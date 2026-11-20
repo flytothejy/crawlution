@@ -1,0 +1,23 @@
+{
+  "name": "crawlution",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "tsx test/sim.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pixi.js": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "playwright-core": "^1.65.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vite-plugin-singlefile": "^2.3.4"
+  }
+}
