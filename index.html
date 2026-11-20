@@ -24,6 +24,22 @@
       #flash.go { animation: flash 0.5s ease-out; }
       @keyframes flash { from { opacity: 0.75; } to { opacity: 0; } }
 
+      #hurt { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, transparent 40%, rgba(255, 30, 20, 0.75) 100%); }
+      #hurt.go { animation: hurt 0.45s ease-out forwards; }
+      @keyframes hurt { from { filter: none; } to { opacity: 0; } }
+      #respawn { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; font-size: 18px; }
+      #respawn b { display: block; font-family: var(--title); font-size: 72px; line-height: 1.1; color: var(--gold); }
+      /* 체력바 · 목숨 */
+      #hpbar { top: calc(74px + env(safe-area-inset-top)); left: 10px; width: min(46vw, 230px); height: 20px; border-radius: 11px; background: rgba(0, 0, 0, 0.5); border: 3px solid var(--ink); overflow: hidden; box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3); }
+      #hpbar i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(180deg, #b6ff8a, #4fbf2a 60%, #2f8f1a); transition: width 0.15s; }
+      #hpbar i::before { content: ''; position: absolute; left: 3px; right: 3px; top: 2px; height: 4px; border-radius: 3px; background: rgba(255, 255, 255, 0.5); }
+      #hpbar.low i { background: linear-gradient(180deg, #ffb08a, #e8402a 60%, #a8200f); animation: lowHp 0.5s ease-in-out infinite alternate; }
+      @keyframes lowHp { to { filter: brightness(1.4); } }
+      #hpbar.guard { border-color: #9ad0ff; box-shadow: 0 0 10px #9ad0ff; }
+      #hpbar span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 12px; }
+      #lives { top: calc(76px + env(safe-area-inset-top)); left: calc(18px + min(46vw, 230px)); display: flex; gap: 1px; font-size: 18px; }
+      #lives b { color: #ff4a5a; text-shadow: 0 2px 0 var(--ink), 1.5px 0 0 var(--ink), -1.5px 0 0 var(--ink), 0 -1.5px 0 var(--ink); }
+      #lives b.lost { color: #444; opacity: 0.6; }
       /* 외곽선 글자: 게임 숫자·제목 */
       .ol { text-shadow: 0 2px 0 var(--ink), 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 -2px 0 var(--ink), 1.5px 1.5px 0 var(--ink), -1.5px 1.5px 0 var(--ink), 1.5px -1.5px 0 var(--ink), -1.5px -1.5px 0 var(--ink), 0 4px 0 rgba(0, 0, 0, 0.35); }
       .ol-thin { text-shadow: 0 1.5px 0 var(--ink), 1.5px 0 0 var(--ink), -1.5px 0 0 var(--ink), 0 -1.5px 0 var(--ink), 0 3px 0 rgba(0, 0, 0, 0.3); }
@@ -73,7 +89,7 @@
       #dist .dl .li { width: 15px; height: 15px; font-size: 8.5px; }
 
       /* 처치 소식 */
-      #feed { left: 10px; top: calc(120px + env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 3px; font-size: 12px; max-width: 52vw; }
+      #feed { left: 10px; top: calc(104px + env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 3px; font-size: 12px; max-width: 52vw; }
       #feed div { background: rgba(20, 34, 14, 0.55); border-radius: 9px; padding: 2px 8px; animation: feedIn 0.25s ease-out; transition: opacity 0.6s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       #feed div.me { background: rgba(255, 210, 63, 0.35); border: 1.5px solid var(--gold); }
       @keyframes feedIn { from { transform: translateX(-30px); opacity: 0; } }
@@ -125,6 +141,7 @@
       #boostBtn { right: calc(16px + env(safe-area-inset-right)); bottom: calc(26px + env(safe-area-inset-bottom)); width: 84px; height: 84px; background: radial-gradient(circle at 50% 30%, #ffd36b, #ff8a1c 70%); }
       #sneakBtn { right: calc(112px + env(safe-area-inset-right)); bottom: calc(20px + env(safe-area-inset-bottom)); width: 62px; height: 62px; background: radial-gradient(circle at 50% 30%, #a8f0d2, #2fae8a 70%); }
       #sneakBtn .ic { font-size: 20px; }
+      #sneakBtn .t { font-size: 11px; }
       body.touch .rbtn { display: flex; }
 
       /* 스킬 버튼 */
@@ -203,7 +220,9 @@
       #hostTag { position: fixed; left: 8px; bottom: calc(6px + env(safe-area-inset-bottom)); font-size: 10px; opacity: 0.4; pointer-events: none; font-family: system-ui; }
 
       @media (max-width: 600px) {
-        #gauge { top: calc(76px + env(safe-area-inset-top)); left: 10px; transform: none; width: 50vw; text-align: left; }
+        #gauge { top: calc(102px + env(safe-area-inset-top)); left: 10px; transform: none; width: 50vw; text-align: left; }
+        #hpbar { top: calc(68px + env(safe-area-inset-top)); width: 46vw; height: 18px; }
+        #lives { top: calc(68px + env(safe-area-inset-top)); left: calc(16px + 46vw); font-size: 16px; }
         #gauge .gl { font-size: 12.5px; }
         #gauge .gb { height: 15px; }
         #stats .pf { width: 50px; height: 50px; }
@@ -212,7 +231,7 @@
         #board { width: 128px; font-size: 12px; }
         #minimap { top: calc(144px + env(safe-area-inset-top)); width: 84px; height: 84px; }
         #dist { top: calc(236px + env(safe-area-inset-top)); width: 128px; }
-        #feed { top: calc(122px + env(safe-area-inset-top)); font-size: 11px; }
+        #feed { top: calc(150px + env(safe-area-inset-top)); font-size: 11px; }
         #cards .ctitle { font-size: 16px; }
         .mcard .nm { font-size: 15px; }
         .mcard .pic { height: 56px; }
@@ -225,7 +244,11 @@
     <div id="vignette"></div>
     <div id="danger"></div>
     <div id="flash"></div>
+    <div id="hurt"></div>
+    <div id="respawn" class="hidden"></div>
     <div id="stats" class="hud hidden"></div>
+    <div id="hpbar" class="hud hidden"><i></i><span class="ol-thin"></span></div>
+    <div id="lives" class="hud hidden"></div>
     <div id="gauge" class="hud hidden"></div>
     <div id="board" class="hud panel hidden"></div>
     <canvas id="minimap" class="hud hidden" width="200" height="200"></canvas>
@@ -235,7 +258,7 @@
     <div id="cards" class="hidden"></div>
     <div id="joy"><div id="knob"></div></div>
     <div id="skillBtn" class="none"></div>
-    <div id="sneakBtn" class="rbtn"><span class="ic">🍃</span><span class="t ol-thin">살금</span></div>
+    <div id="sneakBtn" class="rbtn"><span class="ic">🛡️</span><span class="t ol-thin">웅크리기</span></div>
     <div id="boostBtn" class="rbtn"><span class="ic">⚡</span><span class="t ol-thin">부스트</span></div>
     <div id="hostTag"></div>
 

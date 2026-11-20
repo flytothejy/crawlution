@@ -13,14 +13,18 @@ export interface Command {
 
 export const emptyCommand = (angle = 0): Command => ({ angle, boost: false, sneak: false, skillSeq: 0, moltSeq: 0, moltChoice: 0 });
 
+export type DeathCause = 'bite' | 'wall' | 'crush' | 'bird' | 'poison' | 'skill';
+export type HitKind = 'bite' | 'recoil' | 'skill' | 'poison' | 'bird' | 'wall' | 'crush';
+
 export type GameEvent =
   | { type: 'eat'; snake: number; x: number; y: number; big: boolean }
-  | { type: 'death'; snake: number; x: number; y: number; by: number; cause: 'head' | 'wall' | 'crush' | 'bird' | 'poison' | 'skill' }
+  | { type: 'death'; snake: number; x: number; y: number; by: number; cause: DeathCause }
   | { type: 'ring'; snake: number; cx: number; cy: number; trapped: number }
   | { type: 'crush'; snake: number; cx: number; cy: number; count: number }
   | { type: 'bounce'; snake: number; x: number; y: number }
   | { type: 'respawn'; snake: number }
-  | { type: 'cut'; snake: number; by: number; x: number; y: number; n: number }
+  | { type: 'hit'; snake: number; by: number; dmg: number; x: number; y: number; kind: HitKind; good: boolean; blocked?: boolean }
+  | { type: 'lifeLost'; lives: number }
   | { type: 'matchup'; x: number; y: number; text: string; good: boolean }
   | { type: 'moltStart'; snake: number; species: string }
   | { type: 'molt'; snake: number; species: string; x: number; y: number }
@@ -51,7 +55,11 @@ export interface SnakeView {
   kills: number;
   crushes: number;
   length: number;
+  hp: number;
+  maxHp: number;
   // 상태
+  invuln: boolean;
+  poisoned: boolean;
   molt: number; // 0~1 탈피 진행, 0이면 아님
   fly: boolean;
   shield: boolean;
@@ -78,6 +86,8 @@ export interface PlayerView {
   mastery: number;
   path: string[]; // 거쳐 온 종
   molting: boolean;
+  lives: number;
+  respawnIn: number; // 0이면 살아 있음
 }
 
 export interface RingView {

@@ -1,7 +1,8 @@
 // 시작점: 화면·조작·시뮬레이션 호스트를 연결하고, 받은 상태를 보간해서 그린다.
 import './fonts.css';
 import { CONFIG } from '../shared/config';
-import { beats, CYCLE, LINEAGE, SPECIES_BY_ID, type Lineage, type Species } from '../shared/species';
+import { CYCLE, LINEAGE, SPECIES_BY_ID, type Lineage, type Species } from '../shared/species';
+import { relation } from '../shared/combat';
 import type { Card, Snapshot, SnakeView } from '../shared/types';
 import { createHost, type SimHost } from './host';
 import { Input } from './input';
@@ -88,6 +89,14 @@ function flash() {
   f.classList.add('go');
 }
 
+function hurt(k: number) {
+  const h = $('hurt');
+  h.style.opacity = String(0.35 + 0.5 * k);
+  h.classList.remove('go');
+  void h.offsetWidth;
+  h.classList.add('go');
+}
+
 // ---------- 처치 소식 ----------
 function feed(html: string, mine: boolean) {
   const box = $('feed');
@@ -135,12 +144,17 @@ function onSnap(s: Snapshot) {
       const victim = byId.get(e.snake);
       const killer = e.by >= 0 ? byId.get(e.by) : undefined;
       const mine = e.snake === s.playerId || e.by === s.playerId || !!victim?.isBoss;
-      const ic = { crush: '🌀', head: '💥', bird: '🐦', poison: '☠️', skill: '⚔️', wall: '🧱' }[e.cause];
+      const ic = { crush: '🌀', bite: '🦷', bird: '🐦', poison: '☠️', skill: '⚔️', wall: '🧱' }[e.cause];
       if (e.cause === 'bird') feed(`${ic} 새가 ${who(victim)}를 낚아챘다`, mine);
       else if (e.cause === 'wall') {
         if (mine) feed(`${ic} ${who(victim)} 벽에 부딪힘`, mine);
       } else if (killer) feed(`${who(killer)} ${ic} ${who(victim)}${e.cause === 'crush' ? ' 압착!' : ''}`, mine);
     }
+    if (e.type === 'lifeLost') {
+      banner(`쓰러졌다! 남은 목숨 ${'❤️'.repeat(e.lives)}`, '#ff6b5a', '#c93a2a', 1900);
+      flash();
+    }
+    if (e.type === 'hit' && e.snake === s.playerId && e.dmg > 0) hurt(Math.min(1, e.dmg / 40));
     if (e.type === 'end') endAt = performance.now() + (e.won ? 1800 : 1300);
   }
 }
@@ -197,10 +211,9 @@ function updateDanger(frame: Frame) {
   let danger = false;
   if (playing && me && me.alive && me.segs.length >= 2) {
     const hx = me.segs[0], hy = me.segs[1];
-    const eff = (a: SnakeView, b: SnakeView) => (a.isBoss ? 6 : a.stage + (beats(a.lineage, b.lineage) ? 1 : 0));
     for (const s of frame.snakes) {
       if (s.id === me.id || !s.alive || s.segs.length < 2) continue;
-      if (eff(s, me) <= eff(me, s)) continue;
+      if (relation(me, s) >= 0) continue;
       if (Math.hypot(s.segs[0] - hx, s.segs[1] - hy) < 170) {
         danger = true;
         break;
@@ -270,6 +283,18 @@ function updateHud(latest: Snapshot) {
       <div><div class="nm ol-thin">${LIN_ICON[me.lineage]} ${sp.name} <span class="stars" id="hStars"></span></div>
       <div class="len ol" id="hLen"></div><div class="sc ol-thin" id="hSc"></div></div>`;
   }
+  const hpk = Math.max(0, Math.min(1, me.hp / Math.max(1, me.maxHp)));
+  const hb = $('hpbar');
+  hb.querySelector<HTMLElement>('i')!.style.width = `${hpk * 100}%`;
+  hb.querySelector<HTMLElement>('span')!.textContent = `${me.hp} / ${me.maxHp}`;
+  hb.classList.toggle('low', hpk < 0.3);
+  hb.classList.toggle('guard', me.sneaking);
+  $('lives').innerHTML = Array.from({ length: CONFIG.lives }, (_, i) => `<b class="${i < p.lives ? '' : 'lost'}">❤</b>`).join('');
+  const rs = $('respawn');
+  if (p.respawnIn > 0 && p.lives > 0 && playing) {
+    rs.classList.remove('hidden');
+    rs.innerHTML = `<div class="ol">부활까지</div><b class="ol">${Math.ceil(p.respawnIn)}</b><div class="ol-thin">남은 목숨 ${'❤️'.repeat(p.lives)}</div>`;
+  } else rs.classList.add('hidden');
   $('hStars').textContent = p.mastery ? '★'.repeat(p.mastery) : '';
   $('hLen').innerHTML = `${me.length}<small> 마디</small>`;
   $('hSc').textContent = `점수 ${me.score} · 처치 ${me.kills} · 압착 ${me.crushes}`;
@@ -418,7 +443,7 @@ function showResult(latest: Snapshot) {
 function startGame() {
   $('start').classList.add('hidden');
   $('over').classList.add('hidden');
-  for (const id of ['stats', 'board', 'minimap', 'gauge', 'dist']) $(id).classList.remove('hidden');
+  for (const id of ['stats', 'board', 'minimap', 'gauge', 'dist', 'hpbar', 'lives']) $(id).classList.remove('hidden');
   $('feed').innerHTML = '';
   snaps.length = 0;
   offset = null;
@@ -454,9 +479,9 @@ async function boot() {
   input = new Input(renderer.app.canvas, $('boostBtn'), $('sneakBtn'), $('joy'), $('knob'), $('skillBtn'));
   if (input.touch) document.body.classList.add('touch');
   const how = input.touch
-    ? [['👆', '화면을 끌어서 방향 조절'], ['⚡', '<b>부스트</b> 빠르게 · 🍃 <b>살금</b> 작게 돌기'], ['✨', '<b>스킬</b> 버튼: 곤충마다 다른 기술'], ['🦋', '게이지가 차면 카드를 눌러 <b>탈피</b>']]
-    : [['🖱️', '마우스로 방향 · <b>클릭/스페이스</b> 부스트'], ['🍃', '<b>Shift</b> 살금살금(작게 돌기)'], ['✨', '<b>E</b> 또는 <b>오른쪽 클릭</b>: 스킬'], ['🦋', '게이지가 차면 <b>1·2·3</b>으로 <b>탈피</b>']];
-  how.push(['🌀', '몸으로 한 바퀴 감싸면 <b>압착!</b>']);
+    ? [['👆', '화면을 끌어서 방향 · ⚡ <b>부스트</b>'], ['🦷', '머리로 상대 몸을 <b>물어</b> 체력을 깎아요'], ['🛡️', '<b>웅크리기</b>: 느려지지만 피해 절반'], ['✨', '<b>스킬</b> 버튼: 곤충마다 다른 기술'], ['🦋', '게이지가 차면 카드를 눌러 <b>탈피</b>']]
+    : [['🖱️', '마우스로 방향 · <b>클릭/스페이스</b> 부스트'], ['🦷', '머리로 상대 몸을 <b>물어</b> 체력을 깎아요'], ['🛡️', '<b>Shift</b> 웅크리기: 느려지지만 피해 절반'], ['✨', '<b>E</b>/<b>오른쪽 클릭</b> 스킬 · <b>1·2·3</b> 탈피']];
+  how.push(['🌀', '한 바퀴 감싸면 <b>압착!</b> 한 방에 끝 · 목숨 ❤️❤️❤️']);
   $('howto').innerHTML = how.map(([i, t]) => `<div><span class="i">${i}</span><span>${t}</span></div>`).join('');
   $('lineup').innerHTML = ['caterpillar', 'ladybug', 'mantis', 'bee', 'widow'].map((id) => `<img src="${renderer.portrait(id)}" alt="">`).join('');
   const best = bestScore();

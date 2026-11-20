@@ -1,9 +1,12 @@
 // 게임 로직(시뮬레이션). DOM·화면을 전혀 모른다 → Web Worker, 서버(Node), 테스트에서 그대로 돈다.
-import { CONFIG, radiusFor } from './config';
+// 싸움은 체력 방식: 머리로 상대 몸을 물면 피해, 강한 몸에 박으면 튕겨 나며 반동 피해.
+// 감싸기 압착만 한 방(필살기)으로 남는다.
+import { CONFIG, maxHpFor, radiusFor } from './config';
 import { Rng } from './rng';
 import { botThink, bossThink } from './bot';
+import { biteOf, dmgMult, relation } from './combat';
 import { beats, CYCLE, LINEAGE, SPECIES_BY_ID, speciesFor, type Lineage, type Part, type Species } from './species';
-import { emptyCommand, type Card, type Command, type GameEvent, type RingView, type SnakeView, type Snapshot } from './types';
+import { emptyCommand, type Card, type Command, type DeathCause, type GameEvent, type HitKind, type RingView, type SnakeView, type Snapshot } from './types';
 
 export interface Snake {
   id: number;
@@ -32,6 +35,18 @@ export interface Snake {
   score: number;
   respawnT: number;
   loopCd: number;
+  // 체력
+  hp: number;
+  maxHp: number;
+  hurtT: number;
+  biteCd: number;
+  invulnT: number;
+  wallCd: number;
+  dropAcc: number;
+  poisonT: number;
+  poisonDps: number;
+  poisonBy: number;
+  lives: number;
   // 진화
   stage: number;
   lineage: Lineage;
@@ -55,9 +70,9 @@ export interface Snake {
   flyLand: Part | null;
   dashT: number;
   dashMul: number;
-  dashCut: 'le' | 'all' | null;
+  dashCut: boolean;
   dashPush: boolean;
-  dashHitBoss: boolean;
+  dashHits: Set<number>;
   shieldT: number;
   shieldMode: 'nocut' | 'retaliate';
   magnetT: number;
@@ -67,7 +82,7 @@ export interface Snake {
   trailPart: Part | null;
   trailAcc: number;
   poisonAcc: number;
-  regrow: { t: number; n: number }[];
+  matchupT: number;
   // 봇
   hunter: boolean;
   side: number;
@@ -105,6 +120,7 @@ export interface Zone {
   life: number;
   max: number;
   owner: number;
+  dps: number;
 }
 
 interface Proj {
@@ -115,6 +131,7 @@ interface Proj {
   life: number;
   owner: number;
   slow: number;
+  dmg: number;
 }
 
 interface Shadow {
@@ -123,6 +140,13 @@ interface Shadow {
   r: number;
   t: number;
   total: number;
+}
+
+interface Bite {
+  a: Snake; // 무는 쪽
+  b: Snake; // 물리는 쪽
+  x: number;
+  y: number;
 }
 
 const CELL = 64;
@@ -179,13 +203,15 @@ export class Simulation {
     this.birdPhase = 'idle';
     this.birdNext = CONFIG.birdFirst;
     const p = this.makeSnake(0, playerName, true);
+    p.lives = CONFIG.lives;
     // 시험용: ?stage=N 으로 N단계에서 시작
     const st = Math.max(1, Math.min(5, Math.floor(startStage)));
     if (st > 1) {
       this.setForm(p, st, this.rng.pick(CYCLE));
       p.history = ['caterpillar', p.species.id];
     }
-    this.spawnAt(p, 0, 0, this.rng.range(0, Math.PI * 2), st > 1 ? Math.round(CONFIG.stageMaxSegments[st] * 0.6) : CONFIG.startSegments);
+    this.spawnAt(p, 0, 0, this.rng.range(0, Math.PI * 2), CONFIG.botStartSegs[st]);
+    this.fullHeal(p);
     this.snakes.push(p);
     for (let i = 0; i < CONFIG.botCount; i++) {
       const b = this.makeSnake(i + 1, BOT_NAMES[i % BOT_NAMES.length], false);
@@ -208,10 +234,11 @@ export class Simulation {
       cmd: emptyCommand(),
       boosting: false, sneaking: false, boostAcc: 0,
       totalEP: 0, kills: 0, crushes: 0, score: 0, respawnT: 0, loopCd: 0,
+      hp: 1, maxHp: 1, hurtT: 99, biteCd: 0, invulnT: 0, wallCd: 0, dropAcc: 0, poisonT: 0, poisonDps: 0, poisonBy: -1, lives: 1,
       stage: 1, lineage: 'none', species: SPECIES_BY_ID.get('caterpillar')!, gauge: 0, cards: null, cardsRefresh: 0,
       moltT: 0, moltTotal: 0, moltTarget: null, mastery: 0, history: ['caterpillar'], lastSkillSeq: 0, lastMoltSeq: 0, skillCd: 0,
-      stunT: 0, slowT: 0, rootT: 0, flyT: 0, flyLand: null, dashT: 0, dashMul: 1, dashCut: null, dashPush: false, dashHitBoss: false,
-      shieldT: 0, shieldMode: 'nocut', magnetT: 0, magnetR: 0, ringFastT: 0, trailT: 0, trailPart: null, trailAcc: 0, poisonAcc: 0, regrow: [],
+      stunT: 0, slowT: 0, rootT: 0, flyT: 0, flyLand: null, dashT: 0, dashMul: 1, dashCut: false, dashPush: false, dashHits: new Set(),
+      shieldT: 0, shieldMode: 'nocut', magnetT: 0, magnetR: 0, ringFastT: 0, trailT: 0, trailPart: null, trailAcc: 0, poisonAcc: 0, matchupT: 0,
       hunter: false, side: this.rng.next() < 0.5 ? -1 : 1, modeT: 0, hunting: false, wanderX: 0, wanderY: 0, moltDelay: 0,
     };
   }
@@ -220,19 +247,39 @@ export class Simulation {
     s.stage = stage;
     s.lineage = stage <= 1 ? 'none' : lineage;
     s.species = speciesFor(s.lineage, stage);
-    s.r = s.isBoss ? CONFIG.bossRadius : radiusFor(stage, LINEAGE[s.lineage].radiusMul);
+    this.updateSize(s);
+  }
+
+  /** 굵기·최대 체력을 단계와 길이에 맞춘다 */
+  private updateSize(s: Snake) {
+    if (s.isBoss) {
+      s.r = CONFIG.bossRadius;
+      s.maxHp = CONFIG.bossHp;
+      return;
+    }
+    s.r = radiusFor(s.stage, LINEAGE[s.lineage].radiusMul, s.segCount);
+    s.maxHp = maxHpFor(s.stage, s.segCount);
+    if (s.hp > s.maxHp) s.hp = s.maxHp;
+  }
+
+  private fullHeal(s: Snake) {
+    this.updateSize(s);
+    s.hp = s.maxHp;
+    s.hurtT = 99;
+    s.poisonT = 0;
   }
 
   private clearStatus(s: Snake) {
     s.stunT = s.slowT = s.rootT = s.flyT = s.dashT = s.shieldT = s.magnetT = s.ringFastT = s.trailT = 0;
     s.flyLand = s.trailPart = null;
-    s.dashCut = null;
-    s.dashPush = s.dashHitBoss = false;
+    s.dashCut = s.dashPush = false;
+    s.dashHits.clear();
     s.moltT = 0;
     s.moltTarget = null;
     s.cards = null;
-    s.regrow = [];
     s.skillCd = 0;
+    s.poisonT = 0;
+    s.biteCd = 0;
   }
 
   /** 머리를 (x,y)에 두고 몸을 반대 방향으로 곧게 펼친다 */
@@ -246,6 +293,7 @@ export class Simulation {
     s.growth = 0;
     s.boostAcc = 0;
     s.loopCd = 0;
+    this.updateSize(s);
     const sp = s.r * CONFIG.spacingRatio;
     const len = segCount * sp + 40;
     s.path = [];
@@ -254,17 +302,27 @@ export class Simulation {
     this.rebuildSegs(s);
   }
 
-  private respawnBot(b: Snake, stage: number) {
-    const player = this.snakes[0];
+  /** 다른 곤충과 떨어진 빈자리 */
+  private safeSpot(avoid: Snake | null, minDist = 600): [number, number] {
     const R = CONFIG.arenaRadius * 0.85;
-    let x = 0, y = 0;
+    let bx = 0, by = 0, best = -1;
     for (let tries = 0; tries < 30; tries++) {
       const a = this.rng.range(0, Math.PI * 2);
       const d = Math.sqrt(this.rng.next()) * R;
-      x = Math.cos(a) * d;
-      y = Math.sin(a) * d;
-      if (!player.alive || Math.hypot(x - player.x, y - player.y) > 600) break;
+      const x = Math.cos(a) * d, y = Math.sin(a) * d;
+      let near = Infinity;
+      for (const o of this.snakes) {
+        if (!o.alive || o === avoid) continue;
+        near = Math.min(near, Math.hypot(x - o.x, y - o.y));
+      }
+      if (near > best) ((best = near), (bx = x), (by = y));
+      if (near > minDist) break;
     }
+    return [bx, by];
+  }
+
+  private respawnBot(b: Snake, stage: number) {
+    const [x, y] = this.safeSpot(b, 600);
     b.totalEP = b.kills = b.crushes = b.score = 0;
     b.modeT = 0;
     b.hunting = false;
@@ -274,10 +332,21 @@ export class Simulation {
     const lin = stage > 1 ? this.rng.pick(CYCLE) : 'none';
     this.setForm(b, stage, lin);
     b.history = stage > 1 ? ['caterpillar', b.species.id] : ['caterpillar'];
-    const max = CONFIG.stageMaxSegments[stage];
-    const segs = Math.max(CONFIG.startSegments, Math.round(this.rng.range(0.5, 0.9) * max));
+    const segs = Math.max(CONFIG.startSegments, Math.round(this.rng.range(0.7, 1.3) * CONFIG.botStartSegs[stage]));
     this.spawnAt(b, x, y, this.rng.range(0, Math.PI * 2), segs);
+    this.fullHeal(b);
     this.events.push({ type: 'respawn', snake: b.id });
+  }
+
+  /** 플레이어 부활: 단계는 그대로, 길이 절반, 잠시 무적 */
+  private respawnPlayer(p: Snake, deathLen: number) {
+    const [x, y] = this.safeSpot(p, 700);
+    this.clearStatus(p);
+    const segs = Math.max(CONFIG.startSegments, Math.floor(deathLen / 2));
+    this.spawnAt(p, x, y, this.rng.range(0, Math.PI * 2), segs);
+    this.fullHeal(p);
+    p.invulnT = CONFIG.invulnTime;
+    this.events.push({ type: 'respawn', snake: p.id });
   }
 
   private newFood(kind: 0 | 1): Food {
@@ -301,16 +370,25 @@ export class Simulation {
     if (s) s.cmd = cmd;
   }
 
-  /** 유효 단계 = 단계 + (상대에게 상성이 유리하면 1) */
+  /** 유효 단계(카드·봇 판단용) = 단계 + (상성이 유리하면 1) */
   eff(a: Snake, b: Snake): number {
-    return a.stage + (beats(a.lineage, b.lineage) ? 1 : 0);
+    return (a.isBoss ? 6 : a.stage) + (beats(a.lineage, b.lineage) ? 1 : 0);
+  }
+
+  mult(a: Snake, b: Snake): number {
+    return dmgMult(a, b);
+  }
+
+  /** o가 s보다 강한가 */
+  stronger(o: Snake, s: Snake): boolean {
+    return relation(s, o) < 0;
   }
 
   /** 몸 마디 위치를 머리가 지나온 길에서 일정 간격으로 뽑는다 */
   rebuildSegs(s: Snake) {
     const sp = s.r * CONFIG.spacingRatio;
     const need = Math.max(1, s.segCount);
-    if (s.segs.length < need * 2) s.segs = new Float32Array(need * 2 + 32);
+    if (s.segs.length < need * 2) s.segs = new Float32Array(need * 2 + 64);
     const p = s.path;
     let lastX = p[p.length - 2];
     let lastY = p[p.length - 1];
@@ -364,30 +442,31 @@ export class Simulation {
       if (!s.alive) continue;
       this.handleActions(s, dt);
       this.tickStatus(s, dt);
-      this.moveSnake(s, dt);
+      if (s.alive) this.moveSnake(s, dt);
     }
     // 3) 먹기, 장판, 투사체
-    this.eatFoods(dt);
+    this.eatFoods();
     this.updateZones(dt);
     this.updateProjs(dt);
-    // 4) 충돌(같은 틱 기준으로 모은 뒤 한꺼번에 적용)
+    // 4) 충돌: 같은 틱 기준으로 모은 뒤 한꺼번에 적용
     this.buildGrid();
-    const deaths = new Map<number, { by: number; cause: 'head' | 'wall' }>();
-    this.checkCollisions(deaths);
+    this.checkCollisions();
     // 5) 고리
     for (const s of this.snakes) {
       if (!s.alive) continue;
       s.loopCd -= dt;
-      if (s.loopCd <= 0 && !deaths.has(s.id)) this.detectLoop(s);
+      if (s.loopCd <= 0) this.detectLoop(s);
     }
-    this.updateRings(dt, deaths);
-    for (const [id, d] of deaths) this.kill(this.snakes[id], d.by, d.cause);
+    this.updateRings(dt);
     // 6) 천적, 부활, 먹이 보충
     this.updateBird(dt);
     for (const s of this.snakes) {
-      if (s.alive || s.isPlayer || s.isBoss) continue;
+      if (s.alive || s.isBoss) continue;
       s.respawnT -= dt;
-      if (s.respawnT <= 0) this.respawnBot(s, this.rng.next() < 0.7 ? 1 : 2);
+      if (s.respawnT > 0) continue;
+      if (s.isPlayer) {
+        if (s.lives > 0 && this.state === 'playing') this.respawnPlayer(s, s.segCount);
+      } else this.respawnBot(s, this.rng.next() < 0.7 ? 1 : 2);
     }
     this.refillFoods(dt);
     for (const s of this.snakes) s.score = Math.floor(s.totalEP + s.kills * CONFIG.scoreKill + s.crushes * CONFIG.scoreCrush + (s.stage - 1) * CONFIG.scoreMolt);
@@ -438,6 +517,7 @@ export class Simulation {
     s.moltTarget = null;
     s.skillCd = 0;
     s.history.push(s.species.id);
+    this.fullHeal(s); // 탈피하면 체력이 가득 찬다
     this.rebuildSegs(s);
     this.events.push({ type: 'molt', snake: s.id, species: s.species.id, x: s.x, y: s.y });
     if (s.isPlayer && s.stage >= 5 && this.bossId < 0) this.spawnBoss();
@@ -470,17 +550,15 @@ export class Simulation {
     // 주변에 가장 많은 갈래를 이기는 갈래 1장은 보장
     let common: Lineage | null = null, best = 0;
     for (const [l, n] of Object.entries(counts)) if (n > best) ((best = n), (common = l as Lineage));
-    const pool = [...CYCLE];
     const picked: Lineage[] = [];
     if (common) {
       const winners = CYCLE.filter((l) => beats(l, common!));
       picked.push(this.rng.pick(winners));
     }
     while (picked.length < 3) {
-      const l = this.rng.pick(pool);
+      const l = this.rng.pick(CYCLE);
       if (!picked.includes(l)) picked.push(l);
     }
-    // 섞기
     for (let i = picked.length - 1; i > 0; i--) {
       const j = Math.floor(this.rng.next() * (i + 1));
       [picked[i], picked[j]] = [picked[j], picked[i]];
@@ -497,15 +575,61 @@ export class Simulation {
     s.cardsRefresh = 1;
   }
 
+  /** 먹이: 진화 게이지 + 성장(길수록 느림) + 체력 회복 */
   feed(s: Snake, ep: number) {
     s.totalEP += ep;
     if (s.stage < 5) s.gauge += ep;
-    s.growth += ep * CONFIG.stageGrowth[s.stage] ;
-    const max = s.isBoss ? CONFIG.bossSegments : CONFIG.stageMaxSegments[s.stage];
-    while (s.growth >= 1) {
-      s.growth -= 1;
-      if (s.segCount < max) s.segCount++;
+    if (!s.isBoss) {
+      s.growth += (ep * CONFIG.stageGrowth[s.stage]) / (1 + s.segCount / CONFIG.growthSlowLen);
+      while (s.growth >= 1) {
+        s.growth -= 1;
+        s.segCount++;
+      }
+      this.updateSize(s);
     }
+    s.hp = Math.min(s.maxHp, s.hp + ep * CONFIG.foodHeal);
+  }
+
+  // ---------- 피해 ----------
+
+  /** t에게 피해. 실제로 들어간 피해를 돌려준다 */
+  damage(t: Snake, amount: number, by: number, kind: HitKind, x: number, y: number, cause: DeathCause = 'bite'): number {
+    if (!t.alive || amount <= 0) return 0;
+    const atk = by >= 0 ? this.snakes[by] : null;
+    const good = !!atk && !atk.isBoss && !t.isBoss && beats(atk.lineage, t.lineage);
+    if (t.invulnT > 0 || (t.shieldT > 0 && t.shieldMode === 'nocut') || t.flyT > 0) {
+      this.events.push({ type: 'hit', snake: t.id, by, dmg: 0, x, y, kind, good, blocked: true });
+      return 0;
+    }
+    let d = amount;
+    if (t.lineage === 'armor') d *= CONFIG.armorTakenMul;
+    if (t.sneaking && !t.isBoss) d *= CONFIG.guardMul;
+    d = Math.max(1, Math.round(d));
+    t.hp -= d;
+    t.hurtT = 0;
+    // 피해에 비례해 꼬리 마디가 떨어진다(먹이가 됨)
+    if (!t.isBoss) {
+      t.dropAcc += d * CONFIG.tailDropPerDmg;
+      const n = Math.min(Math.floor(t.dropAcc), Math.max(0, t.segCount - CONFIG.startSegments));
+      t.dropAcc -= Math.floor(t.dropAcc);
+      if (n > 0) this.dropTail(t, n);
+    }
+    this.events.push({ type: 'hit', snake: t.id, by, dmg: d, x, y, kind, good });
+    if (atk && good && (atk.isPlayer || t.isPlayer) && atk.matchupT <= 0) {
+      atk.matchupT = 2;
+      this.events.push({ type: 'matchup', x, y, text: WIN_TEXT[atk.lineage], good: atk.isPlayer });
+    }
+    if (t.hp <= 0) this.kill(t, by, cause);
+    return d;
+  }
+
+  private dropTail(t: Snake, n: number) {
+    for (let k = 0; k < n && t.segCount > CONFIG.startSegments; k++) {
+      const ti = Math.min(t.segN, t.segCount) - 1;
+      this.dropFood(t.segs[ti * 2], t.segs[ti * 2 + 1], Math.max(1, t.stage));
+      t.segCount--;
+    }
+    this.updateSize(t);
   }
 
   // ---------- 스킬 ----------
@@ -517,14 +641,18 @@ export class Simulation {
     for (const part of sp.parts) this.applyPart(s, part, s.x, s.y);
   }
 
+  private skillDmg(s: Snake) {
+    return CONFIG.skillDamage[s.stage] * (1 + 0.1 * s.mastery);
+  }
+
   private applyPart(s: Snake, p: Part, cx: number, cy: number) {
     switch (p.k) {
       case 'dash':
         s.dashT = p.dur;
         s.dashMul = p.mult;
-        s.dashCut = p.cut ?? null;
+        s.dashCut = !!p.cut;
         s.dashPush = !!p.push;
-        s.dashHitBoss = false;
+        s.dashHits.clear();
         break;
       case 'fly':
         s.flyT = p.dur;
@@ -548,13 +676,13 @@ export class Simulation {
           s.trailAcc = 0;
         } else {
           const d = p.radius + s.r + 10;
-          this.zones.push({ x: cx + Math.cos(s.angle) * d, y: cy + Math.sin(s.angle) * d, r: p.radius, kind: p.effect, life: p.life, max: p.life, owner: s.id });
+          this.zones.push({ x: cx + Math.cos(s.angle) * d, y: cy + Math.sin(s.angle) * d, r: p.radius, kind: p.effect, life: p.life, max: p.life, owner: s.id, dps: 0 });
         }
         break;
       case 'proj':
         for (let i = 0; i < p.count; i++) {
           const a = s.angle + (i - (p.count - 1) / 2) * p.spread;
-          this.projs.push({ x: cx, y: cy, vx: Math.cos(a) * p.speed, vy: Math.sin(a) * p.speed, life: 1.1, owner: s.id, slow: p.slow });
+          this.projs.push({ x: cx, y: cy, vx: Math.cos(a) * p.speed, vy: Math.sin(a) * p.speed, life: 1.1, owner: s.id, slow: p.slow, dmg: this.skillDmg(s) * 0.4 });
         }
         break;
       case 'cone': {
@@ -567,57 +695,58 @@ export class Simulation {
           let da = Math.atan2(dy, dx) - dir;
           da = Math.atan2(Math.sin(da), Math.cos(da));
           return Math.abs(da) <= p.half || d < s.r + o.r;
-        }, p.target, (o, i) => this.skillEffect(s, o, i, p.effect, p.dur ?? 0));
+        }, (o, x, y) => this.skillEffect(s, o, p.effect, p.dur ?? 0, x, y));
         break;
       }
       case 'aoe': {
         this.events.push({ type: 'aoe', x: cx, y: cy, r: p.radius, kind: p.effect });
-        this.forEachHit(s, (o, i, x, y) => Math.hypot(x - cx, y - cy) <= p.radius + o.r, p.target, (o, i) => {
+        this.forEachHit(s, (o, i, x, y) => Math.hypot(x - cx, y - cy) <= p.radius + o.r, (o, x, y) => {
           if (p.effect === 'push') {
             const a = Math.atan2(o.y - cy, o.x - cx);
             o.angle = a;
-            o.px = o.x;
-            o.py = o.y;
+            this.shove(o, a, 40);
+            this.damage(o, this.skillDmg(s) * 0.25 * this.mult(s, o), s.id, 'skill', x, y, 'skill');
             this.events.push({ type: 'skillHit', x: o.x, y: o.y, kind: 'push' });
-          } else this.skillEffect(s, o, i, p.effect, p.dur ?? 0);
+          } else this.skillEffect(s, o, p.effect, p.dur ?? 0, x, y);
         });
         break;
       }
     }
   }
 
-  /** 스킬 범위 안 상대마다 '처음 닿은 마디'로 한 번씩 효과를 준다 */
-  private forEachHit(
-    s: Snake,
-    inRange: (o: Snake, i: number, x: number, y: number) => boolean,
-    target: 'le' | 'all',
-    apply: (o: Snake, i: number) => void,
-  ) {
+  /** 범위 안 상대마다 '처음 닿은 마디'로 한 번씩 효과를 준다 */
+  private forEachHit(s: Snake, inRange: (o: Snake, i: number, x: number, y: number) => boolean, apply: (o: Snake, x: number, y: number) => void) {
     for (const o of this.snakes) {
       if (!o.alive || o.id === s.id || o.flyT > 0) continue;
-      if (o.isBoss && target !== 'all') continue;
-      if (!o.isBoss && target === 'le' && this.eff(o, s) > this.eff(s, o)) continue;
       for (let i = 0; i < o.segN; i++) {
-        if (inRange(o, i, o.segs[i * 2], o.segs[i * 2 + 1])) {
-          apply(o, i);
+        const x = o.segs[i * 2], y = o.segs[i * 2 + 1];
+        if (inRange(o, i, x, y)) {
+          apply(o, x, y);
           break;
         }
       }
     }
   }
 
-  private skillEffect(s: Snake, o: Snake, i: number, effect: 'cut' | 'stun', dur: number) {
-    if (o.isBoss) {
-      if (s.stage >= 5) this.damageBoss(o, CONFIG.bossSkillDamage, s.id);
-      return;
-    }
+  private skillEffect(s: Snake, o: Snake, effect: 'cut' | 'stun', dur: number, x: number, y: number) {
+    const base = this.skillDmg(s) * this.mult(s, o);
     if (effect === 'cut') {
-      if (o.shieldT > 0 && o.shieldMode === 'nocut') return;
-      this.cutSnake(o, Math.max(3, i), s.id);
+      this.damage(o, base, s.id, 'skill', x, y, 'skill');
+      this.events.push({ type: 'skillHit', x, y, kind: 'cut' });
     } else {
-      o.stunT = Math.max(o.stunT, dur);
+      if (!o.isBoss && o.invulnT <= 0) o.stunT = Math.max(o.stunT, dur);
+      this.damage(o, base * 0.45, s.id, 'skill', x, y, 'skill');
       this.events.push({ type: 'skillHit', x: o.x, y: o.y, kind: 'stun' });
     }
+  }
+
+  private shove(o: Snake, a: number, dist: number) {
+    o.px = o.x;
+    o.py = o.y;
+    o.x += Math.cos(a) * dist;
+    o.y += Math.sin(a) * dist;
+    o.path.push(o.x, o.y);
+    this.rebuildSegs(o);
   }
 
   private tickStatus(s: Snake, dt: number) {
@@ -626,9 +755,29 @@ export class Simulation {
     s.rootT = Math.max(0, s.rootT - dt);
     s.shieldT = Math.max(0, s.shieldT - dt);
     s.ringFastT = Math.max(0, s.ringFastT - dt);
+    s.invulnT = Math.max(0, s.invulnT - dt);
+    s.biteCd = Math.max(0, s.biteCd - dt);
+    s.wallCd = Math.max(0, s.wallCd - dt);
+    s.matchupT = Math.max(0, s.matchupT - dt);
+    s.hurtT += dt;
+    // 회복
+    if (s.hurtT > CONFIG.regenDelay && s.hp < s.maxHp) {
+      const mul = s.lineage === 'swarm' ? CONFIG.swarmRegenMul : 1;
+      s.hp = Math.min(s.maxHp, s.hp + s.maxHp * CONFIG.regenRate * mul * dt);
+    }
+    // 물기 독
+    if (s.poisonT > 0) {
+      s.poisonT -= dt;
+      s.poisonAcc += dt;
+      if (s.poisonAcc >= CONFIG.poisonTick) {
+        s.poisonAcc = 0;
+        this.damage(s, s.poisonDps * CONFIG.poisonTick, s.poisonBy, 'poison', s.x, s.y, 'poison');
+        if (!s.alive) return;
+      }
+    }
     if (s.dashT > 0) {
       s.dashT -= dt;
-      if (s.dashT <= 0) s.dashCut = null;
+      if (s.dashT <= 0) s.dashCut = s.dashPush = false;
     }
     if (s.flyT > 0) {
       s.flyT -= dt;
@@ -658,15 +807,7 @@ export class Simulation {
         s.trailAcc = 0;
         const tp = s.trailPart;
         const ti = Math.min(s.segN - 1, 2);
-        this.zones.push({ x: s.segs[ti * 2], y: s.segs[ti * 2 + 1], r: tp.radius, kind: tp.effect, life: tp.life, max: tp.life, owner: s.id });
-      }
-    }
-    for (let k = s.regrow.length - 1; k >= 0; k--) {
-      const g = s.regrow[k];
-      g.t -= dt;
-      if (g.t <= 0) {
-        s.segCount = Math.min(CONFIG.stageMaxSegments[s.stage], s.segCount + g.n);
-        s.regrow.splice(k, 1);
+        this.zones.push({ x: s.segs[ti * 2], y: s.segs[ti * 2 + 1], r: tp.radius, kind: tp.effect, life: tp.life, max: tp.life, owner: s.id, dps: this.skillDmg(s) * CONFIG.poisonZoneDps });
       }
     }
   }
@@ -679,7 +820,7 @@ export class Simulation {
     const busy = s.moltT > 0 || s.stunT > 0 || s.rootT > 0;
     s.sneaking = c.sneak && !s.isBoss;
     s.boosting = c.boost && !c.sneak && !busy && s.segCount > CONFIG.boostMinSegments && s.dashT <= 0;
-    const sizeSlow = 1 - CONFIG.sizeTurnSlow * Math.min(1, Math.max(0, s.segCount - CONFIG.startSegments) / 140);
+    const sizeSlow = 1 - CONFIG.sizeTurnSlow * Math.min(1, Math.max(0, s.segCount - CONFIG.startSegments) / 200);
     let maxTurn = s.isBoss ? CONFIG.bossTurn * dt : CONFIG.turnRate * lin.turnMul * dt * sizeSlow * (s.sneaking ? CONFIG.sneakTurnMul : 1);
     if (s.stunT > 0) maxTurn = 0;
     let diff = c.angle - s.angle;
@@ -699,6 +840,7 @@ export class Simulation {
         s.boostAcc -= CONFIG.boostDropInterval;
         const tx = s.segs[(s.segN - 1) * 2], ty = s.segs[(s.segN - 1) * 2 + 1];
         s.segCount--;
+        this.updateSize(s);
         this.dropFood(tx, ty, 1, 30);
       }
     } else s.boostAcc = 0;
@@ -712,7 +854,7 @@ export class Simulation {
     this.rebuildSegs(s);
   }
 
-  private eatFoods(dt: number) {
+  private eatFoods() {
     const foods = this.foods;
     for (const s of this.snakes) {
       if (!s.alive || s.isBoss) continue;
@@ -754,12 +896,14 @@ export class Simulation {
       z.life -= dt;
       let consumed = false;
       for (const o of this.snakes) {
-        if (!o.alive || o.id === z.owner || o.isBoss || o.flyT > 0) continue;
+        if (!o.alive || o.id === z.owner || o.flyT > 0) continue;
         const d = Math.hypot(o.x - z.x, o.y - z.y);
         if (d > z.r + o.r * 0.5) continue;
-        if (z.kind === 'slow') o.slowT = Math.max(o.slowT, 0.3);
-        else if (z.kind === 'root') {
-          o.rootT = 2;
+        if (z.kind === 'slow') {
+          if (!o.isBoss) o.slowT = Math.max(o.slowT, 0.3);
+        } else if (z.kind === 'root') {
+          if (!o.isBoss) o.rootT = 2;
+          this.damage(o, this.skillDmg(this.snakes[z.owner]) * 0.3, z.owner, 'skill', o.x, o.y, 'skill');
           this.events.push({ type: 'skillHit', x: o.x, y: o.y, kind: 'root' });
           consumed = true;
           break;
@@ -767,12 +911,7 @@ export class Simulation {
           o.poisonAcc += dt;
           if (o.poisonAcc >= CONFIG.poisonTick) {
             o.poisonAcc = 0;
-            if (o.segCount <= 4) this.kill(o, z.owner, 'poison');
-            else {
-              const ti = o.segN - 1;
-              this.dropFood(o.segs[ti * 2], o.segs[ti * 2 + 1], o.stage);
-              o.segCount--;
-            }
+            this.damage(o, z.dps * CONFIG.poisonTick, z.owner, 'poison', o.x, o.y, 'poison');
           }
         }
       }
@@ -794,6 +933,8 @@ export class Simulation {
           const rr = o.r + 6;
           if (dx * dx + dy * dy < rr * rr) {
             if (!o.isBoss) o.slowT = Math.max(o.slowT, p.slow);
+            const owner = this.snakes[p.owner];
+            this.damage(o, p.dmg * this.mult(owner, o), p.owner, 'skill', p.x, p.y, 'skill');
             this.events.push({ type: 'skillHit', x: p.x, y: p.y, kind: 'slow' });
             hit = true;
             break;
@@ -837,121 +978,97 @@ export class Simulation {
     }
   }
 
-  private bounce(a: Snake, sx: number, sy: number) {
+  /** 닿은 지점 반대쪽으로 튕겨 낸다(밀려나는 거리 = 넉백) */
+  private bounce(a: Snake, sx: number, sy: number, push: number = CONFIG.knockback) {
     a.x = a.px;
     a.y = a.py;
-    a.angle = Math.atan2(a.y - sy, a.x - sx);
+    const away = Math.atan2(a.y - sy, a.x - sx);
+    a.angle = away;
+    a.x += Math.cos(away) * push;
+    a.y += Math.sin(away) * push;
     a.path[a.path.length - 2] = a.x;
     a.path[a.path.length - 1] = a.y;
     this.rebuildSegs(a);
     this.events.push({ type: 'bounce', snake: a.id, x: a.x, y: a.y });
   }
 
-  private matchup(winner: Snake, loser: Snake, x: number, y: number) {
-    // 같은 단계인데 상성 때문에 결과가 갈렸을 때만 문구를 띄운다
-    if (winner.stage !== loser.stage || !beats(winner.lineage, loser.lineage)) return;
-    if (!winner.isPlayer && !loser.isPlayer) return;
-    this.events.push({ type: 'matchup', x, y, text: WIN_TEXT[winner.lineage], good: winner.isPlayer });
-  }
-
-  private checkCollisions(deaths: Map<number, { by: number; cause: 'head' | 'wall' }>) {
+  private checkCollisions() {
     const ringOwners = new Set(this.rings.map((r) => r.owner));
     const ringOf = new Map(this.rings.map((r) => [r.owner, r]));
     const bounces: [Snake, number, number][] = [];
-    const cuts: [Snake, number, Snake][] = [];
+    const bites: Bite[] = [];
+    const dashHits: [Snake, Snake, number, number][] = [];
     for (const a of this.snakes) {
       if (!a.alive) continue;
+      // 경기장 경계: 튕겨 나며 피해
       if (Math.hypot(a.x, a.y) > CONFIG.arenaRadius) {
-        if (a.isBoss) {
-          a.angle = Math.atan2(-a.y, -a.x);
-          continue;
+        a.angle = Math.atan2(-a.y, -a.x);
+        a.x = a.px;
+        a.y = a.py;
+        if (!a.isBoss && a.wallCd <= 0) {
+          a.wallCd = 0.6;
+          this.damage(a, a.maxHp * CONFIG.wallDamage, -1, 'wall', a.x, a.y, 'wall');
         }
-        deaths.set(a.id, { by: -1, cause: 'wall' });
         continue;
       }
       if (a.flyT > 0) continue;
-      this.forSegsNear(a.x, a.y, a.r + 30, (b, i, sx, sy) => {
-        if (b.id === a.id || b.flyT > 0) return;
+      this.forSegsNear(a.x, a.y, a.r + 40, (b, i, sx, sy) => {
+        if (b.id === a.id || b.flyT > 0 || !b.alive) return;
         const rr = (a.r + b.r) * 0.8;
         const dx = sx - a.x, dy = sy - a.y;
         if (dx * dx + dy * dy > rr * rr) return;
         const myRing = ringOf.get(a.id);
-        if (myRing && myRing.inside.get(b.id)) return;
+        if (myRing && myRing.inside.get(b.id)) return; // 내 고리 안 사냥감과는 부딪히지 않음
         if (i !== 0 && ringOwners.has(b.id)) {
-          bounces.push([a, sx, sy]);
+          bounces.push([a, sx, sy]); // 고리는 벽
           return true;
         }
-        const ea = a.isBoss ? 6 : this.eff(a, b);
-        const eb = b.isBoss ? 6 : this.eff(b, a);
         // 돌진 스킬
         if (a.dashT > 0 && a.dashPush) {
           bounces.push([a, sx, sy]);
           return true;
         }
-        if (a.dashT > 0 && a.dashCut && (a.dashCut === 'all' || eb <= ea)) {
-          if (b.isBoss) {
-            if (!a.dashHitBoss && a.stage >= 5) {
-              a.dashHitBoss = true;
-              this.damageBoss(b, CONFIG.bossSkillDamage, a.id);
-            }
-            bounces.push([a, sx, sy]);
-          } else if (i === 0) deaths.set(b.id, { by: a.id, cause: 'head' });
-          else cuts.push([b, i, a]);
+        if (a.dashT > 0 && a.dashCut) {
+          if (!a.dashHits.has(b.id)) dashHits.push([a, b, sx, sy]);
           return true;
         }
-        if (i === 0) {
-          // 머리끼리: 유효 단계가 높은 쪽이 이긴다
-          if (ea > eb) {
-            deaths.set(b.id, { by: a.id, cause: 'head' });
-            this.matchup(a, b, sx, sy);
-          } else if (ea < eb) {
-            deaths.set(a.id, { by: b.id, cause: 'head' });
-            this.matchup(b, a, sx, sy);
-          } else {
-            deaths.set(a.id, { by: b.id, cause: 'head' });
-            deaths.set(b.id, { by: a.id, cause: 'head' });
-          }
-          return true;
-        }
-        // 머리 → 몸
-        if (ea > eb) {
-          if (b.shieldT > 0) {
-            if (b.shieldMode === 'retaliate') {
-              a.stunT = Math.max(a.stunT, 0.6);
-              this.events.push({ type: 'skillHit', x: a.x, y: a.y, kind: 'stun' });
-            }
-            bounces.push([a, sx, sy]);
-          } else {
-            cuts.push([b, i, a]);
-            this.matchup(a, b, sx, sy);
-          }
-        } else {
-          deaths.set(a.id, { by: b.id, cause: 'head' });
-          this.matchup(b, a, sx, sy);
-        }
+        // 물기: 머리로 상대(머리든 몸이든)를 문다. 머리끼리면 서로 문다(상대 차례에 처리됨)
+        bites.push({ a, b, x: sx, y: sy });
+        bounces.push([a, sx, sy]);
         return true;
       });
     }
-    for (const [a, sx, sy] of bounces) if (!deaths.has(a.id)) this.bounce(a, sx, sy);
-    for (const [b, i, a] of cuts) if (!deaths.has(b.id) && b.alive) this.cutSnake(b, i, a.id);
-  }
-
-  /** i번째 마디부터 꼬리까지 잘라낸다(갑옷은 잃는 양 절반, 무리는 일부가 다시 자람) */
-  cutSnake(b: Snake, i: number, by: number) {
-    if (b.isBoss) return;
-    let idx = Math.max(1, Math.min(b.segN, i));
-    let lose = b.segN - idx;
-    if (lose <= 0) return;
-    if (b.lineage === 'armor') {
-      lose = Math.ceil(lose / 2);
-      idx = b.segN - lose;
+    for (const [a, sx, sy] of bounces) if (a.alive) this.bounce(a, sx, sy);
+    for (const [a, b, x, y] of dashHits) {
+      if (!a.alive || !b.alive || a.dashHits.has(b.id)) continue;
+      a.dashHits.add(b.id);
+      this.damage(b, this.skillDmg(a) * this.mult(a, b), a.id, 'skill', x, y, 'skill');
+      this.events.push({ type: 'skillHit', x, y, kind: 'cut' });
     }
-    for (let k = idx; k < b.segN; k += 1) this.dropFood(b.segs[k * 2], b.segs[k * 2 + 1], Math.max(1, b.stage));
-    b.segCount = idx;
-    if (b.lineage === 'swarm') b.regrow.push({ t: CONFIG.swarmRegrowDelay, n: Math.floor(lose * CONFIG.swarmRegrow) });
-    this.events.push({ type: 'cut', snake: b.id, by, x: b.segs[idx * 2], y: b.segs[idx * 2 + 1], n: lose });
-    if (b.segCount < 3) this.kill(b, by, 'skill');
-    else this.rebuildSegs(b);
+    for (const { a, b, x, y } of bites) {
+      if (!a.alive || !b.alive || a.biteCd > 0) continue;
+      a.biteCd = a.lineage === 'hunt' ? CONFIG.huntBiteCooldown : CONFIG.biteCooldown;
+      // 무당벌레 '쓴맛 즙': 물면 내가 기절하고 피해를 되돌려 받음
+      if (b.shieldT > 0 && b.shieldMode === 'retaliate') {
+        a.stunT = Math.max(a.stunT, 1);
+        this.events.push({ type: 'skillHit', x: a.x, y: a.y, kind: 'stun' });
+        this.damage(a, biteOf(a) * this.mult(a, b), b.id, 'recoil', a.x, a.y, 'bite');
+        continue;
+      }
+      const dmg = biteOf(a) * this.mult(a, b);
+      this.damage(b, dmg, a.id, 'bite', x, y, 'bite');
+      // 독 갈래: 독이 남는다 / 거미 갈래: 느려짐
+      if (b.alive && a.lineage === 'poison') {
+        b.poisonT = 2;
+        b.poisonDps = (dmg * CONFIG.poisonBiteDot) / 2;
+        b.poisonBy = a.id;
+      }
+      if (b.alive && a.lineage === 'spider' && !b.isBoss) b.slowT = Math.max(b.slowT, CONFIG.spiderBiteSlow);
+      // 강한 몸에 박았으면 반동 피해
+      if (a.alive && this.stronger(b, a)) {
+        this.damage(a, biteOf(b) * this.mult(b, a) * CONFIG.recoilMul, b.id, 'recoil', a.x, a.y, 'bite');
+      }
+    }
   }
 
   // ---------- 감싸기 ----------
@@ -982,16 +1099,16 @@ export class Simulation {
     }
   }
 
-  private updateRings(dt: number, deaths: Map<number, { by: number; cause: 'head' | 'wall' }>) {
+  private updateRings(dt: number) {
     for (let k = this.rings.length - 1; k >= 0; k--) {
       const ring = this.rings[k];
       const owner = this.snakes[ring.owner];
-      if (!owner.alive || deaths.has(owner.id)) {
+      if (!owner.alive) {
         this.rings.splice(k, 1);
         continue;
       }
       for (const o of this.snakes) {
-        if (o.id === ring.owner || !o.alive || deaths.has(o.id) || o.flyT > 0) continue;
+        if (o.id === ring.owner || !o.alive || o.flyT > 0) continue;
         if (!ring.inside.has(o.id)) ring.inside.set(o.id, pointInPoly(o.x, o.y, ring.poly));
         const was = ring.inside.get(o.id)!;
         const now = pointInPoly(o.x, o.y, ring.poly);
@@ -1010,8 +1127,14 @@ export class Simulation {
       if (ring.t <= 0) {
         let count = 0;
         for (const o of this.snakes) {
-          if (o.id === ring.owner || !o.alive || deaths.has(o.id) || o.flyT > 0) continue;
-          if (pointInPoly(o.x, o.y, ring.poly)) {
+          if (o.id === ring.owner || !o.alive || o.flyT > 0) continue;
+          if (!pointInPoly(o.x, o.y, ring.poly)) continue;
+          if (o.isBoss) {
+            // 보스는 한 방에 안 죽고 큰 피해
+            this.damage(o, o.maxHp * CONFIG.bossCrushFrac, ring.owner, 'crush', o.x, o.y, 'crush');
+            count++;
+          } else if (o.invulnT <= 0) {
+            this.events.push({ type: 'hit', snake: o.id, by: ring.owner, dmg: Math.ceil(o.hp), x: o.x, y: o.y, kind: 'crush', good: true });
             this.kill(o, ring.owner, 'crush');
             count++;
           }
@@ -1035,27 +1158,16 @@ export class Simulation {
     b.stage = 6;
     b.lineage = 'none';
     b.species = { ...SPECIES_BY_ID.get('caterpillar')!, id: 'boss', name: '왕지네', parts: [] };
-    b.r = CONFIG.bossRadius;
     b.history = ['boss'];
-    // 플레이어에게서 900 떨어진, 경기장 안쪽 지점
     const toCenter = Math.atan2(-p.y, -p.x);
     let x = p.x + Math.cos(toCenter) * 900, y = p.y + Math.sin(toCenter) * 900;
     const d = Math.hypot(x, y);
     if (d > CONFIG.arenaRadius * 0.8) ((x *= (CONFIG.arenaRadius * 0.8) / d), (y *= (CONFIG.arenaRadius * 0.8) / d));
     this.snakes.push(b);
     this.spawnAt(b, x, y, Math.atan2(p.y - y, p.x - x), CONFIG.bossSegments);
+    this.fullHeal(b);
     this.bossId = b.id;
     this.events.push({ type: 'boss', snake: b.id });
-  }
-
-  private damageBoss(b: Snake, n: number, by: number) {
-    if (!b.alive) return;
-    const lose = Math.min(n, b.segN - 1);
-    for (let k = b.segN - lose; k < b.segN; k++) this.dropFood(b.segs[k * 2], b.segs[k * 2 + 1], 3);
-    b.segCount -= lose;
-    this.events.push({ type: 'cut', snake: b.id, by, x: b.x, y: b.y, n: lose });
-    if (b.segCount < CONFIG.bossDeathSegments) this.kill(b, by, 'skill');
-    else this.rebuildSegs(b);
   }
 
   // ---------- 천적: 새 ----------
@@ -1078,7 +1190,7 @@ export class Simulation {
     } else {
       this.birdT -= dt;
       if (this.birdT <= 0 && this.divesLeft > 0) {
-        // 몸이 긴 곤충 상위 4마리 중 하나를 노린다(길수록, 살금살금이 아닐수록 잘 걸림)
+        // 몸이 긴 곤충 상위 4마리 중 하나를 노린다(길수록, 웅크리지 않을수록 잘 걸림)
         const cands = this.snakes
           .filter((s) => s.alive && !s.isBoss)
           .map((s) => ({ s, v: s.segCount * (s.sneaking ? 0.4 : 1) }))
@@ -1119,18 +1231,10 @@ export class Simulation {
       this.events.push({ type: 'birdDive', x: sh.x, y: sh.y, r: sh.r });
       for (const s of this.snakes) {
         if (!s.alive || s.isBoss || s.flyT > 0) continue;
-        if (Math.hypot(s.x - sh.x, s.y - sh.y) < sh.r) {
-          this.kill(s, -1, 'bird');
-          continue;
-        }
-        let inside = false;
-        for (let i = 0; i < s.segN; i++) {
-          if (Math.hypot(s.segs[i * 2] - sh.x, s.segs[i * 2 + 1] - sh.y) < sh.r) {
-            inside = true;
-            break;
-          }
-        }
-        if (inside) this.cutSnake(s, Math.max(3, Math.floor(s.segN / 2)), -1);
+        const headIn = Math.hypot(s.x - sh.x, s.y - sh.y) < sh.r;
+        let bodyIn = headIn;
+        for (let i = 0; i < s.segN && !bodyIn; i += 2) if (Math.hypot(s.segs[i * 2] - sh.x, s.segs[i * 2 + 1] - sh.y) < sh.r) bodyIn = true;
+        if (bodyIn) this.damage(s, s.maxHp * CONFIG.birdDamage * (headIn ? 1 : 0.6), -1, 'bird', s.x, s.y, 'bird');
       }
       this.shadows.splice(k, 1);
     }
@@ -1138,24 +1242,32 @@ export class Simulation {
 
   // ---------- 죽음 ----------
 
-  private kill(s: Snake, by: number, cause: 'head' | 'wall' | 'crush' | 'bird' | 'poison' | 'skill') {
+  kill(s: Snake, by: number, cause: DeathCause) {
     if (!s.alive) return;
     s.alive = false;
+    s.hp = 0;
     const ep = s.isBoss ? 3 : Math.max(1, s.stage);
-    for (let i = 0; i < s.segN; i++) this.dropFood(s.segs[i * 2], s.segs[i * 2 + 1], ep);
+    for (let i = 0; i < s.segN; i += s.segN > 150 ? 2 : 1) this.dropFood(s.segs[i * 2], s.segs[i * 2 + 1], ep);
     if (by >= 0 && by !== s.id) this.snakes[by].kills++;
     this.events.push({ type: 'death', snake: s.id, x: s.x, y: s.y, by, cause });
-    s.respawnT = CONFIG.botRespawnDelay;
     this.rings = this.rings.filter((r) => r.owner !== s.id);
-    if (this.state === 'playing') {
-      if (s.isPlayer) {
-        this.state = 'lost';
-        this.events.push({ type: 'end', won: false });
-      } else if (s.isBoss) {
-        if (by >= 0) this.snakes[by].totalEP += CONFIG.scoreBoss;
-        this.state = 'won';
-        this.events.push({ type: 'end', won: true });
+    if (s.isPlayer) {
+      s.lives--;
+      s.respawnT = CONFIG.respawnDelay;
+      if (this.state === 'playing') {
+        if (s.lives > 0) this.events.push({ type: 'lifeLost', lives: s.lives });
+        else {
+          this.state = 'lost';
+          this.events.push({ type: 'end', won: false });
+        }
       }
+      return;
+    }
+    s.respawnT = CONFIG.botRespawnDelay;
+    if (s.isBoss && this.state === 'playing') {
+      if (by >= 0) this.snakes[by].totalEP += CONFIG.scoreBoss;
+      this.state = 'won';
+      this.events.push({ type: 'end', won: true });
     }
   }
 
@@ -1168,6 +1280,8 @@ export class Simulation {
       boosting: s.boosting, sneaking: s.sneaking,
       segs: s.alive ? s.segs.slice(0, s.segN * 2) : new Float32Array(0),
       score: s.score, kills: s.kills, crushes: s.crushes, length: s.segCount,
+      hp: Math.max(0, Math.ceil(s.hp)), maxHp: s.maxHp,
+      invuln: s.invulnT > 0, poisoned: s.poisonT > 0,
       molt: s.moltT > 0 ? 1 - s.moltT / s.moltTotal : 0,
       fly: s.flyT > 0, shield: s.shieldT > 0, stun: s.stunT > 0 || s.rootT > 0, slow: s.slowT > 0,
       dash: s.dashT > 0, magnet: s.magnetT > 0, ringFast: s.ringFastT > 0,
@@ -1195,6 +1309,7 @@ export class Simulation {
       player: {
         gauge: p.gauge, need: CONFIG.stageGauge[p.stage], cards: p.cards, skillCd: p.skillCd,
         skillCdMax: p.species.cd * (1 - CONFIG.masteryCdCut * p.mastery), mastery: p.mastery, path: p.history, molting: p.moltT > 0,
+        lives: p.lives, respawnIn: p.alive ? 0 : Math.max(0, p.respawnT),
       },
       bossId: this.bossId, state: this.state, lineageCount,
     };

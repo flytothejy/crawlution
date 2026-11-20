@@ -7,10 +7,10 @@ import type { Simulation, Snake } from './sim';
 const OFFSETS = [0, -0.35, 0.35, -0.7, 0.7, -1.1, 1.1, -1.6, 1.6, -2.2, 2.2];
 const PROBES = [22, 45, 75, 110];
 
-/** o의 몸이 s에게 위험한가(내가 더 강하면 상대 몸은 끊을 수 있으니 위험하지 않다) */
+/** o의 몸이 s에게 위험한가(o가 더 강하면 박을 때 반동 피해) */
 function deadly(sim: Simulation, s: Snake, o: Snake) {
   if (o.isBoss) return true;
-  return sim.eff(s, o) <= sim.eff(o, s);
+  return sim.stronger(o, s) || s.hp < s.maxHp * 0.3;
 }
 
 export function botThink(sim: Simulation, s: Snake, dt: number): Command {
@@ -38,6 +38,18 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
     }
   }
 
+  // 물기 공격: 가까운 약한 곤충의 몸통을 노린다(체력이 넉넉할 때)
+  let prey: Snake | null = null;
+  if (!target && !grace && s.moltT <= 0 && s.hp > s.maxHp * 0.5) {
+    let best = s.hunter ? 380 : 220;
+    for (const o of sim.snakes) {
+      if (!o.alive || o.id === s.id || o.isBoss || o.invulnT > 0) continue;
+      if (!sim.stronger(s, o)) continue;
+      const d = Math.hypot(o.x - s.x, o.y - s.y);
+      if (d < best) ((best = d), (prey = o));
+    }
+  }
+
   if (target) {
     const R = Math.max(55, Math.min(220, (s.segCount * s.r * CONFIG.spacingRatio) / (2 * Math.PI) * 0.75));
     const dx = target.x - s.x, dy = target.y - s.y;
@@ -46,6 +58,12 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
     const bend = Math.max(-0.9, Math.min(0.9, (d - R) / R)) * (Math.PI / 3);
     desired = toT + s.side * (Math.PI / 2 - bend);
     boost = d > R * 1.8 && s.segCount > 30 && sim.rng.next() < 0.6;
+  } else if (prey) {
+    // 몸통 1/3 지점을 문다
+    const i = Math.min(prey.segN - 1, Math.max(2, Math.floor(prey.segN / 3)));
+    const tx = prey.segs[i * 2], ty = prey.segs[i * 2 + 1];
+    desired = Math.atan2(ty - s.y, tx - s.x);
+    boost = Math.hypot(tx - s.x, ty - s.y) > 160 && s.segCount > 30 && sim.rng.next() < 0.3;
   } else {
     let bestScore = 0;
     let fx = 0, fy = 0;
@@ -82,6 +100,9 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
   }
   const scared = danger(sim, s, s.angle) > 0.6;
   if (scared && s.segCount > 20 && sim.rng.next() < 0.3) boost = true;
+  // 체력이 낮고 위험하면 웅크려 방어
+  const guard = scared && s.hp < s.maxHp * 0.4;
+  if (guard) boost = false;
 
   // 스킬
   if (s.skillCd <= 0 && s.species.parts.length && s.moltT <= 0 && !grace) skill = wantSkill(sim, s, scared, target);
@@ -102,7 +123,7 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
     }
   }
 
-  return { angle: bestA, boost, sneak: false, skillSeq: s.lastSkillSeq + (skill ? 1 : 0), moltSeq, moltChoice };
+  return { angle: bestA, boost, sneak: guard, skillSeq: s.lastSkillSeq + (skill ? 1 : 0), moltSeq, moltChoice };
 }
 
 function enemiesWithin(sim: Simulation, s: Snake, r: number, filter?: (o: Snake, x: number, y: number) => boolean) {
@@ -138,7 +159,7 @@ function wantSkill(sim: Simulation, s: Snake, scared: boolean, target: Snake | n
     case 'fly':
       return enemiesWithin(sim, s, 150) > 0 || scared;
     case 'dash':
-      if (main.cut) return enemiesWithin(sim, s, 150, (o, x, y) => !deadly(sim, s, o) && inFront(s, x, y, 0.4)) > 0;
+      if (main.cut) return enemiesWithin(sim, s, 150, (o, x, y) => inFront(s, x, y, 0.4)) > 0;
       if (main.push) return scared;
       return scared || !!target;
     case 'zone':
@@ -147,7 +168,7 @@ function wantSkill(sim: Simulation, s: Snake, scared: boolean, target: Snake | n
     case 'proj':
       return enemiesWithin(sim, s, 450, (o, x, y) => inFront(s, x, y, 0.3)) > 0;
     case 'shield':
-      return scared;
+      return scared || s.hurtT < 0.5;
     case 'magnet': {
       let n = 0;
       for (const f of sim.foods) if (Math.hypot(f.x - s.x, f.y - s.y) < main.radius) n++;
@@ -194,18 +215,23 @@ function danger(sim: Simulation, s: Snake, a: number): number {
   return worst;
 }
 
-/** 보스(왕지네): 플레이어를 쫓다가 가까워지면 주위를 돌며 감싸려 한다 */
+/** 보스(왕지네): 플레이어를 쫓아 물다가, 가끔 주위를 돌며 감싸려 한다 */
 export function bossThink(sim: Simulation, s: Snake, dt: number): Command {
   const p = sim.snakes[sim.playerId];
+  s.modeT -= dt;
+  if (s.modeT <= 0) {
+    s.hunting = !s.hunting;
+    s.modeT = s.hunting ? 5 : 7;
+  }
   let desired = s.angle;
   if (p.alive) {
-    const lead = 120;
+    const lead = 90;
     const tx = p.x + Math.cos(p.angle) * lead, ty = p.y + Math.sin(p.angle) * lead;
     const dx = tx - s.x, dy = ty - s.y;
     const d = Math.hypot(dx, dy);
     const toT = Math.atan2(dy, dx);
-    if (d < 380) {
-      const R = 150;
+    if (s.hunting && d < 380) {
+      const R = 160;
       const bend = Math.max(-0.9, Math.min(0.9, (d - R) / R)) * (Math.PI / 3);
       desired = toT + s.side * (Math.PI / 2 - bend);
     } else desired = toT;
