@@ -1,21 +1,28 @@
 // 봇 AI. 봇도 플레이어와 똑같이 '명령'만 만든다 → 나중에 멀티에서 빈자리를 그대로 채운다.
-import { CONFIG, spacingFor } from './config';
+import { CONFIG } from './config';
+import type { Part } from './species';
 import type { Command } from './types';
 import type { Simulation, Snake } from './sim';
 
 const OFFSETS = [0, -0.35, 0.35, -0.7, 0.7, -1.1, 1.1, -1.6, 1.6, -2.2, 2.2];
 const PROBES = [22, 45, 75, 110];
 
+/** o의 몸이 s에게 위험한가(내가 더 강하면 상대 몸은 끊을 수 있으니 위험하지 않다) */
+function deadly(sim: Simulation, s: Snake, o: Snake) {
+  if (o.isBoss) return true;
+  return sim.eff(s, o) <= sim.eff(o, s);
+}
+
 export function botThink(sim: Simulation, s: Snake, dt: number): Command {
   s.modeT -= dt;
   let desired = s.angle;
   let boost = false;
+  let skill = false;
 
   // 사냥꾼 봇: 충분히 길면 가까운 곤충 주위를 돌며 감싸기를 시도
   let target: Snake | null = null;
-  // 판 시작 직후에는 사냥하지 않는다(적응 시간)
-  const grace = sim.tick * sim.dt < CONFIG.botGraceSeconds;
-  if (s.hunter && !grace && s.segCount >= CONFIG.botHunterSegments) {
+  const grace = sim.time < CONFIG.botGraceSeconds;
+  if (s.hunter && !grace && s.segCount >= CONFIG.botHunterSegments && s.moltT <= 0) {
     if (s.modeT <= 0) {
       s.hunting = !s.hunting;
       s.modeT = s.hunting ? 7 + sim.rng.next() * 4 : 4 + sim.rng.next() * 4;
@@ -23,19 +30,16 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
     if (s.hunting) {
       let best = 420;
       for (const o of sim.snakes) {
-        if (!o.alive || o.id === s.id) continue;
-        if (o.segCount >= s.segCount) continue; // 자기보다 짧은 곤충만 노린다
+        if (!o.alive || o.id === s.id || o.isBoss) continue;
+        if (o.segCount >= s.segCount) continue;
         const d = Math.hypot(o.x - s.x, o.y - s.y);
-        if (d < best) {
-          best = d;
-          target = o;
-        }
+        if (d < best) ((best = d), (target = o));
       }
     }
   }
 
   if (target) {
-    const R = Math.max(55, Math.min(220, (s.segCount * spacingFor(s.segCount)) / (2 * Math.PI) * 0.75));
+    const R = Math.max(55, Math.min(220, (s.segCount * s.r * CONFIG.spacingRatio) / (2 * Math.PI) * 0.75));
     const dx = target.x - s.x, dy = target.y - s.y;
     const d = Math.hypot(dx, dy);
     const toT = Math.atan2(dy, dx);
@@ -43,26 +47,19 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
     desired = toT + s.side * (Math.PI / 2 - bend);
     boost = d > R * 1.8 && s.segCount > 30 && sim.rng.next() < 0.6;
   } else {
-    // 먹이 찾기: EP/거리가 가장 좋은 먹이
     let bestScore = 0;
     let fx = 0, fy = 0;
     for (const f of sim.foods) {
       const dx = f.x - s.x, dy = f.y - s.y;
       const d2 = dx * dx + dy * dy;
       if (d2 > 450 * 450) continue;
-      // 정면에 가까운 먹이를 선호(뒤로 크게 돌지 않게)
       const a = Math.atan2(dy, dx) - s.angle;
       const front = 0.6 + 0.4 * Math.cos(a);
       const score = (f.ep * front) / (Math.sqrt(d2) + 40);
-      if (score > bestScore) {
-        bestScore = score;
-        fx = f.x;
-        fy = f.y;
-      }
+      if (score > bestScore) ((bestScore = score), (fx = f.x), (fy = f.y));
     }
-    if (bestScore > 0) {
-      desired = Math.atan2(fy - s.y, fx - s.x);
-    } else {
+    if (bestScore > 0) desired = Math.atan2(fy - s.y, fx - s.x);
+    else {
       if (s.modeT <= 0 || Math.hypot(s.wanderX - s.x, s.wanderY - s.y) < 60) {
         const a = sim.rng.range(0, Math.PI * 2);
         const r = sim.rng.range(0, CONFIG.arenaRadius * 0.7);
@@ -74,22 +71,92 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
     }
   }
 
-  // 위험 회피: 원하는 방향 주변 여러 각도를 탐색해 가장 안전한 쪽을 고른다
+  // 위험 회피
   let bestA = desired;
   let bestCost = Infinity;
   for (const off of OFFSETS) {
     const a = desired + off;
     const cost = danger(sim, s, a) * 10 + Math.abs(off) * 0.4;
-    if (cost < bestCost) {
-      bestCost = cost;
-      bestA = a;
-    }
+    if (cost < bestCost) ((bestCost = cost), (bestA = a));
     if (cost < 0.01) break;
   }
   const scared = danger(sim, s, s.angle) > 0.6;
   if (scared && s.segCount > 20 && sim.rng.next() < 0.3) boost = true;
 
-  return { angle: bestA, boost, sneak: false };
+  // 스킬
+  if (s.skillCd <= 0 && s.species.parts.length && s.moltT <= 0 && !grace) skill = wantSkill(sim, s, scared, target);
+
+  // 진화: 카드가 나오면 잠시 뒤 고른다(60%는 유리한 카드)
+  let moltSeq = s.lastMoltSeq, moltChoice = 0;
+  if (s.cards) {
+    s.moltDelay -= dt;
+    if (s.moltDelay <= 0 && !scared) {
+      if (sim.rng.next() < CONFIG.botFavorableChance) {
+        let best = -Infinity;
+        s.cards.forEach((c, i) => {
+          const v = c.good - c.bad;
+          if (v > best) ((best = v), (moltChoice = i));
+        });
+      } else moltChoice = Math.floor(sim.rng.next() * s.cards.length);
+      moltSeq = s.lastMoltSeq + 1;
+    }
+  }
+
+  return { angle: bestA, boost, sneak: false, skillSeq: s.lastSkillSeq + (skill ? 1 : 0), moltSeq, moltChoice };
+}
+
+function enemiesWithin(sim: Simulation, s: Snake, r: number, filter?: (o: Snake, x: number, y: number) => boolean) {
+  let n = 0;
+  for (const o of sim.snakes) {
+    if (!o.alive || o.id === s.id) continue;
+    for (let i = 0; i < o.segN; i += 3) {
+      const x = o.segs[i * 2], y = o.segs[i * 2 + 1];
+      if (Math.hypot(x - s.x, y - s.y) <= r && (!filter || filter(o, x, y))) {
+        n++;
+        break;
+      }
+    }
+  }
+  return n;
+}
+
+function inFront(s: Snake, x: number, y: number, half: number, back = false) {
+  let da = Math.atan2(y - s.y, x - s.x) - (s.angle + (back ? Math.PI : 0));
+  da = Math.atan2(Math.sin(da), Math.cos(da));
+  return Math.abs(da) <= half;
+}
+
+function wantSkill(sim: Simulation, s: Snake, scared: boolean, target: Snake | null): boolean {
+  const parts = s.species.parts;
+  const p: Part = parts[parts.length - 1];
+  const main = parts[0];
+  switch (main.k) {
+    case 'cone':
+      return enemiesWithin(sim, s, main.range, (o, x, y) => inFront(s, x, y, main.half, main.back)) > 0;
+    case 'aoe':
+      return enemiesWithin(sim, s, main.radius * 0.9) > 0;
+    case 'fly':
+      return enemiesWithin(sim, s, 150) > 0 || scared;
+    case 'dash':
+      if (main.cut) return enemiesWithin(sim, s, 150, (o, x, y) => !deadly(sim, s, o) && inFront(s, x, y, 0.4)) > 0;
+      if (main.push) return scared;
+      return scared || !!target;
+    case 'zone':
+      if (main.shape === 'trail') return enemiesWithin(sim, s, 220, (o, x, y) => inFront(s, x, y, 1.2, true)) > 0;
+      return enemiesWithin(sim, s, 260, (o, x, y) => inFront(s, x, y, 0.5)) > 0;
+    case 'proj':
+      return enemiesWithin(sim, s, 450, (o, x, y) => inFront(s, x, y, 0.3)) > 0;
+    case 'shield':
+      return scared;
+    case 'magnet': {
+      let n = 0;
+      for (const f of sim.foods) if (Math.hypot(f.x - s.x, f.y - s.y) < main.radius) n++;
+      return n > 10 || (p.k === 'aoe' && enemiesWithin(sim, s, 95) > 0);
+    }
+    case 'ringfast':
+      return sim.rings.some((r) => r.owner === s.id) || enemiesWithin(sim, s, 110) > 0;
+  }
+  return false;
 }
 
 function danger(sim: Simulation, s: Snake, a: number): number {
@@ -100,8 +167,8 @@ function danger(sim: Simulation, s: Snake, a: number): number {
     const px = s.x + ca * dist, py = s.y + sa * dist;
     const weight = 1 - k / (PROBES.length + 1);
     if (Math.hypot(px, py) > CONFIG.arenaRadius - 40) worst = Math.max(worst, weight);
-    sim.forSegsNear(px, py, s.r + CONFIG.maxRadius + 8, (o, _i, sx, sy) => {
-      if (o.id === s.id) return;
+    sim.forSegsNear(px, py, s.r + 40, (o, _i, sx, sy) => {
+      if (o.id === s.id || !deadly(sim, s, o)) return;
       const rr = s.r + o.r + 8;
       const dx = sx - px, dy = sy - py;
       if (dx * dx + dy * dy < rr * rr) {
@@ -109,16 +176,43 @@ function danger(sim: Simulation, s: Snake, a: number): number {
         return true;
       }
     });
-    // 고리 벽도 위험
     for (const ring of sim.rings) {
       if (ring.owner === s.id) continue;
       const d = Math.hypot(px - ring.cx, py - ring.cy);
       const approx = Math.sqrt(Math.abs(polyAreaFast(ring.poly)) / Math.PI);
       if (Math.abs(d - approx) < 25) worst = Math.max(worst, weight * 0.7);
     }
+    for (const z of sim.zones) {
+      if (z.owner === s.id) continue;
+      if (Math.hypot(px - z.x, py - z.y) < z.r) worst = Math.max(worst, weight * (z.kind === 'slow' ? 0.3 : 0.6));
+    }
+    for (const sh of sim.shadows) {
+      if (Math.hypot(px - sh.x, py - sh.y) < sh.r + 20) worst = Math.max(worst, weight * 0.9);
+    }
     if (worst >= weight) break;
   }
   return worst;
+}
+
+/** 보스(왕지네): 플레이어를 쫓다가 가까워지면 주위를 돌며 감싸려 한다 */
+export function bossThink(sim: Simulation, s: Snake, dt: number): Command {
+  const p = sim.snakes[sim.playerId];
+  let desired = s.angle;
+  if (p.alive) {
+    const lead = 120;
+    const tx = p.x + Math.cos(p.angle) * lead, ty = p.y + Math.sin(p.angle) * lead;
+    const dx = tx - s.x, dy = ty - s.y;
+    const d = Math.hypot(dx, dy);
+    const toT = Math.atan2(dy, dx);
+    if (d < 380) {
+      const R = 150;
+      const bend = Math.max(-0.9, Math.min(0.9, (d - R) / R)) * (Math.PI / 3);
+      desired = toT + s.side * (Math.PI / 2 - bend);
+    } else desired = toT;
+  }
+  const dc = Math.hypot(s.x, s.y);
+  if (dc > CONFIG.arenaRadius - 260) desired = Math.atan2(-s.y, -s.x);
+  return { angle: desired, boost: false, sneak: false, skillSeq: s.lastSkillSeq, moltSeq: s.lastMoltSeq, moltChoice: 0 };
 }
 
 function polyAreaFast(p: Float32Array): number {

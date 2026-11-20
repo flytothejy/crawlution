@@ -1,5 +1,6 @@
 // 조작 → 명령. PC: 마우스 방향 + 왼쪽 클릭/스페이스(부스트) + Shift(살금살금)
-// 모바일: 화면 아무 곳이나 끌기(가상 조이스틱) + 부스트·살금 버튼
+// 스킬: E 또는 오른쪽 클릭 / 진화 카드: 1·2·3 키 또는 카드 누르기
+// 모바일: 화면 아무 곳이나 끌기(가상 조이스틱) + 부스트·살금·스킬 버튼
 import type { Command } from '../shared/types';
 
 export class Input {
@@ -16,6 +17,18 @@ export class Input {
   private btnBoost = false;
   private btnSneak = false;
   private joy: { id: number; ox: number; oy: number } | null = null;
+  private skillSeq = 0;
+  private moltSeq = 0;
+  private moltChoice = 0;
+
+  skill() {
+    this.skillSeq++;
+  }
+
+  molt(choice: number) {
+    this.moltChoice = choice;
+    this.moltSeq++;
+  }
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -23,6 +36,7 @@ export class Input {
     private sneakBtn: HTMLElement,
     private joyEl: HTMLElement,
     private knobEl: HTMLElement,
+    skillBtn: HTMLElement,
   ) {
     this.touch = 'ontouchstart' in window || matchMedia('(pointer: coarse)').matches;
     canvas.style.touchAction = 'none';
@@ -30,6 +44,7 @@ export class Input {
     canvas.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse') {
         if (e.button === 0) this.mouseBoost = true;
+        if (e.button === 2) this.skill();
         return;
       }
       if (this.joy) return;
@@ -73,6 +88,9 @@ export class Input {
         e.preventDefault();
       }
       if (e.key === 'Shift') this.keySneak = true;
+      if (e.repeat) return;
+      if (e.code === 'KeyE') this.skill();
+      if (e.key === '1' || e.key === '2' || e.key === '3') this.molt(Number(e.key) - 1);
     });
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space') this.keyBoost = false;
@@ -100,6 +118,11 @@ export class Input {
     };
     hold(boostBtn, (v) => (this.btnBoost = v));
     hold(sneakBtn, (v) => (this.btnSneak = v));
+    skillBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.skill();
+    });
   }
 
   /** headX, headY: 화면에서 내 머리 위치 */
@@ -110,7 +133,11 @@ export class Input {
     }
     this.sneak = this.keySneak || this.btnSneak;
     this.boost = !this.sneak && (this.mouseBoost || this.keyBoost || this.btnBoost);
-    return { angle: this.angle, boost: this.boost, sneak: this.sneak };
+    return { angle: this.angle, boost: this.boost, sneak: this.sneak, skillSeq: this.skillSeq, moltSeq: this.moltSeq, moltChoice: this.moltChoice };
+  }
+
+  resetSeq() {
+    this.skillSeq = this.moltSeq = 0;
   }
 
   resetHolds() {

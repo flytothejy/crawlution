@@ -3,37 +3,92 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-    <title>곤충 진화 스네이크 · 프로토타입 A</title>
+    <title>크롤루션 · 곤충 진화 스네이크</title>
     <style>
       * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
       html, body { margin: 0; height: 100%; overflow: hidden; background: #1f3a1c; font-family: system-ui, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; color: #fff; user-select: none; -webkit-user-select: none; }
       #game { position: fixed; inset: 0; }
       #vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgba(10, 25, 8, 0.55) 100%); }
       .hud { position: fixed; pointer-events: none; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
-      #stats { top: calc(10px + env(safe-area-inset-top)); left: 12px; font-size: 14px; line-height: 1.5; }
-      #stats b { font-size: 22px; }
-      #board { top: calc(10px + env(safe-area-inset-top)); right: 12px; font-size: 12.5px; background: rgba(0, 0, 0, 0.22); border-radius: 10px; padding: 6px 10px; min-width: 130px; }
+      #stats { top: calc(10px + env(safe-area-inset-top)); left: 12px; font-size: 13px; line-height: 1.45; }
+      #stats .sp { font-size: 15px; font-weight: 800; }
+      #stats .sp small { font-size: 11px; color: #ffe066; }
+      #stats b { font-size: 20px; }
+      #gauge { top: calc(10px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); width: min(44vw, 260px); text-align: center; font-size: 12px; }
+      #gauge .gl { margin-bottom: 3px; font-weight: 700; }
+      #gauge .gb { height: 9px; border-radius: 6px; background: rgba(0, 0, 0, 0.35); overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.3); }
+      #gauge .gb i { display: block; height: 100%; background: linear-gradient(90deg, #b8f06a, #ffe066); transition: width 0.15s; }
+      #board { top: calc(10px + env(safe-area-inset-top)); right: 12px; font-size: 12px; background: rgba(0, 0, 0, 0.22); border-radius: 10px; padding: 6px 10px; min-width: 128px; }
       #board .row { display: flex; justify-content: space-between; gap: 10px; }
       #board .me { color: #d6ff8a; font-weight: 700; }
-      #minimap { top: calc(150px + env(safe-area-inset-top)); right: 12px; width: 96px; height: 96px; border-radius: 50%; background: rgba(0, 0, 0, 0.25); }
+      .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: 0; }
+      #minimap { top: calc(140px + env(safe-area-inset-top)); right: 12px; width: 92px; height: 92px; border-radius: 50%; background: rgba(0, 0, 0, 0.25); }
+      #dist { top: calc(240px + env(safe-area-inset-top)); right: 12px; width: 128px; font-size: 10px; }
+      #dist .dt { opacity: 0.75; margin-bottom: 2px; }
+      #dist .db { display: flex; height: 7px; border-radius: 4px; overflow: hidden; background: rgba(0, 0, 0, 0.3); }
+      #dist .dl { display: flex; flex-wrap: wrap; gap: 0 7px; margin-top: 3px; font-weight: 700; color: #fff; }
+      #dist .dl i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 3px; }
+      @media (max-width: 600px) {
+        #gauge { top: calc(92px + env(safe-area-inset-top)); left: 12px; transform: none; width: 48vw; text-align: left; }
+        #stats { font-size: 12px; }
+        #stats .sp { font-size: 14px; }
+        #board { font-size: 11px; min-width: 112px; padding: 5px 8px; }
+        #minimap { top: calc(128px + env(safe-area-inset-top)); width: 80px; height: 80px; }
+        #dist { top: calc(214px + env(safe-area-inset-top)); width: 112px; }
+      }
+      #banner { top: 22%; left: 50%; transform: translateX(-50%); font-size: clamp(18px, 4.6vw, 28px); font-weight: 900; text-align: center; white-space: nowrap; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5), 0 0 18px rgba(0, 0, 0, 0.5); }
+      #banner.pop { animation: pop 0.45s ease-out; }
+      @keyframes pop { 0% { transform: translateX(-50%) scale(0.4); opacity: 0; } 60% { transform: translateX(-50%) scale(1.12); opacity: 1; } 100% { transform: translateX(-50%) scale(1); } }
+      /* 진화 카드 */
+      #cards { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(14px + env(safe-area-inset-bottom)); width: min(96vw, 560px); text-align: center; }
+      body.touch #cards { bottom: calc(128px + env(safe-area-inset-bottom)); }
+      #cards .ctitle { font-size: 13px; font-weight: 800; margin-bottom: 6px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7); animation: blink 1s infinite alternate; }
+      @keyframes blink { to { color: #ffe066; } }
+      #cards .crow { display: flex; gap: 6px; }
+      .mcard { position: relative; flex: 1; min-width: 0; border: 0; border-radius: 14px; padding: 8px 6px 7px; background: #fffdf3; color: #2c3a22; border-top: 6px solid var(--c); text-align: center; cursor: pointer; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); font-family: inherit; touch-action: none; }
+      .mcard:active { transform: translateY(2px); }
+      .mcard .key { position: absolute; left: 6px; top: 4px; font-size: 11px; font-weight: 800; color: #999; }
+      .mcard .lin { font-size: 11px; font-weight: 800; color: var(--c); }
+      .mcard .nm { font-size: 16px; font-weight: 900; margin: 1px 0; }
+      .mcard .sk { font-size: 12px; font-weight: 800; }
+      .mcard .ds { font-size: 10.5px; color: #6b7a55; line-height: 1.3; margin: 2px 0 4px; min-height: 27px; }
+      .mcard .odds { font-size: 11px; font-weight: 800; display: flex; justify-content: center; gap: 6px; color: #888; }
+      .mcard .g { color: #2f9a2a; }
+      .mcard .b { color: #d23a2a; }
+      /* 버튼 */
       .btn { position: fixed; display: none; align-items: center; justify-content: center; border-radius: 50%; font-weight: 800; font-size: 15px; color: #fff; background: rgba(255, 255, 255, 0.18); border: 2px solid rgba(255, 255, 255, 0.45); touch-action: none; backdrop-filter: blur(2px); }
       .btn.on { background: rgba(255, 230, 102, 0.45); border-color: #ffe066; }
-      #boostBtn { right: calc(18px + env(safe-area-inset-right)); bottom: calc(26px + env(safe-area-inset-bottom)); width: 86px; height: 86px; }
-      #sneakBtn { right: calc(116px + env(safe-area-inset-right)); bottom: calc(30px + env(safe-area-inset-bottom)); width: 66px; height: 66px; font-size: 13px; }
+      #boostBtn { right: calc(18px + env(safe-area-inset-right)); bottom: calc(26px + env(safe-area-inset-bottom)); width: 82px; height: 82px; }
+      #sneakBtn { right: calc(112px + env(safe-area-inset-right)); bottom: calc(22px + env(safe-area-inset-bottom)); width: 60px; height: 60px; font-size: 13px; }
       body.touch .btn { display: flex; }
+      #skillBtn { position: fixed; display: flex; flex-direction: column; align-items: center; justify-content: center; right: calc(18px + env(safe-area-inset-right)); bottom: calc(122px + env(safe-area-inset-bottom)); width: 82px; height: 82px; border-radius: 50%; color: #fff; font-weight: 900; touch-action: none; cursor: pointer;
+        background: conic-gradient(rgba(0, 0, 0, 0.55) var(--cd, 0deg), color-mix(in srgb, var(--c, #888) 70%, transparent) 0); border: 3px solid rgba(255, 255, 255, 0.6); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+      body:not(.touch) #skillBtn { bottom: calc(20px + env(safe-area-inset-bottom)); width: 74px; height: 74px; }
+      #skillBtn.ready { border-color: #fff; box-shadow: 0 0 14px var(--c, #fff); }
+      #skillBtn.none { display: none; }
+      #skillBtn .sn { font-size: 11.5px; line-height: 1.15; text-align: center; padding: 0 6px; }
+      #skillBtn .cd { font-size: 17px; }
       #joy { position: fixed; display: none; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.08); pointer-events: none; }
       #knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; border-radius: 50%; background: rgba(255, 255, 255, 0.5); transform: translate(-50%, -50%); }
-      .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(15, 35, 12, 0.72); backdrop-filter: blur(3px); padding: 20px; }
-      .card { background: #fffdf3; color: #2c3a22; border-radius: 22px; padding: 24px 22px; max-width: 360px; width: 100%; text-align: center; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); }
-      .card h1 { margin: 0 0 4px; font-size: 26px; }
-      .card .sub { margin: 0 0 14px; color: #6b7a55; font-size: 13px; }
-      .card ul { text-align: left; padding-left: 18px; margin: 12px 0 16px; font-size: 14px; line-height: 1.6; }
-      .card .big { font-size: 15px; background: #eef7d9; border-radius: 12px; padding: 10px; margin: 10px 0; line-height: 1.5; }
+      /* 시작·결과 */
+      .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(15, 35, 12, 0.72); backdrop-filter: blur(3px); padding: 20px; overflow-y: auto; }
+      .card { background: #fffdf3; color: #2c3a22; border-radius: 22px; padding: 22px 20px; max-width: 380px; width: 100%; text-align: center; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); }
+      .card h1 { margin: 0 0 4px; font-size: 25px; }
+      .card .sub { margin: 0 0 12px; color: #6b7a55; font-size: 13px; }
+      .card ul { text-align: left; padding-left: 18px; margin: 10px 0 14px; font-size: 13.5px; line-height: 1.6; }
+      .card .big { font-size: 14px; background: #eef7d9; border-radius: 12px; padding: 10px; margin: 10px 0; line-height: 1.55; }
+      .legend { display: flex; justify-content: center; gap: 10px; font-size: 12px; margin: 6px 0; }
+      .legend span { display: inline-flex; align-items: center; gap: 4px; }
+      .legend i { width: 12px; height: 12px; border-radius: 50%; border: 3px solid; }
       .card button { width: 100%; padding: 14px; font-size: 18px; font-weight: 800; border: 0; border-radius: 14px; background: #7cc243; color: #fff; box-shadow: 0 4px 0 #4f8f22; cursor: pointer; }
       .card button:active { transform: translateY(3px); box-shadow: 0 1px 0 #4f8f22; }
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 14px 0; }
-      .grid div { background: #f1f6e4; border-radius: 12px; padding: 8px; font-size: 12px; color: #6b7a55; }
-      .grid b { display: block; font-size: 22px; color: #2c3a22; }
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 12px 0; }
+      .grid div { background: #f1f6e4; border-radius: 12px; padding: 7px 4px; font-size: 11.5px; color: #6b7a55; }
+      .grid b { display: block; font-size: 19px; color: #2c3a22; }
+      #oPath { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px; margin: 8px 0; }
+      #oPath span { color: #fff; font-size: 12.5px; font-weight: 800; border-radius: 10px; padding: 3px 8px; }
+      #oPath em { font-style: normal; color: #999; font-size: 12px; }
+      #oFact { font-size: 12px; color: #6b7a55; background: #f6f3e4; border-radius: 10px; padding: 8px; margin: 8px 0; line-height: 1.45; }
       .hidden { display: none !important; }
       #hostTag { position: fixed; left: 8px; bottom: calc(6px + env(safe-area-inset-bottom)); font-size: 10px; opacity: 0.45; pointer-events: none; }
     </style>
@@ -42,18 +97,29 @@
     <div id="game"></div>
     <div id="vignette"></div>
     <div id="stats" class="hud hidden"></div>
+    <div id="gauge" class="hud hidden"></div>
     <div id="board" class="hud hidden"></div>
-    <canvas id="minimap" class="hud hidden" width="192" height="192"></canvas>
+    <canvas id="minimap" class="hud hidden" width="184" height="184"></canvas>
+    <div id="dist" class="hud hidden"></div>
+    <div id="banner" class="hud hidden"></div>
+    <div id="cards" class="hidden"></div>
     <div id="joy"><div id="knob"></div></div>
+    <div id="skillBtn" class="none"></div>
     <div id="sneakBtn" class="btn">살금</div>
     <div id="boostBtn" class="btn">부스트</div>
     <div id="hostTag"></div>
 
     <div id="start" class="overlay">
       <div class="card">
-        <h1>🐛 곤충 진화 스네이크</h1>
-        <p class="sub">프로토타입 A · 이동과 감싸기</p>
-        <div class="big">몸으로 곤충 주위를 <b>한 바퀴 감싸면</b><br />1초 뒤 고리 안 곤충이 <b>압착</b>돼요!</div>
+        <h1>🐛 크롤루션</h1>
+        <p class="sub">곤충 진화 스네이크 · 프로토타입 C</p>
+        <div class="big">
+          애벌레로 시작해 <b>5단계</b>까지 진화하고<br />마지막에 나타나는 <b>왕지네</b>를 쓰러뜨리세요!<br />
+          <small>몸으로 한 바퀴 감싸면 <b>압착</b> · 상성이 유리하면 한 단계 위로 쳐요</small>
+        </div>
+        <div class="legend">
+          <span><i style="border-color:#7dff5a"></i>먹을 수 있음</span><span><i style="border-color:#bbb"></i>비김</span><span><i style="border-color:#ff4a3a"></i>위험</span>
+        </div>
         <ul id="howto"></ul>
         <button id="startBtn">시작</button>
       </div>
@@ -63,12 +129,16 @@
       <div class="card">
         <h1 id="overTitle">잡혔다!</h1>
         <p class="sub" id="overSub"></p>
+        <div id="oPath"></div>
         <div class="grid">
           <div>점수<b id="oScore">0</b></div>
-          <div>최대 길이<b id="oLen">0</b></div>
+          <div>최고 단계<b id="oStage">1</b></div>
+          <div>시간<b id="oTime">0:00</b></div>
           <div>처치<b id="oKills">0</b></div>
           <div>압착<b id="oCrush">0</b></div>
+          <div>최대 길이<b id="oLen">0</b></div>
         </div>
+        <div id="oFact"></div>
         <p class="sub" id="oBest"></p>
         <button id="againBtn">다시 하기</button>
       </div>

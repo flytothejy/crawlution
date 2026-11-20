@@ -6,7 +6,7 @@ import type { Command, HostIn, HostOut, Snapshot } from '../shared/types';
 
 export interface SimHost {
   readonly kind: string;
-  start(seed: number, playerName: string): void;
+  start(seed: number, playerName: string, startStage?: number): void;
   send(cmd: Command): void;
   pause(paused: boolean): void;
   stop(): void;
@@ -26,8 +26,8 @@ class WorkerHost implements SimHost {
   private post(m: HostIn) {
     this.w.postMessage(m);
   }
-  start(seed: number, playerName: string) {
-    this.post({ type: 'start', seed, playerName });
+  start(seed: number, playerName: string, startStage = 1) {
+    this.post({ type: 'start', seed, playerName, startStage });
   }
   send(cmd: Command) {
     this.post({ type: 'cmd', cmd });
@@ -48,8 +48,9 @@ class LocalHost implements SimHost {
   private last = 0;
   private acc = 0;
   private paused = false;
-  start(seed: number, playerName: string) {
-    this.sim = new Simulation(seed, playerName);
+  start(seed: number, playerName: string, startStage = 1) {
+    this.sim = new Simulation(seed, playerName, startStage);
+    (globalThis as { __sim?: Simulation }).__sim = this.sim; // 시험용
     this.last = performance.now();
     this.acc = 0;
     this.paused = false;
@@ -89,10 +90,16 @@ class LocalHost implements SimHost {
 }
 
 /** 워커를 먼저 시도하고, 1초 안에 응답이 없거나 만들 수 없으면 메인 스레드로 돌린다 */
-export function createHost(seed: number, playerName: string, onSnap: (s: Snapshot) => void): SimHost {
+export function createHost(seed: number, playerName: string, startStage: number, onSnap: (s: Snapshot) => void): SimHost {
   let host: SimHost;
+  let forceLocal = false;
   try {
-    host = new WorkerHost();
+    forceLocal = new URLSearchParams(location.search).has('local');
+  } catch {
+    /* 주소를 못 읽는 환경 */
+  }
+  try {
+    host = forceLocal ? new LocalHost() : new WorkerHost();
   } catch {
     host = new LocalHost();
   }
@@ -101,14 +108,14 @@ export function createHost(seed: number, playerName: string, onSnap: (s: Snapsho
     got = true;
     onSnap(s);
   };
-  host.start(seed, playerName);
+  host.start(seed, playerName, startStage);
   if (host.kind === 'worker') {
     setTimeout(() => {
       if (got) return;
       host.stop();
       const local = new LocalHost();
       local.onSnap = onSnap;
-      local.start(seed, playerName);
+      local.start(seed, playerName, startStage);
       Object.assign(proxy, { inner: local });
     }, 1000);
   }
@@ -118,8 +125,8 @@ export function createHost(seed: number, playerName: string, onSnap: (s: Snapsho
     get kind() {
       return this.inner.kind;
     },
-    start(s: number, n: string) {
-      this.inner.start(s, n);
+    start(s: number, n: string, st?: number) {
+      this.inner.start(s, n, st);
     },
     send(c: Command) {
       this.inner.send(c);
