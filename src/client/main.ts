@@ -1,6 +1,7 @@
 // 시작점: 화면·조작·시뮬레이션 호스트를 연결하고, 받은 상태를 보간해서 그린다.
+import './fonts.css';
 import { CONFIG } from '../shared/config';
-import { CYCLE, LINEAGE, SPECIES_BY_ID } from '../shared/species';
+import { beats, CYCLE, LINEAGE, SPECIES_BY_ID, type Lineage, type Species } from '../shared/species';
 import type { Card, Snapshot, SnakeView } from '../shared/types';
 import { createHost, type SimHost } from './host';
 import { Input } from './input';
@@ -8,6 +9,26 @@ import { GameRenderer, type Frame, type FrameSnake } from './renderer';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
+
+/** 갈래 아이콘 */
+const LIN_ICON: Record<Lineage, string> = { none: '🌱', armor: '🛡️', hunt: '🗡️', swarm: '🐜', poison: '☠️', spider: '🕸️' };
+
+/** 스킬 아이콘: 첫 효과 부품으로 고른다 */
+function skillIcon(sp: Species): string {
+  const p = sp.parts[0];
+  if (!p) return '';
+  switch (p.k) {
+    case 'dash': return p.cut ? '⚔️' : p.push ? '💢' : '💨';
+    case 'fly': return '🪽';
+    case 'cone': return p.effect === 'cut' ? '✂️' : '💫';
+    case 'aoe': return p.effect === 'push' ? '💢' : '💥';
+    case 'zone': return p.effect === 'poison' ? '🧪' : '🕸️';
+    case 'proj': return '🎯';
+    case 'shield': return '🛡️';
+    case 'magnet': return '🧲';
+    case 'ringfast': return '🔥';
+  }
+}
 
 const renderer = new GameRenderer();
 let host: SimHost | null = null;
@@ -28,6 +49,9 @@ let lastCmd = { angle: 0, boost: false, sneak: false, skillSeq: 0, moltSeq: 0, m
 let hudAt = 0;
 let cardsKey = '';
 let bannerT = 0;
+let hudSpecies = '';
+let skillSpecies = '';
+let skillReady = false;
 const segBuf = new Map<number, Float32Array>();
 
 function bestScore(): number {
@@ -45,15 +69,41 @@ function saveBest(v: number) {
   }
 }
 
-function banner(text: string, color = '#fff', ms = 2600) {
+function banner(text: string, c1 = '#ffb52e', c2 = '#f27b1c', ms = 2600) {
   const b = $('banner');
   b.textContent = text;
-  b.style.color = color;
+  b.style.setProperty('--bc', c1);
+  b.style.setProperty('--bc2', c2);
   b.classList.remove('hidden');
   b.classList.remove('pop');
   void b.offsetWidth;
   b.classList.add('pop');
   bannerT = performance.now() + ms;
+}
+
+function flash() {
+  const f = $('flash');
+  f.classList.remove('go');
+  void f.offsetWidth;
+  f.classList.add('go');
+}
+
+// ---------- 처치 소식 ----------
+function feed(html: string, mine: boolean) {
+  const box = $('feed');
+  const d = document.createElement('div');
+  d.className = mine ? 'me ol-thin' : 'ol-thin';
+  d.innerHTML = html;
+  box.prepend(d);
+  while (box.children.length > 4) box.lastElementChild?.remove();
+  setTimeout(() => (d.style.opacity = '0'), mine ? 4200 : 3000);
+  setTimeout(() => d.remove(), mine ? 4800 : 3600);
+}
+
+function who(s: SnakeView | undefined) {
+  if (!s) return '?';
+  const c = s.isBoss ? '#ffa08a' : hex(mixHex(LINEAGE[s.lineage].color, 0xffffff, 0.35));
+  return `<span style="color:${s.isPlayer ? '#ffe066' : c}">${s.isPlayer ? '나' : s.name}</span>`;
 }
 
 function onSnap(s: Snapshot) {
@@ -67,14 +117,46 @@ function onSnap(s: Snapshot) {
   renderer.handleEvents(s.events, byId, s.playerId);
   if (!playing) return;
   for (const e of s.events) {
-    if (e.type === 'boss') banner('👑 왕지네가 나타났다! 쓰러뜨리면 승리', '#ffb0a0', 3500);
-    if (e.type === 'birdWarn') banner('🐦 새가 온다! 그림자를 피하세요', '#ffe066', 2600);
+    if (e.type === 'boss') {
+      banner('👑 왕지네 등장!', '#ff6b5a', '#c93a2a', 3200);
+      flash();
+    }
+    if (e.type === 'birdWarn') banner('🐦 새가 온다! 그림자를 피해!', '#5ab4ff', '#2a6fd0', 2600);
     if (e.type === 'molt' && e.snake === s.playerId) {
       const sp = SPECIES_BY_ID.get(e.species);
-      if (sp) banner(`${sp.name} · ${sp.skillName}`, hex(LINEAGE[sp.lineage].color), 2200);
+      if (sp) {
+        const c = LINEAGE[sp.lineage].color;
+        banner(`${sp.name}${ro(sp.name)} 진화!`, hex(mixHex(c, 0xffffff, 0.25)), hex(c), 2200);
+      }
+      flash();
+    }
+    if (e.type === 'crush' && e.count > 0 && e.snake === s.playerId) flash();
+    if (e.type === 'death') {
+      const victim = byId.get(e.snake);
+      const killer = e.by >= 0 ? byId.get(e.by) : undefined;
+      const mine = e.snake === s.playerId || e.by === s.playerId || !!victim?.isBoss;
+      const ic = { crush: '🌀', head: '💥', bird: '🐦', poison: '☠️', skill: '⚔️', wall: '🧱' }[e.cause];
+      if (e.cause === 'bird') feed(`${ic} 새가 ${who(victim)}를 낚아챘다`, mine);
+      else if (e.cause === 'wall') {
+        if (mine) feed(`${ic} ${who(victim)} 벽에 부딪힘`, mine);
+      } else if (killer) feed(`${who(killer)} ${ic} ${who(victim)}${e.cause === 'crush' ? ' 압착!' : ''}`, mine);
     }
     if (e.type === 'end') endAt = performance.now() + (e.won ? 1800 : 1300);
   }
+}
+
+/** 받침에 따라 '로'/'으로' (ㄹ 받침은 '로') */
+function ro(word: string) {
+  const c = word.charCodeAt(word.length - 1) - 0xac00;
+  if (c < 0 || c > 11171) return '로';
+  const jong = c % 28;
+  return jong === 0 || jong === 8 ? '로' : '으로';
+}
+
+function mixHex(a: number, b: number, t: number) {
+  const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+  const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+  return (Math.round(ar + (br - ar) * t) << 16) | (Math.round(ag + (bg - ag) * t) << 8) | Math.round(ab + (bb - ab) * t);
 }
 
 function lerpAngle(a: number, b: number, t: number) {
@@ -109,12 +191,40 @@ function buildFrame(): Frame | null {
   return { snakes, foods: b.foods, rings: b.rings, zones: b.zones, projs: b.projs, bird: b.bird, playerId: b.playerId };
 }
 
-function cardHtml(c: Card, i: number) {
+/** 강한 적 머리가 가깝거나 새 그림자 안이면 화면 가장자리를 붉게 */
+function updateDanger(frame: Frame) {
+  const me = frame.snakes.find((s) => s.id === frame.playerId);
+  let danger = false;
+  if (playing && me && me.alive && me.segs.length >= 2) {
+    const hx = me.segs[0], hy = me.segs[1];
+    const eff = (a: SnakeView, b: SnakeView) => (a.isBoss ? 6 : a.stage + (beats(a.lineage, b.lineage) ? 1 : 0));
+    for (const s of frame.snakes) {
+      if (s.id === me.id || !s.alive || s.segs.length < 2) continue;
+      if (eff(s, me) <= eff(me, s)) continue;
+      if (Math.hypot(s.segs[0] - hx, s.segs[1] - hy) < 170) {
+        danger = true;
+        break;
+      }
+    }
+    for (const sh of frame.bird.shadows) if (Math.hypot(sh.x - hx, sh.y - hy) < sh.r + 10) danger = true;
+  }
+  $('danger').classList.toggle('on', danger);
+}
+
+// ---------- 진화 카드 ----------
+function cardHtml(c: Card, i: number, best: boolean) {
   const sp = SPECIES_BY_ID.get(c.species)!;
   const L = LINEAGE[c.lineage];
-  const key = input.touch ? '' : `<span class="key">${i + 1}</span>`;
-  const odds = c.good || c.bad ? `<div class="odds"><span class="g">유리 ${c.good}</span><span class="b">불리 ${c.bad}</span></div>` : '<div class="odds"><span>주변에 비교 대상 없음</span></div>';
-  return `<button class="mcard" data-i="${i}" style="--c:${hex(L.color)}">${key}<div class="lin">${L.name}</div><div class="nm">${sp.name}</div><div class="sk">${sp.skillName}</div><div class="ds">${sp.skillDesc}</div>${odds}</button>`;
+  const key = input.touch ? '' : `<span class="key badge">${i + 1}</span>`;
+  const odds = c.good || c.bad
+    ? `<div class="odds"><span class="g">▲ 유리 ${c.good}</span><span class="b">▼ 불리 ${c.bad}</span></div>`
+    : '<div class="odds"><span class="z">주변에 비교 대상 없음</span></div>';
+  return `<button class="mcard${best ? ' best' : ''}" data-i="${i}" style="--c:${hex(L.color)}">
+    <div class="top ol-thin">${LIN_ICON[c.lineage]} ${L.name}</div>${key}
+    <div class="pic"><img src="${renderer.portrait(sp.id)}" alt=""></div>
+    <div class="nm">${sp.name}</div>
+    <div class="sk">${skillIcon(sp)} ${sp.skillName}</div>
+    <div class="ds">${sp.skillDesc}</div>${odds}</button>`;
 }
 
 function updateCards(latest: Snapshot) {
@@ -122,13 +232,20 @@ function updateCards(latest: Snapshot) {
   const cards = p.cards;
   const key = cards ? cards.map((c) => `${c.species}:${c.good}:${c.bad}`).join('|') : '';
   if (key === cardsKey) return;
+  const sameSet = cards && cardsKey !== '' && cardsKey.split('|').map((k) => k.split(':')[0]).join() === cards.map((c) => c.species).join();
   cardsKey = key;
   const box = $('cards');
   if (!cards) {
     box.classList.add('hidden');
     return;
   }
-  box.innerHTML = `<div class="ctitle">탈피 준비! 다음 모습을 고르세요</div><div class="crow">${cards.map(cardHtml).join('')}</div>`;
+  let bestI = -1, bestV = 0;
+  cards.forEach((c, i) => {
+    if (c.good - c.bad > bestV) ((bestV = c.good - c.bad), (bestI = i));
+  });
+  box.innerHTML = `<div class="ctitle ol">✨ 탈피 준비! <b>다음 모습</b>을 고르세요</div><div class="crow">${cards.map((c, i) => cardHtml(c, i, i === bestI)).join('')}</div>`;
+  // 같은 카드에서 숫자만 바뀐 경우 등장 애니메이션을 다시 하지 않는다
+  if (sameSet) box.querySelectorAll<HTMLElement>('.mcard').forEach((el) => (el.style.animation = 'none'));
   box.classList.remove('hidden');
   box.querySelectorAll<HTMLButtonElement>('.mcard').forEach((el) =>
     el.addEventListener('pointerdown', (e) => {
@@ -139,47 +256,75 @@ function updateCards(latest: Snapshot) {
   );
 }
 
+// ---------- HUD ----------
 function updateHud(latest: Snapshot) {
   const me = latest.snakes.find((s) => s.id === latest.playerId);
   if (!me) return;
   const sp = SPECIES_BY_ID.get(me.species)!;
   const L = LINEAGE[me.lineage];
   const p = latest.player;
-  $('stats').innerHTML =
-    `<div class="sp" style="color:${hex(L.color === 0x8fd14f ? 0xd6ff8a : L.color)}">${me.stage}단계 · ${sp.name}${p.mastery ? ` <small>숙련 ${'★'.repeat(p.mastery)}</small>` : ''}</div>` +
-    `<b>${me.length}</b> 마디 · 점수 ${me.score}<br>처치 ${me.kills} · 압착 ${me.crushes}`;
+  const stats = $('stats');
+  if (hudSpecies !== me.species) {
+    hudSpecies = me.species;
+    stats.innerHTML = `<div class="pfw"><div class="pf" style="--c:${hex(L.color)}"><img src="${renderer.portrait(sp.id)}" alt=""></div><span class="lv badge">${me.stage}</span></div>
+      <div><div class="nm ol-thin">${LIN_ICON[me.lineage]} ${sp.name} <span class="stars" id="hStars"></span></div>
+      <div class="len ol" id="hLen"></div><div class="sc ol-thin" id="hSc"></div></div>`;
+  }
+  $('hStars').textContent = p.mastery ? '★'.repeat(p.mastery) : '';
+  $('hLen').innerHTML = `${me.length}<small> 마디</small>`;
+  $('hSc').textContent = `점수 ${me.score} · 처치 ${me.kills} · 압착 ${me.crushes}`;
+
   // 진화 게이지
   const g = $('gauge');
   if (me.stage >= 5) {
-    g.innerHTML = `<div class="gl">최종 단계 · 왕지네를 쓰러뜨리세요</div>`;
+    g.classList.remove('full');
+    g.innerHTML = `<div class="gl ol-thin">👑 최종 단계! 왕지네를 쓰러뜨려라</div>`;
   } else {
     const k = Math.min(1, p.gauge / p.need);
-    const label = p.molting ? '탈피 중…' : k >= 1 ? '탈피 준비 완료!' : `다음 탈피까지 ${Math.ceil(p.need - p.gauge)}`;
-    g.innerHTML = `<div class="gl">${label}</div><div class="gb"><i style="width:${k * 100}%"></i></div>`;
+    const full = k >= 1;
+    g.classList.toggle('full', full && !p.molting);
+    const label = p.molting ? '🦋 탈피 중…' : full ? '✨ 탈피 준비 완료!' : `다음 탈피까지 ${Math.ceil(p.need - p.gauge)}`;
+    if (!g.querySelector('.gb')) g.innerHTML = `<div class="gl ol-thin"></div><div class="gb"><i></i></div>`;
+    g.querySelector<HTMLElement>('.gl')!.textContent = label;
+    g.querySelector<HTMLElement>('.gb i')!.style.width = `${k * 100}%`;
   }
+
   // 스킬 버튼
   const btn = $('skillBtn');
   if (sp.parts.length) {
     btn.classList.remove('none');
+    if (skillSpecies !== sp.id) {
+      skillSpecies = sp.id;
+      btn.style.setProperty('--c', hex(L.color));
+      btn.innerHTML = `<span class="ic">${skillIcon(sp)}</span><span class="sn ol-thin">${sp.skillName}</span><span class="cd ol"></span>${input.touch ? '' : '<span class="key badge">E</span>'}`;
+    }
     const cdK = p.skillCdMax > 0 ? p.skillCd / p.skillCdMax : 0;
     btn.style.setProperty('--cd', `${cdK * 360}deg`);
-    btn.style.setProperty('--c', hex(L.color));
-    btn.classList.toggle('ready', p.skillCd <= 0);
-    btn.innerHTML = `<span class="sn">${sp.skillName}</span>${p.skillCd > 0 ? `<span class="cd">${Math.ceil(p.skillCd)}</span>` : input.touch ? '' : '<span class="cd">E</span>'}`;
+    const ready = p.skillCd <= 0;
+    btn.classList.toggle('ready', ready);
+    btn.classList.toggle('cooling', !ready);
+    if (ready && !skillReady) btn.animate([{ transform: 'scale(0.75)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], { duration: 350, easing: 'ease-out' });
+    skillReady = ready;
+    btn.querySelector<HTMLElement>('.cd')!.textContent = ready ? '' : String(Math.ceil(p.skillCd));
   } else btn.classList.add('none');
+
   // 순위
   const ranked = latest.snakes.filter((s) => s.alive).sort((x, y) => y.length - x.length).slice(0, 5);
   $('board').innerHTML =
-    '<div style="opacity:.75;margin-bottom:2px">길이 순위</div>' +
+    '<div class="hd">🏆 길이 순위</div>' +
     ranked
-      .map((s, i) => `<div class="row ${s.id === latest.playerId ? 'me' : ''}"><span><i class="dot" style="background:${hex(s.isBoss ? 0xff4a3a : LINEAGE[s.lineage].color)}"></i>${i + 1}. ${s.isPlayer ? '나' : s.name}</span><span>${s.length}</span></div>`)
+      .map((s, i) => {
+        const c = s.isBoss ? 0xff4a3a : LINEAGE[s.lineage].color;
+        const icon = s.isBoss ? '👑' : LIN_ICON[s.lineage];
+        return `<div class="row ${s.isPlayer ? 'me' : s.isBoss ? 'boss' : ''} ol-thin"><span class="rk">${i + 1}</span><span class="li" style="--c:${hex(c)}">${icon}</span><span class="n">${s.isPlayer ? '나' : s.name}</span><span class="v">${s.length}</span></div>`;
+      })
       .join('');
   // 갈래 분포
   $('dist').innerHTML =
-    '<div class="dt">경기장 갈래 분포</div><div class="db">' +
-    CYCLE.map((l) => `<i style="flex:${latest.lineageCount[l] ?? 0};background:${hex(LINEAGE[l].color)}" title="${LINEAGE[l].name}"></i>`).join('') +
-    '</div><div class="dl">' +
-    CYCLE.map((l) => `<span><i style="background:${hex(LINEAGE[l].color)}"></i>${LINEAGE[l].name} ${latest.lineageCount[l] ?? 0}</span>`).join('') +
+    '<div class="db">' +
+    CYCLE.map((l) => `<i style="flex:${latest.lineageCount[l] ?? 0};background:${hex(LINEAGE[l].color)}"></i>`).join('') +
+    '</div><div class="dl ol-thin">' +
+    CYCLE.map((l) => `<span><span class="li" style="--c:${hex(LINEAGE[l].color)}">${LIN_ICON[l]}</span>${LINEAGE[l].name} ${latest.lineageCount[l] ?? 0}</span>`).join('') +
     '</div>';
   updateCards(latest);
   drawMinimap(latest);
@@ -189,33 +334,46 @@ function drawMinimap(s: Snapshot) {
   const c = $('minimap') as unknown as HTMLCanvasElement;
   const ctx = c.getContext('2d');
   if (!ctx) return;
-  const W = c.width, R = CONFIG.arenaRadius, k = (W / 2 - 6) / R;
+  const W = c.width, R = CONFIG.arenaRadius, k = (W / 2 - 8) / R;
   ctx.clearRect(0, 0, W, W);
-  ctx.beginPath();
-  ctx.arc(W / 2, W / 2, W / 2 - 4, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(255,255,255,.45)';
-  ctx.lineWidth = 3;
-  ctx.stroke();
   for (const sh of s.bird.shadows) {
     ctx.beginPath();
-    ctx.arc(W / 2 + sh.x * k, W / 2 + sh.y * k, Math.max(6, sh.r * k), 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,0,0,.45)';
+    ctx.arc(W / 2 + sh.x * k, W / 2 + sh.y * k, Math.max(8, sh.r * k), 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,60,40,.45)';
     ctx.fill();
   }
   for (const r of s.rings) {
     ctx.beginPath();
-    ctx.arc(W / 2 + r.cx * k, W / 2 + r.cy * k, 9, 0, Math.PI * 2);
+    ctx.arc(W / 2 + r.cx * k, W / 2 + r.cy * k, 10, 0, Math.PI * 2);
     ctx.strokeStyle = '#ffe066';
+    ctx.lineWidth = 3;
     ctx.stroke();
   }
   for (const sn of s.snakes) {
     if (!sn.alive || sn.segs.length < 2) continue;
     const me = sn.id === s.playerId;
+    const x = W / 2 + sn.segs[0] * k, y = W / 2 + sn.segs[1] * k;
     ctx.beginPath();
-    ctx.arc(W / 2 + sn.segs[0] * k, W / 2 + sn.segs[1] * k, me ? 7 : sn.isBoss ? 10 : 3 + sn.stage, 0, Math.PI * 2);
+    ctx.arc(x, y, me ? 8 : sn.isBoss ? 11 : 3.5 + sn.stage, 0, Math.PI * 2);
     ctx.fillStyle = me ? '#ffffff' : sn.isBoss ? '#ff4a3a' : hex(LINEAGE[sn.lineage].color);
     ctx.fill();
+    if (me || sn.isBoss) {
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#1b2a12';
+      ctx.stroke();
+    }
   }
+}
+
+// ---------- 결과 ----------
+function countUp(el: HTMLElement, to: number, ms = 900) {
+  const t0 = performance.now();
+  const step = () => {
+    const k = Math.min(1, (performance.now() - t0) / ms);
+    el.textContent = String(Math.round(to * (1 - Math.pow(1 - k, 3))));
+    if (k < 1) requestAnimationFrame(step);
+  };
+  step();
 }
 
 function showResult(latest: Snapshot) {
@@ -223,29 +381,37 @@ function showResult(latest: Snapshot) {
   if (!me) return;
   playing = false;
   input.resetHolds();
+  $('danger').classList.remove('on');
   const won = latest.state === 'won';
-  const best = Math.max(bestScore(), me.score);
-  const isNew = me.score >= best && me.score > 0;
-  saveBest(best);
-  $('overTitle').textContent = won ? '🏆 숲의 왕 등극!' : '잡혔다!';
-  $('overSub').textContent = won ? '왕지네를 쓰러뜨렸어요' : maxStage >= 5 ? '거의 다 왔어요! 왕지네만 남았어요' : maxStage <= 1 ? '애벌레 때 잡혔어요. 먹이를 먹고 탈피해 보세요' : `${maxStage}단계까지 진화했어요`;
-  $('oScore').textContent = String(me.score);
+  const prevBest = bestScore();
+  const isNew = me.score > prevBest;
+  saveBest(Math.max(prevBest, me.score));
+  const over = $('over');
+  over.classList.toggle('win', won);
+  $('overTitle').textContent = won ? '🏆 숲의 왕!' : '잡혔다!';
+  $('overSub').textContent = won
+    ? '왕지네를 쓰러뜨렸어요!'
+    : maxStage >= 5 ? '거의 다 왔어요! 왕지네만 남았어요' : maxStage <= 1 ? '애벌레 때 잡혔어요. 먹이를 먹고 탈피해 보세요' : `${maxStage}단계까지 진화했어요`;
+  countUp($('oScore'), me.score);
   $('oStage').textContent = `${maxStage}단계`;
-  $('oKills').textContent = String(me.kills);
-  $('oCrush').textContent = String(me.crushes);
-  $('oLen').textContent = String(maxLen);
+  countUp($('oKills'), me.kills, 600);
+  countUp($('oCrush'), me.crushes, 600);
+  countUp($('oLen'), maxLen, 700);
   const sec = Math.floor((performance.now() - startedAt) / 1000);
   $('oTime').textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
   $('oPath').innerHTML = latest.player.path
-    .map((id) => {
+    .map((id, i) => {
       const sp = SPECIES_BY_ID.get(id);
-      return sp ? `<span style="background:${hex(LINEAGE[sp.lineage].color)}">${sp.name}</span>` : '';
+      if (!sp) return '';
+      return `<div class="st" style="animation-delay:${0.15 + i * 0.12}s;--c:${hex(LINEAGE[sp.lineage].color)}"><div class="pc"><img src="${renderer.portrait(id)}" alt=""></div>${sp.name}</div>`;
     })
-    .join('<em>→</em>');
+    .join('<em>▶</em>');
   const last = SPECIES_BY_ID.get(me.species);
   $('oFact').textContent = last ? `🔎 ${last.name}: ${last.fact}` : '';
-  $('oBest').textContent = isNew ? '🎉 최고 점수!' : `최고 점수 ${best}`;
-  $('over').classList.remove('hidden');
+  const ob = $('oBest');
+  ob.className = isNew ? 'new' : '';
+  ob.textContent = isNew ? '🎉 최고 점수 갱신!' : `최고 점수 ${Math.max(prevBest, me.score)}`;
+  over.classList.remove('hidden');
   $('cards').classList.add('hidden');
 }
 
@@ -253,12 +419,15 @@ function startGame() {
   $('start').classList.add('hidden');
   $('over').classList.add('hidden');
   for (const id of ['stats', 'board', 'minimap', 'gauge', 'dist']) $(id).classList.remove('hidden');
+  $('feed').innerHTML = '';
   snaps.length = 0;
   offset = null;
   maxLen = 0;
   maxStage = 1;
   endAt = 0;
   cardsKey = '';
+  hudSpecies = '';
+  skillSpecies = '';
   startedAt = performance.now();
   input.resetSeq();
   lastCmd = { ...lastCmd, skillSeq: 0, moltSeq: 0 };
@@ -276,12 +445,22 @@ function startGame() {
 }
 
 async function boot() {
+  try {
+    await Promise.race([Promise.all([document.fonts.load('20px Jua'), document.fonts.load('20px BlackHan')]), new Promise((r) => setTimeout(r, 1500))]);
+  } catch {
+    /* 글꼴을 못 읽어도 진행 */
+  }
   await renderer.init($('game'));
   input = new Input(renderer.app.canvas, $('boostBtn'), $('sneakBtn'), $('joy'), $('knob'), $('skillBtn'));
   if (input.touch) document.body.classList.add('touch');
-  $('howto').innerHTML = input.touch
-    ? '<li>화면을 끌어서 방향 조절 · <b>부스트</b>/<b>살금</b> 버튼</li><li><b>스킬</b> 버튼: 곤충마다 다른 기술</li><li>게이지가 차면 카드를 눌러 <b>탈피(진화)</b></li>'
-    : '<li>마우스로 방향 · <b>클릭/스페이스</b> 부스트 · <b>Shift</b> 살금</li><li><b>E / 오른쪽 클릭</b>: 곤충마다 다른 스킬</li><li>게이지가 차면 <b>1·2·3</b>으로 카드를 골라 <b>탈피</b></li>';
+  const how = input.touch
+    ? [['👆', '화면을 끌어서 방향 조절'], ['⚡', '<b>부스트</b> 빠르게 · 🍃 <b>살금</b> 작게 돌기'], ['✨', '<b>스킬</b> 버튼: 곤충마다 다른 기술'], ['🦋', '게이지가 차면 카드를 눌러 <b>탈피</b>']]
+    : [['🖱️', '마우스로 방향 · <b>클릭/스페이스</b> 부스트'], ['🍃', '<b>Shift</b> 살금살금(작게 돌기)'], ['✨', '<b>E</b> 또는 <b>오른쪽 클릭</b>: 스킬'], ['🦋', '게이지가 차면 <b>1·2·3</b>으로 <b>탈피</b>']];
+  how.push(['🌀', '몸으로 한 바퀴 감싸면 <b>압착!</b>']);
+  $('howto').innerHTML = how.map(([i, t]) => `<div><span class="i">${i}</span><span>${t}</span></div>`).join('');
+  $('lineup').innerHTML = ['caterpillar', 'ladybug', 'mantis', 'bee', 'widow'].map((id) => `<img src="${renderer.portrait(id)}" alt="">`).join('');
+  const best = bestScore();
+  $('startBest').textContent = best > 0 ? `🏆 최고 점수 ${best}` : '';
   $('startBtn').onclick = startGame;
   $('againBtn').onclick = startGame;
   document.addEventListener('visibilitychange', () => host?.pause(document.hidden));
@@ -291,6 +470,7 @@ async function boot() {
     const frame = buildFrame();
     if (!frame) return;
     renderer.render(frame, dt);
+    updateDanger(frame);
     const latest = snaps[snaps.length - 1];
     const me = latest.snakes.find((s) => s.id === latest.playerId);
     if (!me) return;

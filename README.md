@@ -33,3 +33,8 @@ npm run build    # dist/index.html 한 파일로 빌드
   - `config.ts` 밸런스 값, `species.ts` 갈래·종·스킬 데이터(곤충 추가 = 데이터 한 덩어리), `sim.ts` 시뮬레이션, `bot.ts` 봇·보스 AI, `rng.ts` 시드 고정 난수
 - `src/client/` — 화면(PixiJS)과 조작. 시뮬레이션이 보낸 상태를 보간해서 그리기만 한다.
 - `test/` — 로직 자동 점검
+
+## 글꼴
+
+Jua, Black Han Sans (Google Fonts, SIL Open Font License 1.1). 게임에서 쓰는 글자만 남겨 `src/client/fonts/`에 넣었다.
+문구나 종 이름을 새로 쓰면 원본 TTF를 받아 `python3 scripts/subset-fonts.py <원본 폴더>`를 다시 돌린다.

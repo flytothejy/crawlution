@@ -5,7 +5,9 @@ import { beats, BOSS_LOOK, LINEAGE, SPECIES_BY_ID, type Look } from '../shared/s
 import type { BirdView, GameEvent, ProjView, RingView, SnakeView, ZoneView } from '../shared/types';
 
 const FOOD_COLORS = [0xfff07a, 0xa6f37a, 0x7ae3f3, 0xf3a1d7, 0xffc37a, 0xd6a1ff];
-const FONT = 'system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+const FONT = 'Jua, system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif';
+const TITLE = 'BlackHan, Jua, system-ui, sans-serif';
+const INK = 0x1b2a12;
 
 export interface FrameSnake extends SnakeView {
   segs: Float32Array; // 보간된 위치
@@ -85,6 +87,7 @@ export class GameRenderer {
   private popupLayer = new Container();
   private tex: Record<string, Texture> = {};
   private faceTex = new Map<string, Texture>();
+  private portraits = new Map<string, string>();
   private snakes = new Map<number, SnakeGfx>();
   private foodSprites: Sprite[] = [];
   private particles: Particle[] = [];
@@ -327,7 +330,7 @@ export class GameRenderer {
     face.anchor.set(48 / 112, 0.5);
     const label = new Text({
       text: s.isPlayer ? '' : s.isBoss ? '👑 왕지네' : s.name,
-      style: { fontFamily: FONT, fontSize: s.isBoss ? 18 : 13, fontWeight: '700', fill: s.isBoss ? 0xffb0a0 : 0xffffff, stroke: { color: 0x2a3b1f, width: 3 } },
+      style: { fontFamily: FONT, fontSize: s.isBoss ? 20 : 14, fill: s.isBoss ? 0xffb0a0 : 0xffffff, stroke: { color: INK, width: 4, join: 'round' } },
     });
     label.anchor.set(0.5, 1);
     const wings: Sprite[] = [];
@@ -414,10 +417,7 @@ export class GameRenderer {
           if (!this.isNear(e.x, e.y)) break;
           for (let i = 0; i < 50; i++) this.spawnParticle(e.x, e.y, i % 3 ? col : 0xffffff, 80 + Math.random() * 260, 0.9, 0.7);
           this.addShape((g, k) => g.circle(e.x, e.y, 20 + (1 - k) * 160).stroke({ width: 8 * k, color: col, alpha: k }), 0.6);
-          if (e.snake === playerId) {
-            this.popup(e.x, e.y - 30, `${sp?.name ?? ''}(으)로 진화!`, 0xffffff, 32);
-            this.shake = Math.max(this.shake, 10);
-          }
+          if (e.snake === playerId) this.shake = Math.max(this.shake, 10);
           break;
         }
         case 'skill': {
@@ -448,7 +448,7 @@ export class GameRenderer {
           this.addShape((g, k) => {
             const r = e.range * (0.6 + 0.4 * (1 - k));
             g.moveTo(e.x, e.y).arc(e.x, e.y, r, e.angle - e.half, e.angle + e.half).lineTo(e.x, e.y).fill({ color: col, alpha: 0.28 * k });
-            g.arc(e.x, e.y, r, e.angle - e.half, e.angle + e.half).stroke({ width: 5, color: col, alpha: k });
+            g.moveTo(e.x + Math.cos(e.angle - e.half) * r, e.y + Math.sin(e.angle - e.half) * r).arc(e.x, e.y, r, e.angle - e.half, e.angle + e.half).stroke({ width: 5, color: col, alpha: k });
           }, 0.35);
           break;
         }
@@ -487,15 +487,115 @@ export class GameRenderer {
   }
 
   private popup(x: number, y: number, text: string, color: number, size: number) {
+    const big = size >= 30;
     const t = new Text({
       text,
-      style: { fontFamily: FONT, fontSize: size, fontWeight: '900', fill: color, stroke: { color: 0x2a2000, width: 6 } },
+      style: {
+        fontFamily: big ? TITLE : FONT,
+        fontSize: size,
+        fill: color,
+        stroke: { color: INK, width: Math.max(5, size * 0.22), join: 'round' },
+        dropShadow: { color: 0x000000, alpha: 0.35, distance: Math.max(3, size * 0.12), angle: Math.PI / 2, blur: 0 },
+        padding: 8,
+      },
     });
     t.anchor.set(0.5);
     t.position.set(x, y);
     t.scale.set(0.3);
+    t.rotation = (Math.random() - 0.5) * 0.12;
     this.popupLayer.addChild(t);
-    this.popups.push({ t, vy: -40, life: 1.3, max: 1.3 });
+    this.popups.push({ t, vy: big ? -28 : -46, life: big ? 1.6 : 1.2, max: big ? 1.6 : 1.2 });
+  }
+
+  /** 종 초상화(카드·HUD·결과 화면용 이미지). 한 번 그려 두고 재사용 */
+  portrait(species: string): string {
+    const cached = this.portraits.get(species);
+    if (cached) return cached;
+    const look = lookOf(species);
+    const feats = new Set(look.feats ?? []);
+    const c = new Container();
+    const r = 22, scale = (r * 2) / 64;
+    const n = species === 'boss' ? 8 : species === 'caterpillar' ? 6 : 5;
+    const ang = -0.65;
+    const pts: [number, number][] = [[0, 0]];
+    for (let i = 1; i < n; i++) {
+      const a = ang + Math.PI + Math.sin(i * 0.9) * 0.35;
+      const [px, py] = pts[i - 1];
+      pts.push([px + Math.cos(a) * r * 1.2, py + Math.sin(a) * r * 1.2]);
+    }
+    const spider = feats.has('legs8'), centi = feats.has('centipede');
+    for (let i = 1; i < n; i++) {
+      const on = centi ? true : spider ? i <= 3 : species !== 'caterpillar' && i <= 3;
+      if (!on) continue;
+      const leg = new Sprite(this.tex.legs);
+      leg.anchor.set(0.5);
+      leg.position.set(pts[i][0], pts[i][1]);
+      leg.rotation = ang + Math.sin(i * 1.7) * 0.3;
+      leg.scale.set(scale * (spider ? 1.5 : 1.1));
+      c.addChild(leg);
+    }
+    if (feats.has('stinger')) {
+      const st = new Sprite(this.tex.sting);
+      st.anchor.set(1, 0.5);
+      const [tx, ty] = pts[n - 1];
+      st.position.set(tx, ty);
+      st.rotation = ang;
+      st.scale.set(scale * 1.2);
+      c.addChild(st);
+    }
+    for (let i = n - 1; i >= 1; i--) {
+      const [x, y] = pts[i];
+      const taper = i > n - 3 ? 0.85 : 1;
+      const b = new Sprite(this.tex.body);
+      b.anchor.set(0.5);
+      b.position.set(x, y);
+      b.scale.set(scale * taper);
+      const stripe = look.pattern === 'swarm' ? i % 3 === 0 : Math.floor(i / 2) % 2 === 1;
+      b.tint = stripe ? look.stripe : look.body;
+      c.addChild(b);
+      const sh = new Sprite(this.tex.shine);
+      sh.anchor.set(0.5);
+      sh.position.set(x - r * 0.25, y - r * 0.35);
+      sh.scale.set(scale * 0.9 * taper);
+      sh.alpha = look.pattern === 'metal' ? 0.85 : 0.5;
+      c.addChild(sh);
+      if (look.pattern === 'spots' && i % 2 === 1) {
+        const sp = new Sprite(this.tex.spot);
+        sp.anchor.set(0.5);
+        sp.position.set(x + 4, y - 2);
+        sp.scale.set(scale * 0.55);
+        sp.tint = species === 'longhorn' ? 0xffffff : 0x1b1b1b;
+        c.addChild(sp);
+      }
+    }
+    if (feats.has('wings') || feats.has('wings4')) {
+      const k = feats.has('wings4') ? 4 : 2;
+      for (let j = 0; j < k; j++) {
+        const w = new Sprite(this.tex.wing);
+        w.anchor.set(0.05, 0.5);
+        w.position.set(pts[1][0], pts[1][1]);
+        const side = j % 2 === 0 ? 1 : -1;
+        w.rotation = ang + Math.PI + side * (0.5 + (j < 2 ? 0 : 0.35));
+        w.scale.set(scale * 1.25, scale * 0.9);
+        w.alpha = 0.8;
+        c.addChild(w);
+      }
+    }
+    const head = new Sprite(this.tex.body);
+    head.anchor.set(0.5);
+    head.scale.set(scale * 1.25);
+    head.tint = look.head;
+    c.addChild(head);
+    const face = new Sprite(this.getFace(species));
+    face.anchor.set(48 / 112, 0.5);
+    face.rotation = ang;
+    face.scale.set(scale * 1.2);
+    c.addChild(face);
+    const canvas = this.app.renderer.extract.canvas({ target: c, resolution: 2 }) as HTMLCanvasElement;
+    const url = canvas.toDataURL();
+    c.destroy({ children: true });
+    this.portraits.set(species, url);
+    return url;
   }
 
   render(frame: Frame, dt: number) {
@@ -797,7 +897,7 @@ export class GameRenderer {
       // 탈피: 빛나는 고치와 진행 원
       const glow = 0.35 + 0.25 * Math.sin(this.time * 12);
       st.circle(hx, hy, s.r * 2.2).fill({ color: 0xffffff, alpha: glow * 0.5 });
-      st.arc(hx, hy, s.r * 2.6, -Math.PI / 2, -Math.PI / 2 + s.molt * Math.PI * 2).stroke({ width: 4, color: 0xffffff, alpha: 0.95 });
+      st.moveTo(hx, hy - s.r * 2.6).arc(hx, hy, s.r * 2.6, -Math.PI / 2, -Math.PI / 2 + s.molt * Math.PI * 2).stroke({ width: 4, color: 0xffffff, alpha: 0.95 });
       if (Math.random() < 0.4) this.spawnParticle(hx + (Math.random() - 0.5) * s.r * 3, hy + (Math.random() - 0.5) * s.r * 3, 0xffffff, 20, 0.5, 0.35);
     }
     if (s.shield) {
@@ -860,7 +960,7 @@ export class GameRenderer {
         continue;
       }
       const age = p.max - p.life;
-      const pop = age < 0.18 ? 0.3 + (age / 0.18) * 0.95 : 1.25 - Math.min(0.25, (age - 0.18) * 1.5);
+      const pop = age < 0.15 ? 0.3 + (age / 0.15) * 1.1 : 1.4 - Math.min(0.4, (age - 0.15) * 2.4);
       p.t.scale.set(pop / Math.max(0.6, this.zoom));
       p.t.y += p.vy * dt;
       p.t.alpha = Math.min(1, p.life / 0.4);

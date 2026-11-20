@@ -1,0 +1,11 @@
+/* 게임 글꼴(Google Fonts, SIL OFL 1.1). scripts/subset-fonts.py로 쓰는 글자만 남겼다. */
+@font-face {
+  font-family: 'Jua';
+  src: url('./fonts/Jua-Regular.woff2') format('woff2');
+  font-display: block;
+}
+@font-face {
+  font-family: 'BlackHan';
+  src: url('./fonts/BlackHanSans-Regular.woff2') format('woff2');
+  font-display: block;
+}
