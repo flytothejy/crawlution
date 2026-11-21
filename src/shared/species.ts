@@ -148,6 +148,36 @@ export const SPECIES: Species[] = [
     look: { body: 0x1e1e24, stripe: 0xd8262f, head: 0x16161a, pattern: 'metal', feats: ['legs8'] }, fact: '배에 붉은 모래시계 무늬가 있다.' }),
 ];
 
+/** 능력치(보석) */
+export const STATS = [
+  { id: 'hp', name: '체력', icon: '❤', color: 0xff4d6d },
+  { id: 'atk', name: '공격', icon: '🦷', color: 0xff9a2a },
+  { id: 'spd', name: '속도', icon: '⚡', color: 0x3fd0ff },
+  { id: 'skl', name: '기술', icon: '✨', color: 0xb36bff },
+] as const;
+
+/** 특별 먹이: 좋아하는 갈래는 폭풍 성장, 싫어하는 갈래는 느려진다. 갈래마다 하나씩 좋아하고 하나씩 싫어한다 */
+export interface SpecialFood {
+  id: string;
+  name: string;
+  icon: string;
+  like: Lineage;
+  hate: Lineage;
+}
+export const SPECIAL_FOODS: SpecialFood[] = [
+  { id: 'fruit', name: '잘 익은 과일', icon: '🍑', like: 'armor', hate: 'hunt' },
+  { id: 'meat', name: '고깃점', icon: '🍖', like: 'hunt', hate: 'spider' },
+  { id: 'honey', name: '꿀', icon: '🍯', like: 'swarm', hate: 'poison' },
+  { id: 'shroom', name: '독버섯', icon: '🍄', like: 'poison', hate: 'swarm' },
+  { id: 'mosquito', name: '모기', icon: '🦟', like: 'spider', hate: 'armor' },
+];
+/** 1 좋아함, -1 싫어함, 0 보통 */
+export function taste(l: Lineage, food: number): -1 | 0 | 1 {
+  const f = SPECIAL_FOODS[food];
+  if (!f) return 0;
+  return f.like === l ? 1 : f.hate === l ? -1 : 0;
+}
+
 export const BOSS_LOOK: Look = { body: 0x8a2a1a, stripe: 0x5a1a10, head: 0x4a120a, pattern: 'metal', feats: ['centipede', 'mandibles'] };
 
 export const SPECIES_BY_ID = new Map(SPECIES.map((s) => [s.id, s]));

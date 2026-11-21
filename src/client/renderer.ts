@@ -2,7 +2,7 @@
 import { Application, BitmapFont, BitmapText, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
 import { CONFIG } from '../shared/config';
 import { relation } from '../shared/combat';
-import { LINEAGE, SPECIES_BY_ID } from '../shared/species';
+import { LINEAGE, SPECIAL_FOODS, SPECIES_BY_ID, STATS, taste, type Lineage } from '../shared/species';
 import type { EnemyView, GameEvent, MapTheme, MapView, ProjView, RingView, SnakeView, ZoneView } from '../shared/types';
 import { headKit, HR, type HeadKit, type HeadPart } from './heads';
 import { lookOf } from './look';
@@ -144,6 +144,9 @@ export class GameRenderer {
   private snakes = new Map<number, SnakeGfx>();
   private portraits = new Map<string, string>();
   private foodSprites: Sprite[] = [];
+  private foodBackLayer = new Container();
+  private foodBack: Sprite[] = [];
+  private foodBadge: Sprite[] = [];
   private particles: Particle[] = [];
   private freeParticles: Sprite[] = [];
   private popups: Popup[] = [];
@@ -197,7 +200,7 @@ export class GameRenderer {
     this.ghostLayer.blendMode = 'add';
 
     this.world.addChild(
-      this.bg, mask, this.deco, border, this.mapLayer, this.decalLayer, this.zoneGfx, this.foodLayer, this.ringGfx, this.markGfx,
+      this.bg, mask, this.deco, border, this.mapLayer, this.decalLayer, this.zoneGfx, this.foodBackLayer, this.foodLayer, this.ringGfx, this.markGfx,
       this.shadowLayer, this.glowLayer, this.legLayer, this.bodyLayer, this.ghostLayer, this.headLayer, this.statusGfx, this.shapeGfx,
       this.fxSpriteLayer, this.fxLayer, this.enemyGfx, this.hpGfx, this.labelLayer, this.popupLayer,
     );
@@ -279,6 +282,38 @@ export class GameRenderer {
     food.circle(32, 32, 9.5).fill(0xffffff);
     food.circle(29, 28.5, 3.5).fill({ color: 0xffffff, alpha: 1 });
     this.tex.food = r.generateTexture({ target: food, resolution: 2 });
+
+    // 보석: 회색 면으로 그려 두고 능력치 색으로 물들인다
+    const dia = new Graphics();
+    const P = (pts: number[], c: number) => dia.poly(pts).fill(c);
+    dia.poly([8, 26, 20, 12, 44, 12, 56, 26, 32, 56]).fill(INK).stroke({ width: 6, color: INK, join: 'round' });
+    P([11, 26, 21, 15, 27, 26], 0xe6e6e6);
+    P([21, 15, 43, 15, 37, 26, 27, 26], 0xffffff);
+    P([43, 15, 53, 26, 37, 26], 0xcfcfcf);
+    P([11, 26, 27, 26, 32, 51], 0xb4b4b4);
+    P([27, 26, 37, 26, 32, 51], 0xd8d8d8);
+    P([37, 26, 53, 26, 32, 51], 0x8e8e8e);
+    P([24, 17, 30, 17, 26, 22], 0xffffff);
+    this.tex.diamond = r.generateTexture({ target: dia, resolution: 2 });
+    // 특별 먹이: 접시 위 그림 글자
+    const plate = new Graphics().circle(34, 34, 30).fill(0xffffff).stroke({ width: 5, color: INK });
+    plate.circle(34, 34, 24).stroke({ width: 3, color: 0xffffff, alpha: 0.6 });
+    this.tex.plate = r.generateTexture({ target: plate, resolution: 2 });
+    for (const f of SPECIAL_FOODS) {
+      const t = new Text({ text: f.icon, style: { fontSize: 60, fontFamily: 'system-ui, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif', padding: 6 } });
+      this.tex['sp_' + f.id] = r.generateTexture({ target: t, resolution: 1 });
+      t.destroy();
+    }
+    // 좋아함·싫어함 표시
+    const badge = (c: number, draw: (g: Graphics) => void) => {
+      const g = new Graphics().circle(16, 16, 14).fill(c).stroke({ width: 3.5, color: INK });
+      draw(g);
+      const tx = r.generateTexture({ target: g, resolution: 2 });
+      g.destroy();
+      return tx;
+    };
+    this.tex.like = badge(0x3fc83a, (g) => g.moveTo(16, 24).bezierCurveTo(4, 15, 9, 6, 16, 11.5).bezierCurveTo(23, 6, 28, 15, 16, 24).fill(0xffffff));
+    this.tex.hate = badge(0xe0402a, (g) => g.moveTo(10, 10).lineTo(22, 22).moveTo(22, 10).lineTo(10, 22).stroke({ width: 4.5, color: 0xffffff, cap: 'round' }));
 
     const dot = new Graphics();
     for (let i = 5; i >= 1; i--) dot.circle(16, 16, 3 + i * 2.4).fill({ color: 0xffffff, alpha: 0.12 });
@@ -500,6 +535,32 @@ export class GameRenderer {
       switch (e.type) {
         case 'eat': {
           if (!this.isNear(e.x, e.y)) break;
+          const mine = e.snake === playerId;
+          if (e.gem !== undefined) {
+            const st = STATS[e.gem];
+            for (let i = 0; i < 16; i++) this.spawnParticle(e.x, e.y, i % 3 ? st.color : 0xffffff, 90 + Math.random() * 160, 0.5, 0.55);
+            if (mine) {
+              this.popup(e.x, e.y - 24, `${st.icon} ${st.name} Lv${e.lv}`, mix(st.color, 0xffffff, 0.35), 24, 1.3);
+              this.punch = Math.max(this.punch, 0.025);
+            }
+            break;
+          }
+          if (e.special !== undefined) {
+            if (e.taste === 1) {
+              for (let i = 0; i < 30; i++) this.spawnParticle(e.x, e.y, [0xffe066, 0x7dff5a, 0xffffff][i % 3], 120 + Math.random() * 240, 0.7, 0.7);
+              if (mine) {
+                this.popup(e.x, e.y - 34, '폭풍 성장!', 0xffe066, 36, 1.7, true);
+                this.punch = Math.max(this.punch, 0.06);
+                this.shake = Math.max(this.shake, 6);
+              } else this.popup(e.x, e.y - 20, '냠냠!', 0xffe066, 18);
+            } else if (e.taste === -1) {
+              for (let i = 0; i < 16; i++) this.spawnParticle(e.x, e.y, i % 2 ? 0x9aa860 : 0x6a7a3a, 60 + Math.random() * 90, 0.6, 0.55);
+              this.popup(e.x, e.y - 24, mine ? '웩! 느려짐' : '웩!', 0xc8e890, mine ? 26 : 16);
+            } else {
+              for (let i = 0; i < 10; i++) this.spawnParticle(e.x, e.y, FOOD_COLORS[i % FOOD_COLORS.length], 60 + Math.random() * 80, 0.4, 0.5);
+            }
+            break;
+          }
           const n = e.big ? 8 : 3;
           for (let i = 0; i < n; i++) this.spawnParticle(e.x, e.y, FOOD_COLORS[i % FOOD_COLORS.length], 40 + Math.random() * 60, 0.35, e.big ? 0.5 : 0.3);
           break;
@@ -1006,7 +1067,7 @@ export class GameRenderer {
     }
 
     this.drawZones(frame.zones);
-    this.drawFoods(frame.foods);
+    this.drawFoods(frame.foods, player && player.alive ? player.lineage : null);
     this.drawRings(frame.rings);
     this.drawMarks(frame.snakes, player);
 
@@ -1230,31 +1291,85 @@ export class GameRenderer {
     }
   }
 
-  private drawFoods(foods: Float32Array) {
-    const n = foods.length / 4;
+  private drawFoods(foods: Float32Array, myLineage: Lineage | null) {
+    const n = foods.length / 5;
     const viewW = this.app.screen.width / this.zoom / 2 + 40, viewH = this.app.screen.height / this.zoom / 2 + 40;
-    let used = 0;
-    for (let i = 0; i < n; i++) {
-      const x = foods[i * 4], y = foods[i * 4 + 1];
-      if (Math.abs(x - this.camX) > viewW || Math.abs(y - this.camY) > viewH) continue;
-      const r = foods[i * 4 + 2], kind = foods[i * 4 + 3];
-      let s = this.foodSprites[used];
-      if (!s) {
-        s = new Sprite(this.tex.food);
-        s.anchor.set(0.5);
-        this.foodLayer.addChild(s);
-        this.foodSprites.push(s);
+    let used = 0, back = 0, badges = 0;
+    const take = (pool: Sprite[], layer: Container, i: number, tex: Texture) => {
+      let sp = pool[i];
+      if (!sp) {
+        sp = new Sprite(tex);
+        sp.anchor.set(0.5);
+        layer.addChild(sp);
+        pool.push(sp);
       }
-      s.visible = true;
+      sp.texture = tex;
+      sp.visible = true;
+      sp.rotation = 0;
+      sp.alpha = 1;
+      return sp;
+    };
+    for (let i = 0; i < n; i++) {
+      const x = foods[i * 5], y = foods[i * 5 + 1];
+      if (Math.abs(x - this.camX) > viewW || Math.abs(y - this.camY) > viewH) continue;
+      const r = foods[i * 5 + 2], kind = foods[i * 5 + 3], sub = foods[i * 5 + 4];
       const ph = this.time * 3 + (x + y) * 0.05;
+      const pulse = 1 + 0.18 * Math.sin(ph * 1.3);
+      if (kind === 3) {
+        // 보석: 능력치 색 빛 + 반짝이며 흔들림
+        const c = STATS[sub]?.color ?? 0xffffff;
+        const gl = take(this.foodBack, this.foodBackLayer, back++, this.tex.glow);
+        gl.position.set(x, y);
+        gl.tint = c;
+        gl.scale.set(((r * 6) / 96) * (1 + 0.25 * Math.sin(ph * 2)));
+        gl.alpha = 0.9;
+        const d = take(this.foodSprites, this.foodLayer, used++, this.tex.diamond);
+        d.position.set(x, y + Math.sin(ph) * 3);
+        d.tint = mix(c, 0xffffff, 0.15);
+        d.rotation = Math.sin(ph * 0.8) * 0.18;
+        d.scale.set(((r * 3.1) / 64) * (1 + 0.08 * Math.sin(ph * 2.2)));
+        if (Math.random() < 0.025) this.spawnParticle(x + (Math.random() - 0.5) * r * 2, y + (Math.random() - 0.5) * r * 2, 0xffffff, 10, 0.5, 0.35);
+        continue;
+      }
+      if (kind === 4) {
+        // 특별 먹이: 접시(좋아하는 갈래 색) + 그림, 내 입맛 표시
+        const f = SPECIAL_FOODS[sub];
+        if (!f) continue;
+        const t = myLineage ? taste(myLineage, sub) : 0;
+        const bob = Math.sin(ph) * 3;
+        if (t !== 0) {
+          const gl = take(this.foodBack, this.foodBackLayer, back++, this.tex.glow);
+          gl.position.set(x, y);
+          gl.tint = t > 0 ? 0x7dff5a : 0xff4a3a;
+          gl.scale.set(((r * 7.5) / 96) * (1 + 0.3 * Math.sin(ph * 2.5)));
+          gl.alpha = t > 0 ? 1 : 0.7;
+        }
+        const pl = take(this.foodBack, this.foodBackLayer, back++, this.tex.plate);
+        pl.position.set(x, y + bob);
+        pl.tint = mix(LINEAGE[f.like].color, 0xffffff, 0.45);
+        pl.scale.set((r * 2.8) / 68);
+        const ic = take(this.foodSprites, this.foodLayer, used++, this.tex['sp_' + f.id]);
+        ic.position.set(x, y + bob - 1);
+        ic.tint = 0xffffff;
+        ic.rotation = Math.sin(ph * 0.7) * 0.12;
+        ic.scale.set(((r * 2.3) / 72) * (1 + 0.06 * Math.sin(ph * 1.6)));
+        if (t !== 0) {
+          const b = take(this.foodBadge, this.foodLayer, badges++, t > 0 ? this.tex.like : this.tex.hate);
+          b.position.set(x + r * 1.05, y - r * 1.0 + bob);
+          b.scale.set((r * 1.25) / 32);
+          b.tint = 0xffffff;
+        }
+        continue;
+      }
+      const s = take(this.foodSprites, this.foodLayer, used++, this.tex.food);
       s.position.set(x, y + Math.sin(ph) * 2.5);
       const h = Math.abs(Math.floor(x * 7 + y * 13)) % FOOD_COLORS.length;
       s.tint = kind === 1 ? 0xb8ff3a : kind === 2 ? 0xffa03a : FOOD_COLORS[h];
-      const pulse = 1 + 0.18 * Math.sin(ph * 1.3);
       s.scale.set(((r * 4.6) / 64) * pulse * (kind === 1 ? 1.3 : 1));
-      used++;
     }
     for (let i = used; i < this.foodSprites.length; i++) this.foodSprites[i].visible = false;
+    for (let i = back; i < this.foodBack.length; i++) this.foodBack[i].visible = false;
+    for (let i = badges; i < this.foodBadge.length; i++) this.foodBadge[i].visible = false;
   }
 
   private drawRings(rings: RingView[]) {
@@ -1302,6 +1417,8 @@ export class GameRenderer {
       let out = c;
       if (s.slow) out = mix(out, 0x7ab8ff, 0.35);
       if (s.poisoned) out = mix(out, 0x8aff5a, 0.3 + 0.15 * Math.sin(this.time * 12));
+      if (s.yuck) out = mix(out, 0x8a9a50, 0.4);
+      if (s.feast) out = mix(out, 0xffe066, 0.22 + 0.18 * Math.sin(this.time * 14));
       if (s.molt > 0) out = mix(out, 0xffffff, s.molt * 0.6);
       if (flash > 0) out = mix(out, 0xffffff, Math.min(1, flash / 0.13) * 0.85);
       return out;
@@ -1513,6 +1630,19 @@ export class GameRenderer {
       for (let j = 0; j < 3; j++) {
         const k = (this.time * 1.5 + j / 3) % 1;
         st.circle(hx, hy, 40 + (1 - k) * 200).stroke({ width: 3, color: 0xfff3b0, alpha: 0.5 * k });
+      }
+    }
+    if (s.feast) {
+      for (let k = 0; k < 4; k++) {
+        const ang = this.time * 4 + (k * Math.PI) / 2;
+        st.star(hx + Math.cos(ang) * headR * 1.7, hy + Math.sin(ang) * headR * 1.7, 4, 8, 3.5).fill(0xffe066).stroke({ width: 1.5, color: INK });
+      }
+      for (let i = 0; i < n; i += 5) if (Math.random() < 0.15) this.spawnParticle(s.segs[i * 2], s.segs[i * 2 + 1], Math.random() < 0.5 ? 0xffe066 : 0x7dff5a, 40, 0.5, 0.45);
+    }
+    if (s.yuck) {
+      for (let k = 0; k < 3; k++) {
+        const kk = (this.time * 0.9 + k / 3) % 1;
+        st.circle(hx + Math.sin(this.time * 3 + k * 2) * headR * 0.8, hy - headR * (0.8 + kk * 1.8), 3 + kk * 5).fill({ color: 0xb8d870, alpha: 0.8 * (1 - kk) }).stroke({ width: 1.5, color: INK, alpha: 0.6 * (1 - kk) });
       }
     }
     if (s.ringFast) {

@@ -2,8 +2,8 @@
 import { Simulation, pointInPoly } from '../src/shared/sim';
 import { botThink } from '../src/shared/bot';
 import { CONFIG } from '../src/shared/config';
-import { beats, CYCLE, SPECIES } from '../src/shared/species';
-import { dmgMult } from '../src/shared/combat';
+import { beats, CYCLE, SPECIAL_FOODS, SPECIES } from '../src/shared/species';
+import { biteOf, dmgMult } from '../src/shared/combat';
 import { emptyCommand } from '../src/shared/types';
 
 let failed = 0;
@@ -27,6 +27,7 @@ function check(name: string, ok: boolean, info = '') {
   p.hunter = true;
   p.lives = 9999;
   let maxLen = 0;
+  let gemsEaten = 0, likes = 0, yucks = 0;
   let nan = false, rings = 0, crushes = 0, deaths = 0, molts = 0, skills = 0, cuts = 0, crits = 0, playerDeaths = 0, maxStage = 1, ended = false;
   const enemies = new Set<string>();
   const ticks = CONFIG.tickRate * (CONFIG.roundTime + 2);
@@ -46,6 +47,9 @@ function check(name: string, ok: boolean, info = '') {
       if (e.type === 'hit' && (e.kind === 'crit' || e.kind === 'rage')) crits++;
       if (e.type === 'enemyStart') enemies.add(e.kind);
       if (e.type === 'end') ended = true;
+      if (e.type === 'eat' && e.gem !== undefined) gemsEaten++;
+      if (e.type === 'eat' && e.taste === 1) likes++;
+      if (e.type === 'eat' && e.taste === -1) yucks++;
     }
     for (const s of sim.snakes) {
       if (s.alive && !(Number.isFinite(s.x) && Number.isFinite(s.y))) nan = true;
@@ -62,6 +66,7 @@ function check(name: string, ok: boolean, info = '') {
   check('천적이 여러 종 나타남', enemies.size >= 4, [...enemies].join(', '));
   check('꼬리 급소·역습이 일어남', crits > 0, `${crits}회`);
   check('고리가 만들어짐', rings > 0, `고리 ${rings}회, 압착 처치 ${crushes}`);
+  check('보석·좋아하는 먹이를 먹음', gemsEaten > 30 && likes > 5, `보석 ${gemsEaten}, 좋아함 ${likes}, 싫어함 ${yucks}`);
   check('먹이 수가 유지됨', sim.foods.length > CONFIG.foodCount * 0.8 && sim.foods.length < 6000, `먹이 ${sim.foods.length}`);
   check('틱당 처리 시간 < 2ms', ms / ticks < 2, `${(ms / ticks).toFixed(3)}ms/틱`);
   console.log(`      (참고: 죽음 ${deaths}, 플레이어 사망 ${playerDeaths}, 최대 길이 ${maxLen}, 맵 ${sim.map.theme})`);
@@ -72,7 +77,7 @@ function check(name: string, ok: boolean, info = '') {
   const hunt3 = { stage: 3, lineage: 'hunt' as const, isBoss: false };
   const armor3 = { stage: 3, lineage: 'armor' as const, isBoss: false };
   const swarm2 = { stage: 2, lineage: 'swarm' as const, isBoss: false };
-  check('같은 단계 상성 유리 1.25배 / 불리 0.8배', Math.abs(dmgMult(armor3, hunt3) - CONFIG.favorMul) < 1e-9 && Math.abs(dmgMult(hunt3, armor3) - CONFIG.unfavorMul) < 1e-9);
+  check(`같은 단계 상성 유리 ${CONFIG.favorMul}배 / 불리 ${CONFIG.unfavorMul}배`, Math.abs(dmgMult(armor3, hunt3) - CONFIG.favorMul) < 1e-9 && Math.abs(dmgMult(hunt3, armor3) - CONFIG.unfavorMul) < 1e-9);
   check('단계가 높으면 더 아프게', dmgMult({ stage: 4, lineage: 'swarm', isBoss: false }, swarm2) > dmgMult(swarm2, { stage: 4, lineage: 'swarm', isBoss: false }));
 }
 
@@ -138,6 +143,57 @@ function duel(attacker: 'hunt' | 'armor', defender: 'hunt' | 'armor', seed: numb
   p.invulnT = 0;
   sim.kill(p, -1, 'bite');
   check('목숨을 다 잃으면 판 끝', p.lives === 0 && sim.state === 'ended');
+}
+
+// 2-5) 보석: 능력치가 오르고 체력·물기·속도·기술에 반영, 쓰러지면 절반을 떨어뜨림
+{
+  const sim = new Simulation(31);
+  const p = sim.snakes[0];
+  (sim as any).setForm(p, 3, 'hunt');
+  (sim as any).spawnAt(p, 0, 0, 0, 60);
+  (sim as any).fullHeal(p);
+  const hp0 = p.maxHp, bite0 = biteOf(p), cd0 = sim.skillCdMax(p);
+  for (const k of [0, 0, 0, 1, 1, 3]) (sim as any).eatGem(p, { x: 0, y: 0, r: 14, ep: 3, kind: 3, sub: k, life: Infinity });
+  check('보석으로 능력치 레벨이 오름', p.st.join() === '3,2,0,1', p.st.join());
+  check('체력 보석 → 최대 체력↑', p.maxHp > hp0 * 1.15, `${hp0} → ${p.maxHp}`);
+  check('공격 보석 → 물기 피해↑', biteOf(p) > bite0 * 1.1, `${bite0.toFixed(1)} → ${biteOf(p).toFixed(1)}`);
+  check('기술 보석 → 재사용 시간↓', sim.skillCdMax(p) < cd0, `${cd0.toFixed(2)} → ${sim.skillCdMax(p).toFixed(2)}`);
+  p.st = [CONFIG.statMax, 0, 0, 0];
+  (sim as any).eatGem(p, { x: 0, y: 0, r: 14, ep: 3, kind: 3, sub: 0, life: Infinity });
+  check('능력치는 최대 레벨까지', p.st[0] === CONFIG.statMax);
+  p.st = [4, 2, 0, 2];
+  const before = sim.foods.filter((f) => f.kind === 3).length;
+  sim.kill(p, -1, 'bite');
+  const dropped = sim.foods.filter((f) => f.kind === 3).length - before;
+  check('쓰러지면 보석 절반을 떨어뜨림', dropped === 4 && p.st.reduce((a, b) => a + b, 0) === 4, `떨어뜨림 ${dropped}, 남은 레벨 ${p.st.join()}`);
+}
+
+// 2-6) 특별 먹이: 좋아하면 폭풍 성장, 싫어하면 느려짐, 그 외엔 보통
+{
+  const sim = new Simulation(32);
+  const p = sim.snakes[0];
+  (sim as any).setForm(p, 3, 'swarm');
+  (sim as any).spawnAt(p, 0, 0, 0, 60);
+  (sim as any).fullHeal(p);
+  const honey = SPECIAL_FOODS.findIndex((f) => f.like === 'swarm');
+  const shroom = SPECIAL_FOODS.findIndex((f) => f.hate === 'swarm');
+  const seg0 = p.segCount, g0 = p.gauge;
+  (sim as any).eatSpecial(p, { x: 0, y: 0, r: 17, ep: 6, kind: 4, sub: honey, life: Infinity });
+  check('좋아하는 먹이 → 폭풍 성장', p.segCount >= seg0 + CONFIG.likeSegs && p.gauge >= g0 + CONFIG.likeEP && p.feastT > 0, `${seg0} → ${p.segCount}마디`);
+  const speedOf = () => {
+    const x0 = p.x;
+    p.cmd = emptyCommand(0);
+    p.slowT = 0;
+    for (let i = 0; i < 30; i++) sim.step();
+    return p.x - x0;
+  };
+  (sim as any).spawnAt(p, 0, 0, 0, 60);
+  const normal = speedOf();
+  (sim as any).spawnAt(p, 0, 0, 0, 60);
+  (sim as any).eatSpecial(p, { x: 0, y: 0, r: 17, ep: 6, kind: 4, sub: shroom, life: Infinity });
+  const slow = speedOf();
+  check('싫어하는 먹이 → 느려짐', p.yuckT > 0 && slow < normal * 0.75, `${normal.toFixed(0)} → ${slow.toFixed(0)}`);
+  check('갈래마다 좋아하는 것·싫어하는 것 하나씩', CYCLE.every((l) => SPECIAL_FOODS.filter((f) => f.like === l).length === 1 && SPECIAL_FOODS.filter((f) => f.hate === l).length === 1));
 }
 
 // 2-4) 길이 제한 없음(길수록 느리게 자라고 굵어짐)

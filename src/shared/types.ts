@@ -19,7 +19,7 @@ export type EnemyKind = 'bird' | 'frog' | 'rain' | 'centipede' | 'anteater' | 'c
 export type MapTheme = 'grass' | 'sand' | 'forest';
 
 export type GameEvent =
-  | { type: 'eat'; snake: number; x: number; y: number; big: boolean }
+  | { type: 'eat'; snake: number; x: number; y: number; big: boolean; gem?: number; lv?: number; special?: number; taste?: number }
   | { type: 'death'; snake: number; x: number; y: number; by: number; cause: DeathCause; enemy?: EnemyKind }
   | { type: 'ring'; snake: number; cx: number; cy: number; trapped: number }
   | { type: 'crush'; snake: number; cx: number; cy: number; count: number }
@@ -78,6 +78,8 @@ export interface SnakeView {
   dash: boolean;
   magnet: boolean;
   ringFast: boolean;
+  feast: boolean; // 좋아하는 먹이로 폭풍 성장 중
+  yuck: boolean; // 싫어하는 먹이로 느려짐
 }
 
 export interface Card {
@@ -103,6 +105,7 @@ export interface PlayerView {
   captured: number; // 채집망에 갇혀 남은 시간(초), 0이면 아님
   rank: number;
   total: number;
+  stats: number[]; // 보석 능력치 레벨: 체력·공격·속도·기술
 }
 
 export interface MapView {
@@ -148,7 +151,7 @@ export interface Snapshot {
   tick: number;
   time: number; // 시뮬레이션 시간(초)
   snakes: SnakeView[];
-  foods: Float32Array; // x, y, r, kind(0 보통 1 큰것 2 잔해)
+  foods: Float32Array; // x, y, r, kind(0 보통 1 큰것 2 잔해 3 보석 4 특별), sub(보석 능력치 / 특별 먹이 번호)
   rings: RingView[];
   zones: ZoneView[];
   projs: ProjView[];

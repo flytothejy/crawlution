@@ -6,6 +6,7 @@ export interface Fighter {
   stage: number;
   lineage: Lineage;
   isBoss: boolean;
+  st?: number[]; // 보석 능력치 레벨(공격은 [1])
 }
 
 /** a가 b를 칠 때 피해 배수(단계 차이 × 상성) */
@@ -29,5 +30,5 @@ export function relation(me: Fighter, other: Fighter): -1 | 0 | 1 {
 
 export function biteOf(a: Fighter): number {
   if (a.isBoss) return CONFIG.bossBite;
-  return CONFIG.biteDamage[a.stage] * LINEAGE[a.lineage].biteMul;
+  return CONFIG.biteDamage[a.stage] * LINEAGE[a.lineage].biteMul * (1 + CONFIG.statAtk * (a.st?.[1] ?? 0));
 }

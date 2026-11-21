@@ -1,12 +1,13 @@
 // 시작점: 화면·조작·시뮬레이션 호스트를 연결하고, 받은 상태를 보간해서 그린다.
 import './fonts.css';
 import { CONFIG } from '../shared/config';
-import { CYCLE, LINEAGE, SPECIES_BY_ID, type Lineage, type Species } from '../shared/species';
+import { CYCLE, LINEAGE, SPECIAL_FOODS, SPECIES_BY_ID, STATS, type Lineage, type Species } from '../shared/species';
 import { relation } from '../shared/combat';
 import type { Card, EnemyKind, EnemyView, Snapshot, SnakeView } from '../shared/types';
 import { createHost, type SimHost } from './host';
 import { Input } from './input';
 import { GameRenderer, type Frame, type FrameSnake } from './renderer';
+import { Sfx } from './sfx';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
@@ -42,6 +43,8 @@ const ENEMY: Record<EnemyKind, { name: string; icon: string; tip: string; c1: st
 };
 
 const renderer = new GameRenderer();
+const sfx = new Sfx();
+let prevStats = '';
 let host: SimHost | null = null;
 let input: Input;
 
@@ -135,6 +138,7 @@ function onSnap(s: Snapshot) {
   for (const sn of s.snakes) byId.set(sn.id, sn);
   renderer.handleEvents(s.events, byId, s.playerId);
   if (!playing) return;
+  playSounds(s, byId);
   for (const e of s.events) {
     if (e.type === 'enemyWarn') {
       const E = ENEMY[e.kind];
@@ -175,6 +179,77 @@ function onSnap(s: Snapshot) {
     if (e.type === 'end') {
       endAt = performance.now() + (e.timeUp ? 1500 : 1300);
       if (e.timeUp) banner(`⏱ 시간 끝! ${e.rank}등`, '#ffd23f', '#f08a12', 1800);
+    }
+  }
+}
+
+/** 사건 → 효과음·진동. 나와 관련된 것은 크게, 근처의 다른 곤충 기술은 작게 */
+function playSounds(s: Snapshot, byId: Map<number, SnakeView>) {
+  const me = s.playerId;
+  const cam = renderer.camera;
+  const W = renderer.app.screen.width / cam.zoom, H = renderer.app.screen.height / cam.zoom;
+  const near = (x: number, y: number) => Math.abs(x - cam.x) < W * 0.6 && Math.abs(y - cam.y) < H * 0.6;
+  for (const e of s.events) {
+    switch (e.type) {
+      case 'eat':
+        if (e.snake !== me) break;
+        if (e.gem !== undefined) (sfx.play('gem'), sfx.buzz(15));
+        else if (e.special !== undefined) {
+          if (e.taste === 1) (sfx.play('like'), sfx.buzz([25, 30, 25, 30, 60]));
+          else if (e.taste === -1) (sfx.play('yuck'), sfx.buzz(140));
+          else sfx.play('eatBig');
+        } else sfx.play(e.big ? 'eatBig' : 'eat');
+        break;
+      case 'hit': {
+        if (e.by === me && e.snake !== me) {
+          if (e.blocked) sfx.play('block', 0.6);
+          else if (e.kind === 'crit' || e.kind === 'rage') (sfx.play('crit'), sfx.buzz(45));
+          else if (e.dmg >= 25) (sfx.play('hitBig'), sfx.buzz(14));
+          else if (e.dmg > 0) sfx.play('hit');
+        } else if (e.snake === me) {
+          if (e.blocked) sfx.play('block');
+          else if (e.dmg > 0) {
+            const mh = byId.get(me)?.maxHp ?? 100;
+            if (e.dmg >= mh * 0.12 || e.kind === 'crit' || e.kind === 'rage') (sfx.play('hurtBig'), sfx.buzz(80));
+            else (sfx.play('hurt'), sfx.buzz(25));
+          }
+        }
+        break;
+      }
+      case 'skill':
+        if (e.snake === me) (sfx.play('skill'), sfx.buzz(30));
+        else if (near(e.x, e.y)) sfx.play('skill', 0.25);
+        break;
+      case 'molt':
+        if (e.snake === me) (sfx.play('molt'), sfx.buzz([30, 40, 90]));
+        break;
+      case 'ring':
+        if (e.snake === me) sfx.play('ring');
+        break;
+      case 'death':
+        if (e.by === me && e.snake !== me) {
+          if (e.cause === 'crush') (sfx.play('crush'), sfx.buzz([60, 30, 140]));
+          else (sfx.play('kill'), sfx.buzz(45));
+        }
+        break;
+      case 'enemyWarn':
+        sfx.play('warn');
+        sfx.buzz([90, 60, 90, 60, 90]);
+        break;
+      case 'lifeLost':
+        sfx.play('lifeLost');
+        sfx.buzz([160, 80, 160]);
+        break;
+      case 'respawn':
+        if (e.snake === me) sfx.play('respawn');
+        break;
+      case 'captured':
+        if (e.snake === me) (sfx.play('captured'), sfx.buzz(260));
+        break;
+      case 'end':
+        sfx.play(e.rank <= 3 ? 'win' : 'lose');
+        sfx.buzz(e.rank === 1 ? [80, 60, 80, 60, 200] : 120);
+        break;
     }
   }
 }
@@ -323,7 +398,9 @@ function statBars(l: Lineage) {
     ['✨', L.skillMul / L.cdMul],
   ] as const;
   const bar = ([ic, x]: readonly [string, number]) => `<span><em>${ic}</em><i><b style="width:${Math.max(15, Math.min(100, ((x - 0.7) / 0.6) * 100))}%"></b></i></span>`;
-  return `<div class="stats">${v.map(bar).join('')}</div><div class="trait">${L.trait}</div>`;
+  const lk = SPECIAL_FOODS.find((f) => f.like === l), ht = SPECIAL_FOODS.find((f) => f.hate === l);
+  const tst = lk && ht ? `<div class="tst"><span class="lk">♥${lk.icon}</span><span class="ht">✖${ht.icon}</span></div>` : '';
+  return `<div class="stats">${v.map(bar).join('')}</div><div class="trait">${L.trait}</div>${tst}`;
 }
 
 function cardHtml(c: Card, i: number, best: boolean) {
@@ -365,6 +442,7 @@ function updateCards(latest: Snapshot) {
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      sfx.play('click');
       input.molt(Number(el.dataset.i));
     }),
   );
@@ -411,7 +489,25 @@ function updateHud(latest: Snapshot) {
   } else rs.classList.add('hidden');
   $('hStars').textContent = p.mastery ? '★'.repeat(p.mastery) : '';
   $('hLen').innerHTML = `${me.length}<small> 마디</small>`;
-  $('hSc').textContent = `점수 ${me.score} · 처치 ${me.kills} · 압착 ${me.crushes}`;
+  const stKey = p.stats.join();
+  const sc = $('hSc');
+  let fresh = false;
+  if (!sc.querySelector('.gm')) {
+    sc.innerHTML = `<span class="pt"></span>${STATS.map((st, i) => `<span class="gm" data-i="${i}" style="--c:${hex(st.color)}"></span>`).join('')}`;
+    fresh = true;
+  }
+  sc.querySelector<HTMLElement>('.pt')!.textContent = `점수 ${me.score}`;
+  if (stKey !== prevStats || fresh) {
+    const old = prevStats && !fresh ? prevStats.split(',').map(Number) : [];
+    sc.querySelectorAll<HTMLElement>('.gm').forEach((el, i) => {
+      const lv = p.stats[i] ?? 0;
+      el.textContent = `${STATS[i].icon}${lv}`;
+      el.classList.toggle('z', lv === 0);
+      el.classList.toggle('max', lv >= CONFIG.statMax);
+      if (old.length && lv > (old[i] ?? 0)) el.animate([{ transform: 'scale(1.9)' }, { transform: 'scale(1)' }], { duration: 400, easing: 'cubic-bezier(0.2, 1.6, 0.4, 1)' });
+    });
+    prevStats = stKey;
+  }
 
   // 진화 게이지
   const g = $('gauge');
@@ -440,6 +536,7 @@ function updateHud(latest: Snapshot) {
     const ready = p.skillCd <= 0;
     btn.classList.toggle('ready', ready);
     btn.classList.toggle('cooling', !ready);
+    if (ready && !skillReady && playing && me.alive) sfx.play('ready');
     if (ready && !skillReady) btn.animate([{ transform: 'scale(0.75)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], { duration: 350, easing: 'ease-out' });
     skillReady = ready;
     btn.querySelector<HTMLElement>('.cd')!.textContent = ready ? '' : String(Math.ceil(p.skillCd));
@@ -576,7 +673,9 @@ function showResult(latest: Snapshot) {
 function startGame() {
   $('start').classList.add('hidden');
   $('over').classList.add('hidden');
-  for (const id of ['stats', 'board', 'minimap', 'gauge', 'dist', 'hpbar', 'lives', 'rage', 'timer']) $(id).classList.remove('hidden');
+  for (const id of ['stats', 'board', 'minimap', 'gauge', 'dist', 'hpbar', 'lives', 'rage', 'timer', 'sndBtn']) $(id).classList.remove('hidden');
+  sfx.unlock();
+  prevStats = '';
   $('feed').innerHTML = '';
   snaps.length = 0;
   offset = null;
@@ -616,11 +715,40 @@ async function boot() {
     : [['🖱️', '마우스로 방향 · <b>클릭/스페이스</b> 부스트'], ['🦷', '머리로 상대 몸을 <b>물어</b> 체력을 깎아요'], ['🛡️', '<b>Shift</b> 웅크리기: 느려지지만 피해 절반'], ['✨', '<b>E</b>/<b>오른쪽 클릭</b> 스킬 · <b>1·2·3</b> 탈피']];
   how.push(['🎯', '강한 상대는 <b>꼬리 끝</b>을 물면 급소! 맞으면 <b>역습</b> 게이지']);
   how.push(['🌀', '한 바퀴 감싸면 <b>압착!</b> 한 방에 끝 · 목숨 ❤️❤️❤️']);
+  how.push(['💎', '<b>보석</b>을 먹으면 체력·공격·속도·기술 레벨 UP']);
+  how.push(['🍯', '좋아하는 먹이 <b>♥ 폭풍 성장</b> · 싫어하는 먹이 ✖ 느려짐']);
   $('howto').innerHTML = how.map(([i, t]) => `<div><span class="i">${i}</span><span>${t}</span></div>`).join('');
   $('lineup').innerHTML = ['caterpillar', 'ladybug', 'mantis', 'bee', 'widow'].map((id) => `<img src="${renderer.portrait(id)}" alt="">`).join('');
   const best = bestScore();
   $('startBest').textContent = best > 0 ? `🏆 최고 점수 ${best}` : '';
   $('startBtn').onclick = startGame;
+  // 효과음·진동 켜기/끄기
+  const optSnd = $('optSnd'), optVib = $('optVib'), sndBtn = $('sndBtn');
+  const paint = () => {
+    optSnd.classList.toggle('off', !sfx.sound);
+    optVib.classList.toggle('off', !sfx.vibe || !sfx.canVibrate);
+    optVib.textContent = sfx.canVibrate ? '📳 진동' : '📳 진동(이 기기 미지원)';
+    sndBtn.textContent = sfx.sound ? '🔊' : '🔇';
+  };
+  paint();
+  optSnd.onclick = () => (sfx.setSound(!sfx.sound), paint(), sfx.play('click'));
+  optVib.onclick = () => {
+    if (!sfx.canVibrate) return;
+    sfx.setVibe(!sfx.vibe);
+    paint();
+    sfx.buzz(40);
+  };
+  sndBtn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    sfx.setSound(!sfx.sound);
+    paint();
+    sfx.play('click');
+  });
+  // 모바일은 사용자가 화면을 눌러야 소리를 낼 수 있다
+  const unlock = () => sfx.unlock();
+  document.addEventListener('pointerdown', unlock, { passive: true });
+  document.addEventListener('keydown', unlock);
   $('againBtn').onclick = startGame;
   document.addEventListener('visibilitychange', () => host?.pause(document.hidden));
 

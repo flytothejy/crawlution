@@ -164,7 +164,7 @@
       #knob { position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #fff, #cfe8b8); border: 3px solid var(--ink); box-shadow: 0 4px 0 rgba(0, 0, 0, 0.3); transform: translate(-50%, -50%); }
 
       /* 시작·결과 화면 */
-      .overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; overflow: hidden auto;
+      .overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: safe center; padding: 20px; overflow: hidden auto;
         background: radial-gradient(circle at 50% 35%, rgba(70, 120, 40, 0.55), rgba(10, 25, 8, 0.88)); backdrop-filter: blur(4px); }
       .rays { position: absolute; left: 50%; top: 30%; width: 900px; height: 900px; margin: -450px 0 0 -450px; pointer-events: none; opacity: 0.16;
         background: repeating-conic-gradient(#fff 0 8deg, transparent 8deg 22deg); border-radius: 50%; mask: radial-gradient(circle, #000 15%, transparent 62%); -webkit-mask: radial-gradient(circle, #000 15%, transparent 62%); animation: spin 30s linear infinite; }
@@ -254,30 +254,44 @@
       #board .row .v { width: 40px; text-align: right; }
       #board .sep { text-align: center; line-height: 8px; opacity: 0.6; }
       #over.mid .rtitle { --bc: #8ad0ff; --bc2: #3a7ad8; }
-      /* 작은 진화 카드(왼쪽 아래) */
-      #cards { left: 8px !important; transform: none !important; bottom: calc(10px + env(safe-area-inset-bottom)) !important; width: min(52vw, 240px) !important; text-align: left !important; }
-      body.touch #cards { bottom: calc(12px + env(safe-area-inset-bottom)) !important; }
-      #cards .ctitle { font-size: 15px !important; margin-bottom: 4px !important; }
-      #cards .crow { flex-direction: column !important; gap: 5px !important; align-items: stretch !important; }
-      #cards .mcard { display: flex; align-items: center; gap: 6px; padding: 3px 8px 3px 4px !important; border-radius: 12px; border-top: 3px solid var(--ink); border-left: 7px solid var(--c); box-shadow: 0 4px 0 var(--ink) !important; animation-name: cardSlide !important; text-align: left; }
-      @keyframes cardSlide { from { transform: translateX(-120%); opacity: 0; } }
-      #cards .mcard .pic { width: 46px; height: 46px !important; flex: none; margin: 0; background: radial-gradient(circle, color-mix(in srgb, var(--c) 35%, #fff) 0 60%, transparent 62%); }
-      #cards .mcard .pic img { height: 50px !important; }
-      #cards .mcard .tx { min-width: 0; }
-      #cards .mcard .nm { font-size: 14px !important; margin: 0 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      #cards .mcard .sk { font-size: 10.5px !important; padding: 0 6px !important; margin: 1px 0 !important; }
-      #cards .mcard .odds { justify-content: flex-start !important; font-size: 11px !important; gap: 3px !important; }
-      #cards .mcard .odds span { padding: 0 4px !important; border-width: 1.5px !important; }
-      #cards .mcard .odds .up { color: #b8860b; border-color: #e0b030; background: #fff6d0; }
-      #cards .mcard .key { position: static !important; flex: none; }
-      #cards .mcard .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 6px; margin: 2px 0 1px; }
+      /* 진화 카드: 화면 위쪽 가로 3장 */
+      #cards { left: 50%; transform: translateX(-50%); top: calc(6px + env(safe-area-inset-top)); bottom: auto !important; width: min(98vw, 540px); text-align: center; z-index: 6; }
+      body.touch #cards { bottom: auto !important; width: min(98vw, 540px); }
+      body:not(.touch) #cards { width: min(98vw, 640px); }
+      #cards .ctitle { font-size: 15px; margin: 0 0 4px; padding: 1px 12px 2px; border-radius: 10px; background: rgba(20, 34, 14, 0.72); }
+      #cards .crow { display: flex; flex-direction: row; gap: 6px; align-items: stretch; }
+      #cards .mcard { display: flex; flex-direction: column; align-items: center; padding: 0 4px 5px; border-radius: 13px; border-top: 7px solid var(--c); box-shadow: 0 4px 0 var(--ink), 0 8px 14px rgba(0, 0, 0, 0.35); animation-name: cardDrop; }
+      @keyframes cardDrop { from { transform: translateY(-130%) rotate(-3deg); opacity: 0; } }
+      #cards .mcard:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--ink); }
+      #cards .mcard .pic { width: 100%; height: 46px; margin: 1px 0 0; background: radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--c) 32%, #fff) 0 22px, transparent 23px); }
+      #cards .mcard .pic img { height: 52px; }
+      #cards .mcard .tx { width: 100%; min-width: 0; }
+      #cards .mcard .nm { font-size: 14px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #cards .mcard .sk { font-size: 10.5px; padding: 0 6px; margin: 1px 0 3px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #cards .mcard .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 5px; margin: 0 2px; }
       #cards .mcard .stats span { display: flex; align-items: center; gap: 2px; font-size: 9px; }
       #cards .mcard .stats em { font-style: normal; width: 12px; }
       #cards .mcard .stats i { flex: 1; height: 5px; border-radius: 3px; background: rgba(27, 42, 18, 0.15); overflow: hidden; }
       #cards .mcard .stats b { display: block; height: 100%; background: var(--c); }
-      #cards .mcard .trait { font-size: 10px; color: #6b5a2a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      #cards .mcard.upg { background: linear-gradient(90deg, #fff6d0, #ffe9a0); }
-      #cards .mcard.best::after { top: 6px !important; right: -30px !important; font-size: 10px !important; }
+      #cards .mcard .trait { font-size: 9.5px; line-height: 1.2; color: #6b5a2a; margin: 3px 1px 0; min-height: 23px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      #cards .mcard .tst { font-size: 10px; margin-top: 1px; white-space: nowrap; }
+      #cards .mcard .tst .lk { color: #2e8a20; }
+      #cards .mcard .tst .ht { color: #c4301f; margin-left: 4px; }
+      #cards .mcard .odds { justify-content: center; font-size: 10.5px; gap: 3px; margin-top: 2px; }
+      #cards .mcard .odds span { padding: 0 4px; border-width: 1.5px; }
+      #cards .mcard .odds .up { color: #b8860b; border-color: #e0b030; background: #fff6d0; }
+      #cards .mcard .key { left: 4px; top: 4px; }
+      #cards .mcard.upg { background: linear-gradient(180deg, #fff6d0, #ffe9a0); }
+      #cards .mcard.best::after { top: 7px; right: -30px; font-size: 10px; }
+      /* 보석 능력치 칩 */
+      #stats .gm { display: inline-flex; align-items: center; margin-left: 3px; padding: 0 4px; height: 15px; border-radius: 8px; font-size: 11px; line-height: 15px; background: color-mix(in srgb, var(--c) 55%, rgba(0, 0, 0, 0.35)); border: 1.5px solid var(--ink); }
+      #stats .gm.z { opacity: 0.45; }
+      #stats .gm.max { box-shadow: 0 0 6px var(--c); }
+      /* 소리 버튼 */
+      #sndBtn { position: fixed; left: 8px; bottom: calc(22px + env(safe-area-inset-bottom)); width: 38px; height: 38px; border-radius: 50%; border: 2.5px solid var(--ink); background: rgba(20, 34, 14, 0.6); color: #fff; font-size: 18px; display: grid; place-items: center; cursor: pointer; z-index: 7; touch-action: none; padding: 0; }
+      .opts { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
+      .opts button { font-size: 13.5px; padding: 5px 12px; border-radius: 12px; border: 2.5px solid var(--ink); background: #fff8dc; color: var(--ink); cursor: pointer; box-shadow: 0 3px 0 var(--ink); }
+      .opts button.off { background: #ddd; color: #777; text-decoration: line-through; }
       @media (max-width: 600px) {
         #timer { font-size: 15px; top: calc(156px + env(safe-area-inset-top)); left: auto; right: 10px; transform: none; padding: 1px 8px; width: 136px; text-align: center; }
         #minimap { top: calc(188px + env(safe-area-inset-top)) !important; }
@@ -288,8 +302,6 @@
         #board { width: 136px !important; font-size: 11px !important; }
         #board .row .v { width: 34px; }
         #board .row .li { display: none; }
-        #cards .mcard .pic { width: 40px; height: 40px !important; }
-        #cards .mcard .pic img { height: 44px !important; }
       }
       .hidden { display: none !important; }
       #hostTag { position: fixed; left: 8px; bottom: calc(6px + env(safe-area-inset-bottom)); font-size: 10px; opacity: 0.4; pointer-events: none; font-family: system-ui; }
@@ -307,10 +319,6 @@
         #minimap { top: calc(144px + env(safe-area-inset-top)); width: 84px; height: 84px; }
         #dist { top: calc(236px + env(safe-area-inset-top)); width: 128px; }
         #feed { top: calc(150px + env(safe-area-inset-top)); font-size: 11px; }
-        #cards .ctitle { font-size: 16px; }
-        .mcard .nm { font-size: 15px; }
-        .mcard .pic { height: 56px; }
-        .mcard .pic img { height: 62px; }
       }
     </style>
   </head>
@@ -341,6 +349,7 @@
     <div id="skillBtn" class="none"></div>
     <div id="sneakBtn" class="rbtn"><span class="ic">🛡️</span><span class="t ol-thin">웅크리기</span></div>
     <div id="boostBtn" class="rbtn"><span class="ic">⚡</span><span class="t ol-thin">부스트</span></div>
+    <button id="sndBtn" class="hidden" aria-label="소리">🔊</button>
     <div id="hostTag"></div>
 
     <div id="start" class="overlay">
@@ -353,6 +362,7 @@
         <div class="legend"><span><i style="border-color:#7dff5a"></i>먹을 수 있음</span><span><i style="border-color:#bbb"></i>비김</span><span><i style="border-color:#ff4a3a"></i>위험</span></div>
         <div class="how" id="howto"></div>
         <button class="gbtn pulse ol" id="startBtn">시작!</button>
+        <div class="opts"><button id="optSnd">🔊 효과음</button><button id="optVib">📳 진동</button></div>
         <div class="best" id="startBest"></div>
       </div>
     </div>

@@ -76,6 +76,27 @@ export const CONFIG = {
   bigFoodEP: 4,
   bigFoodRadius: 15,
   remainsRadius: 11,
+  // 보석(능력치 성장): ❤ 체력 · 🦷 공격 · ⚡ 속도 · ✨ 기술
+  gemCount: 36,
+  gemRadius: 14,
+  gemEP: 3,
+  statMax: 10,
+  statHp: 0.06, // 레벨마다 최대 체력 +6%
+  statAtk: 0.06, // 물기 피해 +6%
+  statSpd: 0.02, // 이동 속도 +2%
+  statSkl: 0.06, // 기술 피해 +6%
+  statCd: 0.025, // 기술 재사용 시간 -2.5%
+  gemDropMax: 6, // 쓰러지면 보석 레벨 절반(최대 이만큼)을 떨어뜨린다
+  // 특별 먹이: 좋아하는 갈래는 폭풍 성장, 싫어하는 갈래는 느려짐
+  specialCount: 30,
+  specialRadius: 17,
+  specialEP: 6, // 보통 갈래
+  likeEP: 30, // 좋아하는 갈래
+  likeSegs: 8, // 좋아하면 바로 늘어나는 마디
+  likeHeal: 0.3,
+  feastTime: 3, // 폭풍 성장 연출 시간
+  yuckTime: 4,
+  yuckMul: 0.6, // 싫어하면 이 배율로 느려짐
 
   // 감싸기
   loopMinIndex: 12,
@@ -152,6 +173,6 @@ export function radiusFor(stage: number, lineageRadius = 1, segCount: number = C
   return CONFIG.stageRadius[Math.max(1, Math.min(5, stage))] * lineageRadius * (1 + thick);
 }
 
-export function maxHpFor(stage: number, segCount: number, mastery = 0, hpMul = 1): number {
-  return Math.round((CONFIG.stageHp[Math.max(1, Math.min(5, stage))] + segCount * CONFIG.hpPerSeg) * (1 + CONFIG.masteryHp * mastery) * hpMul);
+export function maxHpFor(stage: number, segCount: number, mastery = 0, hpMul = 1, hpLv = 0): number {
+  return Math.round((CONFIG.stageHp[Math.max(1, Math.min(5, stage))] + segCount * CONFIG.hpPerSeg) * (1 + CONFIG.masteryHp * mastery) * hpMul * (1 + CONFIG.statHp * hpLv));
 }

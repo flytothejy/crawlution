@@ -1,6 +1,6 @@
 // 봇 AI. 봇도 플레이어와 똑같이 '명령'만 만든다 → 나중에 멀티에서 빈자리를 그대로 채운다.
 import { CONFIG } from './config';
-import type { Part } from './species';
+import { taste, type Part } from './species';
 import type { Command } from './types';
 import type { Simulation, Snake } from './sim';
 
@@ -89,7 +89,15 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
       if (d2 > 450 * 450) continue;
       const a = Math.atan2(dy, dx) - s.angle;
       const front = 0.6 + 0.4 * Math.cos(a);
-      const score = (f.ep * front) / (Math.sqrt(d2) + 40);
+      // 보석은 귀하고, 좋아하는 특별 먹이는 아주 귀하다. 싫어하는 먹이는 피한다
+      let v = f.ep;
+      if (f.kind === 3) v = s.st[f.sub] < CONFIG.statMax ? 10 : 2;
+      else if (f.kind === 4) {
+        const t = taste(s.lineage, f.sub);
+        if (t < 0) continue;
+        v = t > 0 ? 45 : f.ep;
+      }
+      const score = (v * front) / (Math.sqrt(d2) + 40);
       if (score > bestScore) ((bestScore = score), (fx = f.x), (fy = f.y));
     }
     if (bestScore > 0) desired = Math.atan2(fy - s.y, fx - s.x);
