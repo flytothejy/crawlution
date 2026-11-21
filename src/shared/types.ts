@@ -166,9 +166,18 @@ export interface Snapshot {
   lineageCount: Record<string, number>;
 }
 
+/** 판 설정 */
+export interface GameOpts {
+  power: number; // 내 곤충 세기 배율(아들 모드 5): 주는 피해 ×power, 받는 피해 ÷power
+  bots: number; // 봇 수
+  map: MapTheme | 'random';
+}
+export const defaultOpts = (): GameOpts => ({ power: 1, bots: 20, map: 'random' });
+
 /** 화면 → 시뮬레이션 메시지 */
 export type HostIn =
-  | { type: 'start'; seed: number; playerName: string; startStage?: number }
+  | { type: 'start'; seed: number; playerName: string; startStage?: number; opts?: GameOpts }
+  | { type: 'opts'; opts: GameOpts }
   | { type: 'cmd'; cmd: Command }
   | { type: 'pause'; paused: boolean }
   | { type: 'stop' };

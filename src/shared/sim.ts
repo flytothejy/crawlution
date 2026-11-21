@@ -7,7 +7,7 @@ import { botThink, bossThink } from './bot';
 import { biteOf, dmgMult, relation } from './combat';
 import { Enemies } from './enemies';
 import { beats, CYCLE, LINEAGE, SPECIAL_FOODS, SPECIES_BY_ID, speciesFor, STATS, taste, type Lineage, type Part, type Species } from './species';
-import { emptyCommand, type Card, type Command, type DeathCause, type EnemyKind, type GameEvent, type HitKind, type MapTheme, type MapView, type RingView, type SnakeView, type Snapshot } from './types';
+import { defaultOpts, emptyCommand, type Card, type GameOpts, type Command, type DeathCause, type EnemyKind, type GameEvent, type HitKind, type MapTheme, type MapView, type RingView, type SnakeView, type Snapshot } from './types';
 
 export interface Snake {
   id: number;
@@ -177,10 +177,19 @@ export class Simulation {
   enemies: Enemies;
   private grid = new Map<number, number[]>();
 
-  constructor(seed: number, playerName = '나', startStage = 1, theme?: MapTheme) {
+  opts: GameOpts = defaultOpts();
+
+  constructor(seed: number, playerName = '나', startStage = 1, theme?: MapTheme, opts?: GameOpts) {
     this.rng = new Rng(seed);
     this.enemies = new Enemies(this);
+    if (opts) this.opts = { ...opts };
+    if (!theme && this.opts.map !== 'random') theme = this.opts.map;
     this.reset(playerName, startStage, theme);
+  }
+
+  /** 판 도중 바꿀 수 있는 설정(세기) */
+  setOpts(opts: GameOpts) {
+    this.opts = { ...this.opts, power: opts.power };
   }
 
   get time() {
@@ -210,7 +219,7 @@ export class Simulation {
     this.spawnAt(p, 0, 0, this.rng.range(0, Math.PI * 2), CONFIG.botStartSegs[st]);
     this.fullHeal(p);
     this.snakes.push(p);
-    for (let i = 0; i < CONFIG.botCount; i++) {
+    for (let i = 0; i < Math.max(1, Math.min(40, Math.round(this.opts.bots))); i++) {
       const b = this.makeSnake(i + 1, BOT_NAMES[i % BOT_NAMES.length], false);
       b.hunter = i % 2 === 0;
       this.snakes.push(b);
@@ -690,6 +699,12 @@ export class Simulation {
     }
     let d = amount;
     d *= LINEAGE[t.lineage].takenMul;
+    // 아들 모드: 내 곤충은 세게 때리고 적게 맞는다
+    const pw = this.opts.power;
+    if (pw !== 1) {
+      if (atk?.isPlayer && !t.isPlayer) d *= pw;
+      if (t.isPlayer && !atk?.isPlayer) d /= pw;
+    }
     if (t.sneaking && !t.isBoss) d *= CONFIG.guardMul;
     d = Math.max(1, Math.round(d));
     t.hp -= d;

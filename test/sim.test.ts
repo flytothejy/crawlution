@@ -196,6 +196,25 @@ function duel(attacker: 'hunt' | 'armor', defender: 'hunt' | 'armor', seed: numb
   check('갈래마다 좋아하는 것·싫어하는 것 하나씩', CYCLE.every((l) => SPECIAL_FOODS.filter((f) => f.like === l).length === 1 && SPECIAL_FOODS.filter((f) => f.hate === l).length === 1));
 }
 
+// 2-7) 아들 모드: 내 곤충 세기 5배(주는 피해 ×5, 받는 피해 ÷5)
+{
+  const hit = (power: number) => {
+    const sim = new Simulation(41, '나', 1, undefined, { power, bots: 4, map: 'grass' });
+    const p = sim.snakes[0], b = sim.snakes[1];
+    for (const s of [p, b]) {
+      (sim as any).setForm(s, 3, 'spider');
+      (sim as any).fullHeal(s);
+      s.invulnT = 0;
+    }
+    const dealt = sim.damage(b, 20, p.id, 'bite', b.x, b.y);
+    const taken = sim.damage(p, 20, b.id, 'bite', p.x, p.y);
+    return [dealt, taken, sim.snakes.length - 1];
+  };
+  const [d1, t1] = hit(1), [d5, t5, bots] = hit(5);
+  check('아들 모드: 주는 피해 5배·받는 피해 1/5', d5 === d1 * 5 && t5 === Math.round(t1 / 5), `주는 ${d1}→${d5}, 받는 ${t1}→${t5}`);
+  check('봇 수 설정', bots === 4, `${bots}마리`);
+}
+
 // 2-4) 길이 제한 없음(길수록 느리게 자라고 굵어짐)
 {
   const sim = new Simulation(10);

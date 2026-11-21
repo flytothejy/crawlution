@@ -8,6 +8,8 @@ import { createHost, type SimHost } from './host';
 import { Input } from './input';
 import { GameRenderer, type Frame, type FrameSnake } from './renderer';
 import { Sfx } from './sfx';
+import { loadSettings, saveSettings, SECTIONS, SON_POWER, type Settings } from './settings';
+import type { GameOpts } from '../shared/types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
@@ -44,6 +46,8 @@ const ENEMY: Record<EnemyKind, { name: string; icon: string; tip: string; c1: st
 
 const renderer = new GameRenderer();
 const sfx = new Sfx();
+let S: Settings = loadSettings();
+let settingsOpen = false;
 let prevStats = '';
 let host: SimHost | null = null;
 let input: Input;
@@ -459,7 +463,7 @@ function updateHud(latest: Snapshot) {
   if (hudSpecies !== me.species) {
     hudSpecies = me.species;
     stats.innerHTML = `<div class="pfw"><div class="pf" style="--c:${hex(L.color)}"><img src="${renderer.portrait(sp.id)}" alt=""></div><span class="lv badge">${me.stage}</span></div>
-      <div><div class="nm ol-thin">${LIN_ICON[me.lineage]} ${sp.name} <span class="stars" id="hStars"></span></div>
+      <div><div class="nm ol-thin">${LIN_ICON[me.lineage]} ${sp.name} <span class="stars" id="hStars"></span>${S.son ? `<span class="son">🦸×${SON_POWER}</span>` : ''}</div>
       <div class="len ol" id="hLen"></div><div class="sc ol-thin" id="hSc"></div></div>`;
   }
   const hpk = Math.max(0, Math.min(1, me.hp / Math.max(1, me.maxHp)));
@@ -673,7 +677,7 @@ function showResult(latest: Snapshot) {
 function startGame() {
   $('start').classList.add('hidden');
   $('over').classList.add('hidden');
-  for (const id of ['stats', 'board', 'minimap', 'gauge', 'dist', 'hpbar', 'lives', 'rage', 'timer', 'sndBtn']) $(id).classList.remove('hidden');
+  for (const id of ['stats', 'board', 'minimap', 'gauge', 'dist', 'hpbar', 'lives', 'rage', 'timer', 'setBtnG']) $(id).classList.remove('hidden');
   sfx.unlock();
   prevStats = '';
   $('feed').innerHTML = '';
@@ -695,10 +699,102 @@ function startGame() {
   } catch {
     /* 주소를 못 읽는 환경 */
   }
-  if (!host) host = createHost(seed, '나', stage, onSnap);
-  else host.start(seed, '나', stage);
+  if (!host) host = createHost(seed, '나', stage, onSnap, gameOpts());
+  else host.start(seed, '나', stage, gameOpts());
+  applySettings();
   playing = true;
   setTimeout(() => ($('hostTag').textContent = `sim: ${host?.kind}`), 1500);
+}
+
+// ---------- 설정 ----------
+function gameOpts(): GameOpts {
+  return { power: S.son ? SON_POWER : 1, bots: S.bots, map: S.map };
+}
+
+/** 설정을 화면·소리·시뮬레이션에 반영 */
+function applySettings() {
+  const b = document.body;
+  b.classList.toggle('lefty', S.hand === 'left');
+  b.style.setProperty('--bz', String({ s: 0.82, m: 1, l: 1.2 }[S.btnSize]));
+  sfx.setSound(S.sound);
+  sfx.setVolume(S.volume);
+  sfx.setVibe(S.vibe);
+  renderer.opts.shake = S.shake;
+  renderer.opts.labels = S.labels;
+  renderer.opts.numbers = S.numbers;
+  renderer.setQuality(S.quality === 'high');
+  if (playing) $('dist').classList.toggle('hidden', !S.dist);
+  host?.setOpts(gameOpts());
+  hudSpecies = ''; // 이름 옆 🦸 표시 갱신
+}
+
+function buildSettings() {
+  const box = $('setBody');
+  box.innerHTML = SECTIONS.map(
+    (sec) =>
+      `<div class="sh">${sec.title}</div>` +
+      sec.rows
+        .map((r) => {
+          let ctl = '';
+          if (r.kind === 'toggle') ctl = `<button class="tg" data-k="${r.key}"><i></i></button>`;
+          else if (r.kind === 'seg') ctl = `<div class="seg">${r.options.map(([v, t]) => `<button data-k="${r.key}" data-v="${v}">${t}</button>`).join('')}</div>`;
+          else ctl = `<input type="range" min="0" max="100" step="5" data-k="${r.key}">`;
+          const vib = r.key === 'vibe' && !sfx.canVibrate ? '<small>이 기기는 진동을 지원하지 않아요</small>' : '';
+          return `<div class="srow${'special' in r && r.special ? ' sp' : ''}${r.kind === 'seg' && r.options.length > 3 ? ' wide' : ''}"><span class="si">${r.icon}</span><div class="sl">${r.label}${r.desc ? `<small>${r.desc}</small>` : ''}${vib}</div>${ctl}</div>`;
+        })
+        .join(''),
+  ).join('');
+  const set = (k: keyof Settings, v: unknown) => {
+    (S as unknown as Record<string, unknown>)[k] = v;
+    saveSettings(S);
+    applySettings();
+    paintSettings();
+  };
+  box.querySelectorAll<HTMLButtonElement>('.tg').forEach((el) =>
+    (el.onclick = () => {
+      const k = el.dataset.k as keyof Settings;
+      set(k, !S[k]);
+      if (k === 'vibe' && S.vibe) sfx.buzz(60);
+      sfx.play('click');
+    }),
+  );
+  box.querySelectorAll<HTMLButtonElement>('.seg button').forEach((el) =>
+    (el.onclick = () => {
+      const k = el.dataset.k as keyof Settings;
+      const v = typeof S[k] === 'number' ? Number(el.dataset.v) : el.dataset.v;
+      set(k, v);
+      sfx.play('click');
+    }),
+  );
+  box.querySelectorAll<HTMLInputElement>('input[type=range]').forEach((el) => {
+    el.oninput = () => set(el.dataset.k as keyof Settings, Number(el.value) / 100);
+    el.onchange = () => sfx.play('gem');
+  });
+  paintSettings();
+}
+
+function paintSettings() {
+  const box = $('setBody');
+  box.querySelectorAll<HTMLElement>('.tg').forEach((el) => el.classList.toggle('on', !!S[el.dataset.k as keyof Settings]));
+  box.querySelectorAll<HTMLElement>('.seg button').forEach((el) => el.classList.toggle('on', String(S[el.dataset.k as keyof Settings]) === el.dataset.v));
+  box.querySelectorAll<HTMLInputElement>('input[type=range]').forEach((el) => (el.value = String(Math.round(Number(S[el.dataset.k as keyof Settings]) * 100))));
+}
+
+function openSettings() {
+  sfx.unlock();
+  settingsOpen = true;
+  paintSettings();
+  $('settings').classList.remove('hidden');
+  $('setNote').textContent = playing ? '⏸ 게임이 멈춰 있어요' : '';
+  input.resetHolds();
+  if (playing) host?.pause(true);
+}
+
+function closeSettings() {
+  settingsOpen = false;
+  $('settings').classList.add('hidden');
+  if (playing) host?.pause(document.hidden);
+  sfx.play('click');
 }
 
 async function boot() {
@@ -722,35 +818,25 @@ async function boot() {
   const best = bestScore();
   $('startBest').textContent = best > 0 ? `🏆 최고 점수 ${best}` : '';
   $('startBtn').onclick = startGame;
-  // 효과음·진동 켜기/끄기
-  const optSnd = $('optSnd'), optVib = $('optVib'), sndBtn = $('sndBtn');
-  const paint = () => {
-    optSnd.classList.toggle('off', !sfx.sound);
-    optVib.classList.toggle('off', !sfx.vibe || !sfx.canVibrate);
-    optVib.textContent = sfx.canVibrate ? '📳 진동' : '📳 진동(이 기기 미지원)';
-    sndBtn.textContent = sfx.sound ? '🔊' : '🔇';
-  };
-  paint();
-  optSnd.onclick = () => (sfx.setSound(!sfx.sound), paint(), sfx.play('click'));
-  optVib.onclick = () => {
-    if (!sfx.canVibrate) return;
-    sfx.setVibe(!sfx.vibe);
-    paint();
-    sfx.buzz(40);
-  };
-  sndBtn.addEventListener('pointerdown', (e) => {
+  // 설정
+  buildSettings();
+  applySettings();
+  for (const id of ['setBtn', 'setBtnO']) $(id).onclick = () => openSettings();
+  $('setBtnG').addEventListener('pointerdown', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    sfx.setSound(!sfx.sound);
-    paint();
-    sfx.play('click');
+    openSettings();
+  });
+  $('setClose').onclick = () => closeSettings();
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') (settingsOpen ? closeSettings() : playing && openSettings());
   });
   // 모바일은 사용자가 화면을 눌러야 소리를 낼 수 있다
   const unlock = () => sfx.unlock();
   document.addEventListener('pointerdown', unlock, { passive: true });
   document.addEventListener('keydown', unlock);
   $('againBtn').onclick = startGame;
-  document.addEventListener('visibilitychange', () => host?.pause(document.hidden));
+  document.addEventListener('visibilitychange', () => host?.pause(document.hidden || settingsOpen));
 
   renderer.app.ticker.add((tk) => {
     const dt = Math.min(0.05, tk.deltaMS / 1000);

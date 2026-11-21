@@ -33,12 +33,14 @@ function loop() {
 self.onmessage = (e: MessageEvent<HostIn>) => {
   const m = e.data;
   if (m.type === 'start') {
-    sim = new Simulation(m.seed, m.playerName, m.startStage ?? 1);
+    sim = new Simulation(m.seed, m.playerName, m.startStage ?? 1, undefined, m.opts);
     last = performance.now();
     acc = 0;
     paused = false;
     if (timer) clearInterval(timer);
     timer = setInterval(loop, 4);
+  } else if (m.type === 'opts') {
+    sim?.setOpts(m.opts);
   } else if (m.type === 'cmd') {
     sim?.setCommand(0, m.cmd);
   } else if (m.type === 'pause') {

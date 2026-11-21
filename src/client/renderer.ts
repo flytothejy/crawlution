@@ -168,6 +168,8 @@ export class GameRenderer {
   private shake = 0;
   private time = 0;
   private view = { x0: 0, x1: 0, y0: 0, y1: 0 };
+  /** 화면 설정 */
+  opts = { shake: true, labels: true, numbers: true };
 
   async init(parent: HTMLElement) {
     await this.app.init({
@@ -896,6 +898,7 @@ export class GameRenderer {
 
   /** 피해 숫자: 옆으로 튀며 솟았다가 떨어진다 */
   private dmgPop(x: number, y: number, dmg: number, color: number, size: number, bang: boolean) {
+    if (!this.opts.numbers) return;
     if (this.popups.length > 60) return;
     const t = new BitmapText({ text: bang ? `${dmg}!` : String(dmg), style: { fontFamily: 'dmg', fontSize: size } });
     t.tint = color;
@@ -910,6 +913,7 @@ export class GameRenderer {
 
   /** 내가 같은 상대를 연달아 때리면 콤보로 모아 보여 준다 */
   private comboHit(id: number, dmg: number, x: number, y: number) {
+    if (!this.opts.numbers) return;
     let c = this.combos.get(id);
     if (!c || c.life <= 0) {
       if (c) c.t.destroy();
@@ -1053,6 +1057,8 @@ export class GameRenderer {
     }
     this.shake *= Math.exp(-dt * 7);
     this.punch *= Math.exp(-dt * 9);
+    if (!this.opts.shake) this.shake = this.punch = 0;
+    this.labelLayer.visible = this.opts.labels;
     const z = this.zoom * (1 + this.punch);
     const sx = (Math.random() - 0.5) * this.shake, sy = (Math.random() - 0.5) * this.shake;
     this.world.scale.set(z);
@@ -1769,6 +1775,13 @@ export class GameRenderer {
       c.t.position.set(c.x, c.y - 70 / Math.max(0.6, this.zoom));
       c.t.alpha = Math.min(1, c.life / 0.3);
     }
+  }
+
+  /** 화질: 선명하게(기기 해상도, 최대 2배) / 가볍게(1배) */
+  setQuality(high: boolean) {
+    const r = high ? Math.min(window.devicePixelRatio || 1, 2) : 1;
+    if (this.app.renderer.resolution === r) return;
+    this.app.renderer.resize(window.innerWidth, window.innerHeight, r);
   }
 
   get camera() {

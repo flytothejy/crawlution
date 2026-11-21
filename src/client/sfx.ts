@@ -31,6 +31,7 @@ export class Sfx {
   private noiseBuf: AudioBuffer | null = null;
   private last = new Map<string, number>();
   sound = load(KEY_SND);
+  volume = 0.8;
   vibe = load(KEY_VIB);
   readonly canVibrate = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
 
@@ -42,7 +43,7 @@ export class Sfx {
         if (!AC) return;
         this.ctx = new AC();
         this.master = this.ctx.createGain();
-        this.master.gain.value = 0.55;
+        this.master.gain.value = 0.7 * this.volume;
         // 너무 큰 소리가 겹쳐도 찢어지지 않게
         const comp = this.ctx.createDynamicsCompressor();
         comp.threshold.value = -14;
@@ -63,6 +64,10 @@ export class Sfx {
     this.sound = on;
     save(KEY_SND, on);
     if (on) this.unlock();
+  }
+  setVolume(v: number) {
+    this.volume = Math.max(0, Math.min(1, v));
+    if (this.master) this.master.gain.value = 0.7 * this.volume;
   }
   setVibe(on: boolean) {
     this.vibe = on;
