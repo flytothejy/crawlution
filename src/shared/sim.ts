@@ -282,7 +282,7 @@ export class Simulation {
       return;
     }
     s.r = radiusFor(s.stage, LINEAGE[s.lineage].radiusMul, s.segCount);
-    s.maxHp = maxHpFor(s.stage, s.segCount, s.mastery);
+    s.maxHp = maxHpFor(s.stage, s.segCount, s.mastery, LINEAGE[s.lineage].hpMul);
     if (s.hp > s.maxHp) s.hp = s.maxHp;
   }
 
@@ -468,9 +468,15 @@ export class Simulation {
       return;
     }
     // 1) 봇·왕지네 생각 → 명령
+    // 봇은 3틱마다 한 번씩(서로 엇갈려) 생각한다 → 계산량 1/3
     for (const s of this.snakes) {
       if (!this.onField(s) || s.isPlayer) continue;
-      s.cmd = s.isBoss ? bossThink(this, s, dt) : botThink(this, s, dt);
+      if (s.isBoss) s.cmd = bossThink(this, s, dt);
+      else if ((this.tick + s.id) % 3 === 0) {
+        const c = botThink(this, s, dt * 3);
+        // 스킬·탈피 입력은 한 번만 들어가도록 순번만 넘긴다
+        s.cmd = c;
+      }
     }
     // 2) 명령 처리(스킬·탈피) + 상태 시간 + 이동
     for (const s of this.snakes) {
@@ -645,7 +651,7 @@ export class Simulation {
     s.totalEP += ep;
     s.gauge += ep;
     if (!s.isBoss) {
-      s.growth += (ep * CONFIG.stageGrowth[s.stage]) / (1 + s.segCount / CONFIG.growthSlowLen);
+      s.growth += (ep * CONFIG.stageGrowth[s.stage] * LINEAGE[s.lineage].growthMul) / (1 + s.segCount / CONFIG.growthSlowLen);
       while (s.growth >= 1) {
         s.growth -= 1;
         s.segCount++;
@@ -667,7 +673,7 @@ export class Simulation {
       return 0;
     }
     let d = amount;
-    if (t.lineage === 'armor') d *= CONFIG.armorTakenMul;
+    d *= LINEAGE[t.lineage].takenMul;
     if (t.sneaking && !t.isBoss) d *= CONFIG.guardMul;
     d = Math.max(1, Math.round(d));
     t.hp -= d;
@@ -736,13 +742,13 @@ export class Simulation {
 
   private castSkill(s: Snake) {
     const sp = s.species;
-    s.skillCd = sp.cd * (1 - CONFIG.masteryCdCut * Math.min(s.mastery, 4));
+    s.skillCd = sp.cd * LINEAGE[s.lineage].cdMul * (1 - CONFIG.masteryCdCut * Math.min(s.mastery, 4));
     this.events.push({ type: 'skill', snake: s.id, species: sp.id, x: s.x, y: s.y, angle: s.angle });
     for (const part of sp.parts) this.applyPart(s, part, s.x, s.y);
   }
 
   private skillDmg(s: Snake) {
-    return CONFIG.skillDamage[s.stage] * (1 + 0.08 * s.mastery);
+    return CONFIG.skillDamage[s.stage] * (1 + 0.08 * s.mastery) * LINEAGE[s.lineage].skillMul;
   }
 
   private applyPart(s: Snake, p: Part, cx: number, cy: number) {
@@ -864,7 +870,7 @@ export class Simulation {
     s.hurtT += dt;
     // 회복
     if (s.hurtT > CONFIG.regenDelay && s.hp < s.maxHp) {
-      const mul = s.lineage === 'swarm' ? CONFIG.swarmRegenMul : 1;
+      const mul = LINEAGE[s.lineage].regenMul;
       s.hp = Math.min(s.maxHp, s.hp + s.maxHp * CONFIG.regenRate * mul * dt);
     }
     // 물기 독
@@ -1381,7 +1387,7 @@ export class Simulation {
       events, playerId: this.playerId,
       player: {
         gauge: p.gauge, need: CONFIG.stageGauge[p.stage], cards: p.cards, skillCd: p.skillCd,
-        skillCdMax: p.species.cd * (1 - CONFIG.masteryCdCut * Math.min(p.mastery, 4)), mastery: p.mastery, path: p.history, molting: p.moltT > 0,
+        skillCdMax: p.species.cd * LINEAGE[p.lineage].cdMul * (1 - CONFIG.masteryCdCut * Math.min(p.mastery, 4)), mastery: p.mastery, path: p.history, molting: p.moltT > 0,
         lives: p.lives, respawnIn: p.alive ? 0 : Math.max(0, p.respawnT),
         rage: p.rage / CONFIG.rageMax, captured: Math.max(0, p.netT), rank, total,
       },

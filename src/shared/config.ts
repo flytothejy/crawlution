@@ -32,22 +32,19 @@ export const CONFIG = {
   biteDamage: [0, 8, 13, 19, 26, 34],
   biteCooldown: 0.35,
   stageDmgStep: 0.25, // 단계 1 차이마다 피해 ±25%
-  favorMul: 1.25, // 상성 유리
-  unfavorMul: 0.8, // 상성 불리
-  strongRatio: 1.12, // 피해 배수가 상대의 이 배 이상이면 '강함'
+  favorMul: 1.1, // 상성 유리(약하게: 갈래 차이는 능력치로)
+  unfavorMul: 0.92, // 상성 불리
+  strongRatio: 1.2, // 피해 배수가 상대의 이 배 이상이면 '강함'(같은 단계 상성만으로는 안 됨) // 피해 배수가 상대의 이 배 이상이면 '강함'
   recoilMul: 0.6, // 강한 몸에 박으면 상대 물기의 이만큼 내가 받음
   guardMul: 0.5, // 웅크리기(살금) 중 받는 피해
-  armorTakenMul: 0.8, // 갑옷 갈래 받는 피해
-  huntBiteMul: 1.2, // 사냥 갈래 물기 피해
   huntBiteCooldown: 0.27,
   poisonBiteDot: 0.5, // 독 갈래: 물기 피해의 이만큼을 2초에 걸쳐 추가
   spiderBiteSlow: 0.8, // 거미 갈래: 물린 적 느려짐(초)
-  swarmRegenMul: 2,
   regenDelay: 3, // 마지막 피해 후 이 시간이 지나면 회복
   regenRate: 0.05, // 초당 최대 체력의 비율
   foodHeal: 1.5, // 먹이 EP당 회복
   tailDropPerDmg: 1 / 12, // 피해 12마다 꼬리 1마디가 떨어짐
-  skillDamage: [0, 0, 30, 45, 60, 80],
+  skillDamage: [0, 0, 40, 60, 80, 105], // 기술은 더 세게
   knockback: 10,
   wallDamage: 0.15, // 경계에 부딪히면 최대 체력의 이만큼
   invulnTime: 3,
@@ -155,6 +152,6 @@ export function radiusFor(stage: number, lineageRadius = 1, segCount: number = C
   return CONFIG.stageRadius[Math.max(1, Math.min(5, stage))] * lineageRadius * (1 + thick);
 }
 
-export function maxHpFor(stage: number, segCount: number, mastery = 0): number {
-  return Math.round((CONFIG.stageHp[Math.max(1, Math.min(5, stage))] + segCount * CONFIG.hpPerSeg) * (1 + CONFIG.masteryHp * mastery));
+export function maxHpFor(stage: number, segCount: number, mastery = 0, hpMul = 1): number {
+  return Math.round((CONFIG.stageHp[Math.max(1, Math.min(5, stage))] + segCount * CONFIG.hpPerSeg) * (1 + CONFIG.masteryHp * mastery) * hpMul);
 }

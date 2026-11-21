@@ -313,6 +313,19 @@ function updateDanger(frame: Frame) {
 }
 
 // ---------- 진화 카드 ----------
+/** 갈래 능력치 막대: 체력·공격·속도·기술 */
+function statBars(l: Lineage) {
+  const L = LINEAGE[l];
+  const v = [
+    ['❤', L.hpMul],
+    ['🦷', L.biteMul],
+    ['⚡', L.speedMul],
+    ['✨', L.skillMul / L.cdMul],
+  ] as const;
+  const bar = ([ic, x]: readonly [string, number]) => `<span><em>${ic}</em><i><b style="width:${Math.max(15, Math.min(100, ((x - 0.7) / 0.6) * 100))}%"></b></i></span>`;
+  return `<div class="stats">${v.map(bar).join('')}</div><div class="trait">${L.trait}</div>`;
+}
+
 function cardHtml(c: Card, i: number, best: boolean) {
   const sp = SPECIES_BY_ID.get(c.species)!;
   const L = LINEAGE[c.lineage];
@@ -324,7 +337,7 @@ function cardHtml(c: Card, i: number, best: boolean) {
       : '';
   return `<button class="mcard${best ? ' best' : ''}${c.upgrade ? ' upg' : ''}" data-i="${i}" style="--c:${hex(L.color)}">${key}
     <div class="pic"><img src="${renderer.portrait(sp.id)}" alt=""></div>
-    <div class="tx"><div class="nm">${LIN_ICON[c.lineage]} ${sp.name}</div><div class="sk">${skillIcon(sp)} ${sp.skillName}</div><div class="odds">${odds}</div></div></button>`;
+    <div class="tx"><div class="nm">${LIN_ICON[c.lineage]} ${sp.name}</div><div class="sk">${skillIcon(sp)} ${sp.skillName}</div>${statBars(c.lineage)}<div class="odds">${odds}</div></div></button>`;
 }
 
 function updateCards(latest: Snapshot) {

@@ -270,6 +270,12 @@
       #cards .mcard .odds span { padding: 0 4px !important; border-width: 1.5px !important; }
       #cards .mcard .odds .up { color: #b8860b; border-color: #e0b030; background: #fff6d0; }
       #cards .mcard .key { position: static !important; flex: none; }
+      #cards .mcard .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 6px; margin: 2px 0 1px; }
+      #cards .mcard .stats span { display: flex; align-items: center; gap: 2px; font-size: 9px; }
+      #cards .mcard .stats em { font-style: normal; width: 12px; }
+      #cards .mcard .stats i { flex: 1; height: 5px; border-radius: 3px; background: rgba(27, 42, 18, 0.15); overflow: hidden; }
+      #cards .mcard .stats b { display: block; height: 100%; background: var(--c); }
+      #cards .mcard .trait { font-size: 10px; color: #6b5a2a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       #cards .mcard.upg { background: linear-gradient(90deg, #fff6d0, #ffe9a0); }
       #cards .mcard.best::after { top: 6px !important; right: -30px !important; font-size: 10px !important; }
       @media (max-width: 600px) {

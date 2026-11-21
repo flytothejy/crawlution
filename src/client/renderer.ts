@@ -1,5 +1,5 @@
 // 화면 그리기. 시뮬레이션 상태를 받아 그리기만 한다(상태를 바꾸지 않음).
-import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
+import { Application, BitmapFont, BitmapText, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
 import { CONFIG } from '../shared/config';
 import { relation } from '../shared/combat';
 import { LINEAGE, SPECIES_BY_ID } from '../shared/species';
@@ -67,7 +67,7 @@ interface Particle {
 }
 
 interface Popup {
-  t: Text;
+  t: Text | BitmapText;
   vx: number;
   vy: number;
   g: number; // 중력(피해 숫자는 튀어 올랐다 떨어짐)
@@ -77,7 +77,7 @@ interface Popup {
 }
 
 interface Combo {
-  t: Text;
+  t: BitmapText;
   n: number;
   total: number;
   life: number;
@@ -89,6 +89,16 @@ interface Shape {
   draw: (g: Graphics, k: number) => void;
   life: number;
   max: number;
+}
+
+interface Fx {
+  s: Sprite;
+  life: number;
+  max: number;
+  s0: number; // 시작·끝 크기
+  s1: number;
+  a0: number; // 시작 투명도
+  vr: number; // 회전 속도
 }
 
 interface Ghost {
@@ -139,6 +149,11 @@ export class GameRenderer {
   private popups: Popup[] = [];
   private shapes: Shape[] = [];
   private ghosts: Ghost[] = [];
+  private fxs: Fx[] = [];
+  private decalLayer = new Container();
+  private fxSpriteLayer = new Container();
+  private screenFx = new Graphics();
+  private speedLines = 0;
   private flashT = new Map<number, number>(); // 맞았을 때 하얗게 번쩍
   private biteT = new Map<number, number>(); // 물 때 큰턱 닫힘
   private strikeT = new Map<number, number>(); // 스킬 쓸 때 낫·턱 휘두름
@@ -149,6 +164,7 @@ export class GameRenderer {
   private punch = 0;
   private shake = 0;
   private time = 0;
+  private view = { x0: 0, x1: 0, y0: 0, y1: 0 };
 
   async init(parent: HTMLElement) {
     await this.app.init({
@@ -160,6 +176,14 @@ export class GameRenderer {
     });
     parent.appendChild(this.app.canvas);
     this.makeTextures();
+    // 피해 숫자용 비트맵 글꼴: 매번 글자 텍스처를 새로 만들지 않아 후반에도 가볍다
+    BitmapFont.install({
+      name: 'dmg',
+      style: { fontFamily: TITLE, fontSize: 64, fill: 0xffffff, stroke: { color: INK, width: 12, join: 'round' }, dropShadow: { color: 0x000000, alpha: 0.4, distance: 5, angle: Math.PI / 2, blur: 0 } },
+      chars: [['0', '9'], '!', '연타급소역습 ×+-'],
+      resolution: 1,
+      padding: 8,
+    });
 
     this.bg = new TilingSprite({ texture: this.tex.ground_grass, width: CONFIG.arenaRadius * 2 + 400, height: CONFIG.arenaRadius * 2 + 400 });
     this.bg.position.set(-CONFIG.arenaRadius - 200, -CONFIG.arenaRadius - 200);
@@ -173,11 +197,12 @@ export class GameRenderer {
     this.ghostLayer.blendMode = 'add';
 
     this.world.addChild(
-      this.bg, mask, this.deco, border, this.mapLayer, this.zoneGfx, this.foodLayer, this.ringGfx, this.markGfx,
+      this.bg, mask, this.deco, border, this.mapLayer, this.decalLayer, this.zoneGfx, this.foodLayer, this.ringGfx, this.markGfx,
       this.shadowLayer, this.glowLayer, this.legLayer, this.bodyLayer, this.ghostLayer, this.headLayer, this.statusGfx, this.shapeGfx,
-      this.fxLayer, this.enemyGfx, this.hpGfx, this.labelLayer, this.popupLayer,
+      this.fxSpriteLayer, this.fxLayer, this.enemyGfx, this.hpGfx, this.labelLayer, this.popupLayer,
     );
-    this.app.stage.addChild(this.world, this.screenGfx);
+    this.fxSpriteLayer.blendMode = 'add';
+    this.app.stage.addChild(this.world, this.screenGfx, this.screenFx);
   }
 
   private makeTextures() {
@@ -201,6 +226,29 @@ export class GameRenderer {
     gem.poly([16, 0, 32, 16, 16, 32, 0, 16]).fill(0xffffff).stroke({ width: 3, color: 0x2a2a2a });
     gem.poly([16, 4, 24, 14, 16, 12, 8, 14]).fill({ color: 0xffffff, alpha: 0.9 });
     this.tex.gem = r.generateTexture({ target: gem, resolution: 2 });
+
+    // 기술 연출용: 초승달 칼날, 충격파 고리, 번쩍임, 그을린 자국
+    const slash = new Graphics();
+    for (let k = 0; k < 14; k++) {
+      const rr = 118 - k * 1.6, a0 = -1.25 + k * 0.02, a1 = 1.25 - k * 0.02;
+      slash.moveTo(128 + Math.cos(a0) * rr, 128 + Math.sin(a0) * rr).arc(128, 128, rr, a0, a1).stroke({ width: 30 - k * 2, color: 0xffffff, alpha: 0.05 + k * 0.05, cap: 'round' });
+    }
+    this.tex.slash = r.generateTexture({ target: slash, resolution: 1, frame: new Rectangle(0, 0, 256, 256) });
+    const ring = new Graphics();
+    for (let k = 0; k < 12; k++) ring.circle(128, 128, 100 + k * 1.5).stroke({ width: 3, color: 0xffffff, alpha: 0.08 + (k < 6 ? k : 12 - k) * 0.12 });
+    this.tex.ring = r.generateTexture({ target: ring, resolution: 1, frame: new Rectangle(0, 0, 256, 256) });
+    const flare = new Graphics();
+    for (let i = 14; i >= 1; i--) flare.circle(128, 128, i * 7).fill({ color: 0xffffff, alpha: 0.05 + (14 - i) * 0.012 });
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2, L = k % 2 ? 120 : 80;
+      flare.poly([128 + Math.cos(a - 0.06) * 12, 128 + Math.sin(a - 0.06) * 12, 128 + Math.cos(a) * L, 128 + Math.sin(a) * L, 128 + Math.cos(a + 0.06) * 12, 128 + Math.sin(a + 0.06) * 12]).fill({ color: 0xffffff, alpha: 0.5 });
+    }
+    this.tex.flare = r.generateTexture({ target: flare, resolution: 1, frame: new Rectangle(0, 0, 256, 256) });
+    const scorch = new Graphics();
+    let sd = 11;
+    const srnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+    for (let k = 0; k < 18; k++) scorch.circle(128 + (srnd() - 0.5) * 120, 128 + (srnd() - 0.5) * 120, 20 + srnd() * 40).fill({ color: 0xffffff, alpha: 0.12 });
+    this.tex.scorch = r.generateTexture({ target: scorch, resolution: 1, frame: new Rectangle(0, 0, 256, 256) });
 
     const glow = new Graphics();
     for (let i = 12; i >= 1; i--) glow.circle(48, 48, 16 + i * 2.6).fill({ color: 0xffffff, alpha: 0.055 });
@@ -391,9 +439,10 @@ export class GameRenderer {
     const legs = new Container();
     const bodies = new Container();
     const head = new Container();
+    const spName = SPECIES_BY_ID.get(s.species)?.name ?? '';
     const label = new Text({
-      text: s.isPlayer ? '' : s.isBoss ? '👑 왕지네' : s.name,
-      style: { fontFamily: FONT, fontSize: s.isBoss ? 20 : 14, fill: s.isBoss ? 0xffb0a0 : 0xffffff, stroke: { color: INK, width: 4, join: 'round' } },
+      text: s.isBoss ? '👑 왕지네' : s.isPlayer ? `나 · ${spName}` : `${s.name} · ${spName}`,
+      style: { fontFamily: FONT, fontSize: s.isBoss ? 20 : 14, fill: s.isBoss ? 0xffb0a0 : s.isPlayer ? 0xd6ff8a : 0xffffff, stroke: { color: INK, width: 4, join: 'round' } },
     });
     label.anchor.set(0.5, 1);
     const wings: Sprite[] = [];
@@ -601,6 +650,8 @@ export class GameRenderer {
           if (!this.isNear(e.x, e.y) || !sp) break;
           const col = LINEAGE[sp.lineage].color;
           for (let i = 0; i < 24; i++) this.spawnParticle(e.x, e.y, i % 2 ? col : 0xffffff, 80 + Math.random() * 180, 0.5, 0.6);
+          this.fx('flare', e.x, e.y, col, 40, 260, 0.5, 0, 2);
+          this.fx('ring', e.x, e.y, col, 30, 300, 0.5);
           this.addShape((g, k) => {
             g.circle(e.x, e.y, 18 + (1 - k) * 110).stroke({ width: 12 * k, color: col, alpha: k });
             g.circle(e.x, e.y, 10 + (1 - k) * 60).stroke({ width: 6 * k, color: 0xffffff, alpha: k });
@@ -615,6 +666,9 @@ export class GameRenderer {
           if (e.kind === 'cut') {
             // X자 베기 자국
             const a = Math.random() * Math.PI;
+            this.fx('slash', e.x, e.y, 0xffd23f, 50, 90, 0.3, a, 0);
+            this.fx('slash', e.x, e.y, 0xffffff, 50, 90, 0.3, a + Math.PI / 2, 0);
+            this.fx('flare', e.x, e.y, 0xffffff, 30, 110, 0.25);
             this.addShape((g, k) => {
               const L = 34 * (1.2 - k * 0.2);
               for (const d of [a, a + Math.PI / 2]) {
@@ -629,6 +683,11 @@ export class GameRenderer {
         }
         case 'aoe': {
           const col = { cut: 0xff9a3a, stun: 0xffe066, push: 0xbfe0ff }[e.kind];
+          this.fx('ring', e.x, e.y, col, e.r * 0.4, e.r * 2.6, 0.55);
+          this.fx('ring', e.x, e.y, 0xffffff, e.r * 0.2, e.r * 2.0, 0.4);
+          this.fx('flare', e.x, e.y, col, e.r * 0.8, e.r * 2.4, 0.45, 0, 1.5);
+          this.decal(e.x, e.y, e.r * 1.1, 0x1a1008);
+          if (this.isNear(e.x, e.y)) this.speedLines = 0.35;
           const cracks: number[][] = [];
           for (let j = 0; j < 9; j++) {
             const pts = [e.x, e.y];
@@ -655,6 +714,14 @@ export class GameRenderer {
         }
         case 'cone': {
           const col = e.kind === 'cut' ? 0xffd23f : 0xffe066;
+          // 칼날 3겹이 부채꼴을 따라 휘두르듯 지나간다
+          for (let j = 0; j < 3; j++) {
+            const rr = e.range * (0.75 + j * 0.25);
+            this.fx('slash', e.x + Math.cos(e.angle) * rr * 0.35, e.y + Math.sin(e.angle) * rr * 0.35, j === 1 ? 0xffffff : col, rr * 1.1, rr * 1.5, 0.35 + j * 0.08, e.angle - 0.5 + j * 0.25, 2.5);
+          }
+          this.fx('flare', e.x, e.y, col, 60, 220, 0.35);
+          this.decal(e.x + Math.cos(e.angle) * e.range * 0.6, e.y + Math.sin(e.angle) * e.range * 0.6, e.range * 0.6, 0x2a1a08);
+          if (this.isNear(e.x, e.y)) this.speedLines = 0.3;
           this.addShape((g, k) => {
             const grow = 1 - k;
             g.moveTo(e.x, e.y).arc(e.x, e.y, e.range * (0.5 + 0.55 * grow), e.angle - e.half, e.angle + e.half).lineTo(e.x, e.y).fill({ color: col, alpha: 0.22 * k });
@@ -693,6 +760,34 @@ export class GameRenderer {
 
   private addShape(draw: (g: Graphics, k: number) => void, life: number) {
     this.shapes.push({ draw, life, max: life });
+  }
+
+  /** 텍스처 효과 하나(커지며 사라짐, 가산 합성) */
+  private fx(tex: string, x: number, y: number, color: number, size0: number, size1: number, life: number, rot = 0, vr = 0, alpha = 1) {
+    if (this.fxs.length > 160) return;
+    const s = new Sprite(this.tex[tex]);
+    s.anchor.set(0.5);
+    s.position.set(x, y);
+    s.rotation = rot;
+    s.tint = color;
+    s.alpha = alpha;
+    s.scale.set(size0 / 128);
+    this.fxSpriteLayer.addChild(s);
+    this.fxs.push({ s, life, max: life, s0: size0 / 128, s1: size1 / 128, a0: alpha, vr });
+  }
+
+  /** 바닥에 남는 그을린 자국 */
+  private decal(x: number, y: number, r: number, color: number) {
+    if (this.decalLayer.children.length > 30) this.decalLayer.children[0].destroy();
+    const s = new Sprite(this.tex.scorch);
+    s.anchor.set(0.5);
+    s.position.set(x, y);
+    s.rotation = Math.random() * Math.PI * 2;
+    s.tint = color;
+    s.alpha = 0.55;
+    s.scale.set(r / 110);
+    this.decalLayer.addChild(s);
+    this.fxs.push({ s, life: 3, max: 3, s0: r / 110, s1: r / 110, a0: 0.55, vr: 0 });
   }
 
   private isNear(x: number, y: number) {
@@ -740,17 +835,9 @@ export class GameRenderer {
 
   /** 피해 숫자: 옆으로 튀며 솟았다가 떨어진다 */
   private dmgPop(x: number, y: number, dmg: number, color: number, size: number, bang: boolean) {
-    const t = new Text({
-      text: bang ? `${dmg}!` : String(dmg),
-      style: {
-        fontFamily: TITLE,
-        fontSize: size,
-        fill: color,
-        stroke: { color: INK, width: Math.max(5, size * 0.2), join: 'round' },
-        dropShadow: { color: 0x000000, alpha: 0.4, distance: 4, angle: Math.PI / 2, blur: 0 },
-        padding: 8,
-      },
-    });
+    if (this.popups.length > 60) return;
+    const t = new BitmapText({ text: bang ? `${dmg}!` : String(dmg), style: { fontFamily: 'dmg', fontSize: size } });
+    t.tint = color;
     t.anchor.set(0.5);
     t.position.set(x + (Math.random() - 0.5) * 20, y - 10);
     t.scale.set(0.2);
@@ -765,10 +852,8 @@ export class GameRenderer {
     let c = this.combos.get(id);
     if (!c || c.life <= 0) {
       if (c) c.t.destroy();
-      const t = new Text({
-        text: '',
-        style: { fontFamily: TITLE, fontSize: 22, fill: 0xffe066, stroke: { color: INK, width: 6, join: 'round' }, padding: 8 },
-      });
+      const t = new BitmapText({ text: '', style: { fontFamily: 'dmg', fontSize: 24 } });
+      t.tint = 0xffe066;
       t.anchor.set(0.5);
       this.popupLayer.addChild(t);
       c = { t, n: 0, total: 0, life: 0, x, y };
@@ -779,7 +864,8 @@ export class GameRenderer {
     c.life = 1.1;
     c.x = x;
     c.y = y;
-    c.t.text = c.n >= 2 ? `${c.n}연타! ${c.total}` : '';
+    const txt = c.n >= 2 ? `${c.n}연타! ${c.total}` : '';
+    if (c.t.text !== txt) c.t.text = txt;
     c.t.scale.set(1.5 / Math.max(0.6, this.zoom));
   }
 
@@ -910,6 +996,8 @@ export class GameRenderer {
     const sx = (Math.random() - 0.5) * this.shake, sy = (Math.random() - 0.5) * this.shake;
     this.world.scale.set(z);
     this.world.position.set(W / 2 - this.camX * z + sx, H / 2 - this.camY * z + sy);
+    const hw = W / z / 2 + 90, hh = H / z / 2 + 90;
+    this.view = { x0: this.camX - hw, x1: this.camX + hw, y0: this.camY - hh, y1: this.camY + hh };
     for (const m of [this.flashT, this.biteT, this.strikeT, this.pulseT]) {
       for (const [k, v] of m) {
         if (v - dt <= 0) m.delete(k);
@@ -1001,7 +1089,9 @@ export class GameRenderer {
     const g = this.shapeGfx;
     for (const p of projs) {
       const c = Math.cos(p.angle), s = Math.sin(p.angle);
-      g.moveTo(p.x - c * 30, p.y - s * 30).lineTo(p.x + c * 6, p.y + s * 6).stroke({ width: 8, color: 0xffe066, alpha: 0.35 });
+      g.moveTo(p.x - c * 70, p.y - s * 70).lineTo(p.x + c * 6, p.y + s * 6).stroke({ width: 14, color: 0xffb03a, alpha: 0.25 });
+      g.moveTo(p.x - c * 30, p.y - s * 30).lineTo(p.x + c * 6, p.y + s * 6).stroke({ width: 8, color: 0xffe066, alpha: 0.5 });
+      g.circle(p.x, p.y, 12).fill({ color: 0xfff3b0, alpha: 0.35 });
       g.moveTo(p.x - c * 12, p.y - s * 12).lineTo(p.x + c * 10, p.y + s * 10).stroke({ width: 3.5, color: 0x1b1b1b });
       g.circle(p.x + c * 10, p.y + s * 10, 3).fill(0xffffff);
     }
@@ -1188,7 +1278,7 @@ export class GameRenderer {
     const g = this.getSnakeGfx(s);
     const vis = s.alive && s.segs.length >= 2;
     g.shadows.visible = g.glows.visible = g.legs.visible = g.bodies.visible = g.head.visible = vis;
-    g.label.visible = vis && !s.isPlayer;
+    g.label.visible = vis;
     for (const w of g.wings) w.visible = vis;
     if (!vis) return;
     const look = lookOf(s.species);
@@ -1253,6 +1343,12 @@ export class GameRenderer {
         continue;
       }
       const x = s.segs[i * 2], y = s.segs[i * 2 + 1];
+      // 화면 밖 마디는 그리지 않는다
+      const vw = this.view;
+      if (x < vw.x0 || x > vw.x1 || y < vw.y0 || y > vw.y1) {
+        if (b.visible || sh.visible) b.visible = sh.visible = gl.visible = shine.visible = spot.visible = leg.visible = false;
+        continue;
+      }
       const pj = Math.max(0, i - 1);
       const dirA = i === 0 ? s.angle : Math.atan2(s.segs[pj * 2 + 1] - y, s.segs[pj * 2] - x);
       const taper = i > n - 6 ? 0.7 + 0.3 * ((n - i) / 6) : 1;
@@ -1450,6 +1546,34 @@ export class GameRenderer {
   }
 
   private updateFx(dt: number) {
+    for (let i = this.fxs.length - 1; i >= 0; i--) {
+      const f = this.fxs[i];
+      f.life -= dt;
+      if (f.life <= 0) {
+        f.s.destroy();
+        this.fxs.splice(i, 1);
+        continue;
+      }
+      const k = 1 - f.life / f.max; // 0 → 1
+      const e = 1 - Math.pow(1 - k, 3);
+      f.s.scale.set(f.s0 + (f.s1 - f.s0) * e);
+      f.s.alpha = f.a0 * (1 - k * k);
+      f.s.rotation += f.vr * dt;
+    }
+    // 기술을 쓰면 화면 가장자리에 집중선
+    const sf = this.screenFx;
+    sf.clear();
+    if (this.speedLines > 0) {
+      this.speedLines -= dt;
+      const W = this.app.screen.width, H = this.app.screen.height, k = Math.max(0, this.speedLines / 0.35);
+      const cx = W / 2, cy = H / 2, R0 = Math.min(W, H) * 0.36, R1 = Math.hypot(W, H) * 0.6;
+      for (let j = 0; j < 40; j++) {
+        const a = (j / 40) * Math.PI * 2 + Math.random() * 0.1;
+        const r0 = R0 + Math.random() * 60;
+        sf.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0).lineTo(cx + Math.cos(a) * R1, cy + Math.sin(a) * R1);
+      }
+      sf.stroke({ width: 3, color: 0xffffff, alpha: 0.35 * k });
+    }
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.life -= dt;

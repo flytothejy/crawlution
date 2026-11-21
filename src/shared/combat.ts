@@ -1,6 +1,6 @@
 // 싸움 공식: 시뮬레이션·화면·봇이 같은 계산을 쓴다.
 import { CONFIG } from './config';
-import { beats, type Lineage } from './species';
+import { beats, LINEAGE, type Lineage } from './species';
 
 export interface Fighter {
   stage: number;
@@ -29,5 +29,5 @@ export function relation(me: Fighter, other: Fighter): -1 | 0 | 1 {
 
 export function biteOf(a: Fighter): number {
   if (a.isBoss) return CONFIG.bossBite;
-  return CONFIG.biteDamage[a.stage] * (a.lineage === 'hunt' ? CONFIG.huntBiteMul : 1);
+  return CONFIG.biteDamage[a.stage] * LINEAGE[a.lineage].biteMul;
 }
