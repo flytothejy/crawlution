@@ -13,12 +13,14 @@ export interface Command {
 
 export const emptyCommand = (angle = 0): Command => ({ angle, boost: false, sneak: false, skillSeq: 0, moltSeq: 0, moltChoice: 0 });
 
-export type DeathCause = 'bite' | 'wall' | 'crush' | 'bird' | 'poison' | 'skill';
-export type HitKind = 'bite' | 'recoil' | 'skill' | 'poison' | 'bird' | 'wall' | 'crush';
+export type DeathCause = 'bite' | 'wall' | 'crush' | 'enemy' | 'poison' | 'skill';
+export type HitKind = 'bite' | 'recoil' | 'skill' | 'poison' | 'enemy' | 'wall' | 'crush' | 'crit' | 'rage';
+export type EnemyKind = 'bird' | 'frog' | 'rain' | 'centipede' | 'anteater' | 'child';
+export type MapTheme = 'grass' | 'sand' | 'forest';
 
 export type GameEvent =
   | { type: 'eat'; snake: number; x: number; y: number; big: boolean }
-  | { type: 'death'; snake: number; x: number; y: number; by: number; cause: DeathCause }
+  | { type: 'death'; snake: number; x: number; y: number; by: number; cause: DeathCause; enemy?: EnemyKind }
   | { type: 'ring'; snake: number; cx: number; cy: number; trapped: number }
   | { type: 'crush'; snake: number; cx: number; cy: number; count: number }
   | { type: 'bounce'; snake: number; x: number; y: number }
@@ -32,10 +34,17 @@ export type GameEvent =
   | { type: 'skillHit'; x: number; y: number; kind: 'cut' | 'stun' | 'push' | 'slow' | 'root' }
   | { type: 'aoe'; x: number; y: number; r: number; kind: 'cut' | 'stun' | 'push' }
   | { type: 'cone'; x: number; y: number; angle: number; range: number; half: number; kind: 'cut' | 'stun' }
-  | { type: 'birdWarn' }
+  | { type: 'enemyWarn'; kind: EnemyKind; x: number; y: number }
+  | { type: 'enemyStart'; kind: EnemyKind; x: number; y: number }
+  | { type: 'enemyEnd'; kind: EnemyKind; killed: boolean }
   | { type: 'birdDive'; x: number; y: number; r: number }
-  | { type: 'boss'; snake: number }
-  | { type: 'end'; won: boolean };
+  | { type: 'tongue'; x0: number; y0: number; x1: number; y1: number }
+  | { type: 'drop'; x: number; y: number; r: number }
+  | { type: 'lick'; x0: number; y0: number; x1: number; y1: number; w: number }
+  | { type: 'netSwoop'; x: number; y: number; r: number; caught: number }
+  | { type: 'captured'; snake: number }
+  | { type: 'released'; snake: number; x: number; y: number }
+  | { type: 'end'; rank: number; total: number; timeUp: boolean };
 
 export interface SnakeView {
   id: number;
@@ -58,6 +67,7 @@ export interface SnakeView {
   hp: number;
   maxHp: number;
   // 상태
+  captured: boolean;
   invuln: boolean;
   poisoned: boolean;
   molt: number; // 0~1 탈피 진행, 0이면 아님
@@ -75,6 +85,7 @@ export interface Card {
   species: string;
   good: number; // 주변에서 이 갈래가 이기는 곤충 수
   bad: number; // 주변에서 이 갈래를 이기는 곤충 수
+  upgrade?: boolean; // 5단계: 같은 종 강화(★)
 }
 
 export interface PlayerView {
@@ -88,7 +99,25 @@ export interface PlayerView {
   molting: boolean;
   lives: number;
   respawnIn: number; // 0이면 살아 있음
+  rage: number; // 역습 게이지 0~1
+  captured: number; // 채집망에 갇혀 남은 시간(초), 0이면 아님
+  rank: number;
+  total: number;
 }
+
+export interface MapView {
+  theme: MapTheme;
+  rocks: { x: number; y: number; r: number }[];
+  puddles: { x: number; y: number; r: number }[];
+}
+
+export type EnemyView =
+  | { kind: 'bird'; warn: number; shadows: { x: number; y: number; r: number; t: number; total: number }[] }
+  | { kind: 'frog'; warn: number; x: number; y: number; angle: number; aim: { x: number; y: number; t: number; total: number } | null; tongue: { x: number; y: number; t: number } | null }
+  | { kind: 'rain'; warn: number; drops: { x: number; y: number; r: number; t: number; total: number }[] }
+  | { kind: 'centipede'; warn: number; x: number; y: number; bossId: number; life: number }
+  | { kind: 'anteater'; warn: number; x: number; y: number; angle: number; strip: { x1: number; y1: number; w: number; t: number; total: number; lick: number } | null }
+  | { kind: 'child'; warn: number; x: number; y: number; r: number; swoop: number; held: { x: number; y: number; t: number }[] };
 
 export interface RingView {
   owner: number;
@@ -114,10 +143,6 @@ export interface ProjView {
   angle: number;
 }
 
-export interface BirdView {
-  active: boolean;
-  shadows: { x: number; y: number; r: number; t: number; total: number }[];
-}
 
 export interface Snapshot {
   tick: number;
@@ -127,12 +152,14 @@ export interface Snapshot {
   rings: RingView[];
   zones: ZoneView[];
   projs: ProjView[];
-  bird: BirdView;
+  enemy: EnemyView | null;
+  map: MapView;
+  timeLeft: number;
   events: GameEvent[];
   playerId: number;
   player: PlayerView;
-  bossId: number; // -1이면 없음
-  state: 'playing' | 'won' | 'lost';
+  bossId: number; // 왕지네가 활동 중이면 그 id, 아니면 -1
+  state: 'playing' | 'ended';
   lineageCount: Record<string, number>;
 }
 

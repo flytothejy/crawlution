@@ -216,6 +216,75 @@
       #oFact { font-size: 12.5px; color: #5b6a45; background: #e8f3d2; border-radius: 10px; padding: 7px 9px; margin: 6px 0 4px; line-height: 1.4; }
       #oBest { text-align: center; font-size: 14px; margin: 6px 0 10px; color: #6b5a2a; }
       #oBest.new { color: #d2541c; font-size: 17px; animation: pulse 0.8s ease-in-out infinite; }
+
+      /* 시간 */
+      #timer { top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); padding: 2px 12px; border-radius: 14px; background: rgba(20, 34, 14, 0.6); border: 2.5px solid var(--ink); font-family: var(--title); font-size: 20px; z-index: 2; }
+      #timer.low { color: #ff6a5a; animation: pulse 0.6s ease-in-out infinite; }
+      #gauge { top: calc(44px + env(safe-area-inset-top)); }
+      /* 역습 게이지 */
+      #rage { top: calc(98px + env(safe-area-inset-top)); left: 10px; width: min(36vw, 180px); height: 13px; border-radius: 8px; background: rgba(0, 0, 0, 0.5); border: 2.5px solid var(--ink); overflow: hidden; }
+      #rage i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, #ff9a3a, #ff3a6a); transition: width 0.2s; }
+      #rage span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 10px; }
+      #rage.full { width: min(56vw, 250px); box-shadow: 0 0 12px #ff5a3a; animation: glow 0.5s ease-in-out infinite alternate; }
+      #rage.full i { background: linear-gradient(90deg, #ffd23f, #ff3a3a); }
+      #feed { top: calc(122px + env(safe-area-inset-top)) !important; }
+      /* 경보 */
+      #alarm { position: fixed; inset: 0; pointer-events: none; z-index: 5; border: 14px solid transparent; border-image: repeating-linear-gradient(45deg, #ffd23f 0 22px, #1b2a12 22px 44px) 14; }
+      #alarm.go { animation: alarmBlink 0.4s steps(2) 7; }
+      @keyframes alarmBlink { 50% { opacity: 0.2; } }
+      #alarm .tip { position: absolute; left: 50%; top: calc(23% + 56px); transform: translateX(-50%); font-size: clamp(14px, 3.6vw, 19px); white-space: nowrap; color: #fff3b0; }
+      /* 기술 컷인 */
+      #cutin { position: fixed; left: 0; right: 0; top: 30%; height: 84px; opacity: 0; display: flex; align-items: center; justify-content: center; gap: 10px; pointer-events: none; z-index: 4;
+        background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--c) 85%, #000) 18%, var(--c) 50%, color-mix(in srgb, var(--c) 85%, #000) 82%, transparent); border-top: 3px solid rgba(255,255,255,.7); border-bottom: 3px solid rgba(255,255,255,.7); }
+      #cutin img { height: 92px; filter: drop-shadow(0 4px 0 rgba(0,0,0,.35)); transform: skewX(12deg) scale(1.1); }
+      #cutin div { display: flex; flex-direction: column; transform: skewX(12deg); }
+      #cutin small { font-size: 14px; }
+      #cutin b { font-family: var(--title); font-size: clamp(26px, 7vw, 40px); font-weight: normal; color: #fff; }
+      /* 화면 밖 천적 화살표 */
+      #enemyArrow { position: fixed; width: 54px; height: 54px; margin: -27px 0 0 -27px; pointer-events: none; z-index: 3; display: grid; place-items: center; border-radius: 50%; background: rgba(220, 40, 30, 0.85); border: 3px solid var(--ink); animation: pulse 0.7s ease-in-out infinite; }
+      #enemyArrow .ar { position: absolute; inset: 0; display: grid; place-items: center; font-size: 22px; color: #fff; }
+      #enemyArrow .ar { justify-items: end; padding-right: 0; transform-origin: 50% 50%; }
+      #enemyArrow .ic { font-size: 24px; }
+      #captured { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; font-size: 18px; z-index: 3; }
+      #captured b { display: block; font-family: var(--title); font-size: 64px; color: #ffb84a; }
+      /* 순위표 */
+      #board { width: 170px !important; }
+      #board .hd span { float: right; font-size: 10px; color: #ddd; margin-top: 2px; }
+      #board .row .k { width: 18px; text-align: right; font-size: 11px; color: #ffb0a0; }
+      #board .row .v { width: 40px; text-align: right; }
+      #board .sep { text-align: center; line-height: 8px; opacity: 0.6; }
+      #over.mid .rtitle { --bc: #8ad0ff; --bc2: #3a7ad8; }
+      /* 작은 진화 카드(왼쪽 아래) */
+      #cards { left: 8px !important; transform: none !important; bottom: calc(10px + env(safe-area-inset-bottom)) !important; width: min(52vw, 240px) !important; text-align: left !important; }
+      body.touch #cards { bottom: calc(12px + env(safe-area-inset-bottom)) !important; }
+      #cards .ctitle { font-size: 15px !important; margin-bottom: 4px !important; }
+      #cards .crow { flex-direction: column !important; gap: 5px !important; align-items: stretch !important; }
+      #cards .mcard { display: flex; align-items: center; gap: 6px; padding: 3px 8px 3px 4px !important; border-radius: 12px; border-top: 3px solid var(--ink); border-left: 7px solid var(--c); box-shadow: 0 4px 0 var(--ink) !important; animation-name: cardSlide !important; text-align: left; }
+      @keyframes cardSlide { from { transform: translateX(-120%); opacity: 0; } }
+      #cards .mcard .pic { width: 46px; height: 46px !important; flex: none; margin: 0; background: radial-gradient(circle, color-mix(in srgb, var(--c) 35%, #fff) 0 60%, transparent 62%); }
+      #cards .mcard .pic img { height: 50px !important; }
+      #cards .mcard .tx { min-width: 0; }
+      #cards .mcard .nm { font-size: 14px !important; margin: 0 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #cards .mcard .sk { font-size: 10.5px !important; padding: 0 6px !important; margin: 1px 0 !important; }
+      #cards .mcard .odds { justify-content: flex-start !important; font-size: 11px !important; gap: 3px !important; }
+      #cards .mcard .odds span { padding: 0 4px !important; border-width: 1.5px !important; }
+      #cards .mcard .odds .up { color: #b8860b; border-color: #e0b030; background: #fff6d0; }
+      #cards .mcard .key { position: static !important; flex: none; }
+      #cards .mcard.upg { background: linear-gradient(90deg, #fff6d0, #ffe9a0); }
+      #cards .mcard.best::after { top: 6px !important; right: -30px !important; font-size: 10px !important; }
+      @media (max-width: 600px) {
+        #timer { font-size: 15px; top: calc(156px + env(safe-area-inset-top)); left: auto; right: 10px; transform: none; padding: 1px 8px; width: 136px; text-align: center; }
+        #minimap { top: calc(188px + env(safe-area-inset-top)) !important; }
+        #dist { top: calc(280px + env(safe-area-inset-top)) !important; }
+        #gauge { top: calc(116px + env(safe-area-inset-top)) !important; }
+        #rage { top: calc(90px + env(safe-area-inset-top)); width: 46vw; }
+        #feed { top: calc(160px + env(safe-area-inset-top)) !important; }
+        #board { width: 136px !important; font-size: 11px !important; }
+        #board .row .v { width: 34px; }
+        #board .row .li { display: none; }
+        #cards .mcard .pic { width: 40px; height: 40px !important; }
+        #cards .mcard .pic img { height: 44px !important; }
+      }
       .hidden { display: none !important; }
       #hostTag { position: fixed; left: 8px; bottom: calc(6px + env(safe-area-inset-bottom)); font-size: 10px; opacity: 0.4; pointer-events: none; font-family: system-ui; }
 
@@ -246,6 +315,12 @@
     <div id="flash"></div>
     <div id="hurt"></div>
     <div id="respawn" class="hidden"></div>
+    <div id="captured" class="hidden"></div>
+    <div id="alarm" class="hidden"><div class="tip ol"></div></div>
+    <div id="cutin" class="hidden"></div>
+    <div id="enemyArrow" class="hidden"><span class="ar">➤</span><span class="ic"></span></div>
+    <div id="timer" class="hud hidden ol"></div>
+    <div id="rage" class="hud hidden"><i></i><span class="ol-thin">역습</span></div>
     <div id="stats" class="hud hidden"></div>
     <div id="hpbar" class="hud hidden"><i></i><span class="ol-thin"></span></div>
     <div id="lives" class="hud hidden"></div>
@@ -268,7 +343,7 @@
       <div class="tag">곤충 진화 스네이크</div>
       <div class="lineup" id="lineup"></div>
       <div class="box">
-        <div class="goal">애벌레로 시작해 <b>5단계</b>까지 진화하고<br />마지막 보스 <b>왕지네</b>를 쓰러뜨리세요!</div>
+        <div class="goal"><b>8분</b> 동안 애벌레에서 진화하며<br />천적을 피하고 <b>1등</b>을 노리세요!</div>
         <div class="legend"><span><i style="border-color:#7dff5a"></i>먹을 수 있음</span><span><i style="border-color:#bbb"></i>비김</span><span><i style="border-color:#ff4a3a"></i>위험</span></div>
         <div class="how" id="howto"></div>
         <button class="gbtn pulse ol" id="startBtn">시작!</button>

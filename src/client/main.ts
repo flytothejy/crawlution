@@ -3,7 +3,7 @@ import './fonts.css';
 import { CONFIG } from '../shared/config';
 import { CYCLE, LINEAGE, SPECIES_BY_ID, type Lineage, type Species } from '../shared/species';
 import { relation } from '../shared/combat';
-import type { Card, Snapshot, SnakeView } from '../shared/types';
+import type { Card, EnemyKind, EnemyView, Snapshot, SnakeView } from '../shared/types';
 import { createHost, type SimHost } from './host';
 import { Input } from './input';
 import { GameRenderer, type Frame, type FrameSnake } from './renderer';
@@ -30,6 +30,16 @@ function skillIcon(sp: Species): string {
     case 'ringfast': return '🔥';
   }
 }
+
+/** 천적 정보 */
+const ENEMY: Record<EnemyKind, { name: string; icon: string; tip: string; c1: string; c2: string }> = {
+  bird: { name: '새', icon: '🐦', tip: '그림자를 피해!', c1: '#5ab4ff', c2: '#2a6fd0' },
+  frog: { name: '개구리', icon: '🐸', tip: '빨간 선에서 비켜!', c1: '#7ad84a', c2: '#3a9a2a' },
+  rain: { name: '소나기', icon: '🌧️', tip: '물방울 표시를 피해! 몸이 길수록 많이 맞아요', c1: '#7ab0ff', c2: '#3a5ab8' },
+  centipede: { name: '왕지네', icon: '👑', tip: '1등을 쫓아요! 잡으면 +1500', c1: '#ff6b5a', c2: '#c93a2a' },
+  anteater: { name: '개미핥기', icon: '👅', tip: '빨간 띠에서 벗어나!', c1: '#d8966a', c2: '#9a5a2a' },
+  child: { name: '채집망 든 아이', icon: '🧒', tip: '그물이 빨개지면 피해!', c1: '#ffb84a', c2: '#e0702a' },
+};
 
 const renderer = new GameRenderer();
 let host: SimHost | null = null;
@@ -126,11 +136,18 @@ function onSnap(s: Snapshot) {
   renderer.handleEvents(s.events, byId, s.playerId);
   if (!playing) return;
   for (const e of s.events) {
-    if (e.type === 'boss') {
-      banner('👑 왕지네 등장!', '#ff6b5a', '#c93a2a', 3200);
+    if (e.type === 'enemyWarn') {
+      const E = ENEMY[e.kind];
+      banner(`⚠ 천적 경보: ${E.icon} ${E.name}!`, E.c1, E.c2, 2900);
+      alarm(E.tip);
+    }
+    if (e.type === 'enemyEnd' && e.kind === 'centipede' && e.killed) banner('👑 왕지네 처치!', '#ffd23f', '#f08a12', 2400);
+    if (e.type === 'captured' && e.snake === s.playerId) {
+      banner('🧒 채집망에 잡혔다!', '#ffb84a', '#e0702a', 2200);
       flash();
     }
-    if (e.type === 'birdWarn') banner('🐦 새가 온다! 그림자를 피해!', '#5ab4ff', '#2a6fd0', 2600);
+    if (e.type === 'released' && e.snake === s.playerId) banner('풀려났다! 몸이 반쪽이 됐어요', '#7ad84a', '#3a9a2a', 2000);
+    if (e.type === 'skill' && e.snake === s.playerId) cutIn(e.species);
     if (e.type === 'molt' && e.snake === s.playerId) {
       const sp = SPECIES_BY_ID.get(e.species);
       if (sp) {
@@ -144,8 +161,8 @@ function onSnap(s: Snapshot) {
       const victim = byId.get(e.snake);
       const killer = e.by >= 0 ? byId.get(e.by) : undefined;
       const mine = e.snake === s.playerId || e.by === s.playerId || !!victim?.isBoss;
-      const ic = { crush: '🌀', bite: '🦷', bird: '🐦', poison: '☠️', skill: '⚔️', wall: '🧱' }[e.cause];
-      if (e.cause === 'bird') feed(`${ic} 새가 ${who(victim)}를 낚아챘다`, mine);
+      const ic = { crush: '🌀', bite: '🦷', enemy: '⚠', poison: '☠️', skill: '⚔️', wall: '🧱' }[e.cause];
+      if (e.cause === 'enemy' && e.enemy) feed(`${ENEMY[e.enemy].icon} ${ENEMY[e.enemy].name}에게 ${who(victim)} 당함`, mine);
       else if (e.cause === 'wall') {
         if (mine) feed(`${ic} ${who(victim)} 벽에 부딪힘`, mine);
       } else if (killer) feed(`${who(killer)} ${ic} ${who(victim)}${e.cause === 'crush' ? ' 압착!' : ''}`, mine);
@@ -155,8 +172,67 @@ function onSnap(s: Snapshot) {
       flash();
     }
     if (e.type === 'hit' && e.snake === s.playerId && e.dmg > 0) hurt(Math.min(1, e.dmg / 40));
-    if (e.type === 'end') endAt = performance.now() + (e.won ? 1800 : 1300);
+    if (e.type === 'end') {
+      endAt = performance.now() + (e.timeUp ? 1500 : 1300);
+      if (e.timeUp) banner(`⏱ 시간 끝! ${e.rank}등`, '#ffd23f', '#f08a12', 1800);
+    }
   }
+}
+
+/** 천적 경보: 화면 가장자리가 노랑·빨강으로 깜빡인다 */
+function alarm(tip: string) {
+  const a = $('alarm');
+  a.querySelector<HTMLElement>('.tip')!.textContent = tip;
+  a.classList.remove('hidden');
+  a.classList.remove('go');
+  void a.offsetWidth;
+  a.classList.add('go');
+  setTimeout(() => a.classList.add('hidden'), 3000);
+}
+
+/** 기술 컷인: 곤충 그림 + 기술 이름이 화면 위쪽을 지나간다 */
+function cutIn(speciesId: string) {
+  const sp = SPECIES_BY_ID.get(speciesId);
+  if (!sp) return;
+  const c = $('cutin');
+  c.style.setProperty('--c', hex(LINEAGE[sp.lineage].color));
+  c.innerHTML = `<img src="${renderer.portrait(sp.id)}" alt=""><div><small class="ol-thin">${sp.name}</small><b class="ol">${skillIcon(sp)} ${sp.skillName}!</b></div>`;
+  c.classList.remove('hidden');
+  c.getAnimations().forEach((a) => a.cancel());
+  c.animate(
+    [
+      { transform: 'translateX(-100%) skewX(-12deg)', opacity: 0, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)' },
+      { transform: 'translateX(0) skewX(-12deg)', opacity: 1, offset: 0.15 },
+      { transform: 'translateX(4%) skewX(-12deg)', opacity: 1, offset: 0.8, easing: 'ease-in' },
+      { transform: 'translateX(110%) skewX(-12deg)', opacity: 0 },
+    ],
+    { duration: 1200, easing: 'linear', fill: 'forwards' },
+  );
+  const f = $('flash');
+  f.style.background = hex(LINEAGE[sp.lineage].color);
+  flash();
+  setTimeout(() => (f.style.background = '#fff'), 500);
+}
+
+/** 화면 밖 천적 방향 표시 */
+function updateEnemyArrow(en: EnemyView | null) {
+  const el = $('enemyArrow');
+  if (!playing || !en) return el.classList.add('hidden');
+  let x: number | null = null, y: number | null = null;
+  if (en.kind === 'frog' || en.kind === 'anteater' || en.kind === 'child' || en.kind === 'centipede') ((x = en.x), (y = en.y));
+  if (x === null || y === null) return el.classList.add('hidden');
+  const cam = renderer.camera;
+  const W = renderer.app.screen.width, H = renderer.app.screen.height;
+  const sx = W / 2 + (x - cam.x) * cam.zoom, sy = H / 2 + (y - cam.y) * cam.zoom;
+  const m = 46;
+  if (sx > m && sx < W - m && sy > m && sy < H - m) return el.classList.add('hidden');
+  const a = Math.atan2(sy - H / 2, sx - W / 2);
+  const k = Math.min((W / 2 - m) / Math.abs(Math.cos(a) || 1e-6), (H / 2 - m) / Math.abs(Math.sin(a) || 1e-6));
+  el.classList.remove('hidden');
+  el.style.left = `${W / 2 + Math.cos(a) * k}px`;
+  el.style.top = `${H / 2 + Math.sin(a) * k}px`;
+  el.querySelector<HTMLElement>('.ar')!.style.transform = `rotate(${a}rad)`;
+  el.querySelector<HTMLElement>('.ic')!.textContent = ENEMY[en.kind].icon;
 }
 
 /** 받침에 따라 '로'/'으로' (ㄹ 받침은 '로') */
@@ -202,7 +278,7 @@ function buildFrame(): Frame | null {
     for (let i = 0; i < nb; i++) buf[i] = i < na ? sa.segs[i] + (sb.segs[i] - sa.segs[i]) * t : sb.segs[i];
     return { ...sb, segs: buf, angle: lerpAngle(sa.angle, sb.angle, t) };
   });
-  return { snakes, foods: b.foods, rings: b.rings, zones: b.zones, projs: b.projs, bird: b.bird, playerId: b.playerId };
+  return { snakes, foods: b.foods, rings: b.rings, zones: b.zones, projs: b.projs, enemy: b.enemy, map: b.map, playerId: b.playerId };
 }
 
 /** 강한 적 머리가 가깝거나 새 그림자 안이면 화면 가장자리를 붉게 */
@@ -219,7 +295,19 @@ function updateDanger(frame: Frame) {
         break;
       }
     }
-    for (const sh of frame.bird.shadows) if (Math.hypot(sh.x - hx, sh.y - hy) < sh.r + 10) danger = true;
+    const en = frame.enemy;
+    if (en && en.warn <= 0) {
+      if (en.kind === 'bird') for (const sh of en.shadows) if (Math.hypot(sh.x - hx, sh.y - hy) < sh.r + 10) danger = true;
+      if (en.kind === 'rain') for (const d of en.drops) if (Math.hypot(d.x - hx, d.y - hy) < d.r + 10) danger = true;
+      if (en.kind === 'child' && Math.hypot(en.x - hx, en.y - hy) < en.r + 30) danger = true;
+      if (en.kind === 'frog' && en.aim && Math.hypot(en.aim.x - hx, en.aim.y - hy) < 120) danger = true;
+      if (en.kind === 'anteater' && en.strip && en.strip.t > 0) {
+        const { x1, y1, w } = en.strip;
+        const dx = x1 - en.x, dy = y1 - en.y, L2 = dx * dx + dy * dy;
+        const t = Math.max(0, Math.min(1, ((hx - en.x) * dx + (hy - en.y) * dy) / L2));
+        if (Math.hypot(hx - en.x - dx * t, hy - en.y - dy * t) < w / 2 + 20) danger = true;
+      }
+    }
   }
   $('danger').classList.toggle('on', danger);
 }
@@ -229,15 +317,14 @@ function cardHtml(c: Card, i: number, best: boolean) {
   const sp = SPECIES_BY_ID.get(c.species)!;
   const L = LINEAGE[c.lineage];
   const key = input.touch ? '' : `<span class="key badge">${i + 1}</span>`;
-  const odds = c.good || c.bad
-    ? `<div class="odds"><span class="g">▲ 유리 ${c.good}</span><span class="b">▼ 불리 ${c.bad}</span></div>`
-    : '<div class="odds"><span class="z">주변에 비교 대상 없음</span></div>';
-  return `<button class="mcard${best ? ' best' : ''}" data-i="${i}" style="--c:${hex(L.color)}">
-    <div class="top ol-thin">${LIN_ICON[c.lineage]} ${L.name}</div>${key}
+  const odds = c.upgrade
+    ? '<span class="up">★ 강화: 체력·기술 UP</span>'
+    : c.good || c.bad
+      ? `<span class="g">▲${c.good}</span><span class="b">▼${c.bad}</span>`
+      : '';
+  return `<button class="mcard${best ? ' best' : ''}${c.upgrade ? ' upg' : ''}" data-i="${i}" style="--c:${hex(L.color)}">${key}
     <div class="pic"><img src="${renderer.portrait(sp.id)}" alt=""></div>
-    <div class="nm">${sp.name}</div>
-    <div class="sk">${skillIcon(sp)} ${sp.skillName}</div>
-    <div class="ds">${sp.skillDesc}</div>${odds}</button>`;
+    <div class="tx"><div class="nm">${LIN_ICON[c.lineage]} ${sp.name}</div><div class="sk">${skillIcon(sp)} ${sp.skillName}</div><div class="odds">${odds}</div></div></button>`;
 }
 
 function updateCards(latest: Snapshot) {
@@ -256,7 +343,8 @@ function updateCards(latest: Snapshot) {
   cards.forEach((c, i) => {
     if (c.good - c.bad > bestV) ((bestV = c.good - c.bad), (bestI = i));
   });
-  box.innerHTML = `<div class="ctitle ol">✨ 탈피 준비! <b>다음 모습</b>을 고르세요</div><div class="crow">${cards.map((c, i) => cardHtml(c, i, i === bestI)).join('')}</div>`;
+  const final = cards.some((c) => c.upgrade);
+  box.innerHTML = `<div class="ctitle ol">${final ? '✨ 변신 또는 강화!' : '✨ 탈피! 골라요'}</div><div class="crow">${cards.map((c, i) => cardHtml(c, i, i === bestI)).join('')}</div>`;
   // 같은 카드에서 숫자만 바뀐 경우 등장 애니메이션을 다시 하지 않는다
   if (sameSet) box.querySelectorAll<HTMLElement>('.mcard').forEach((el) => (el.style.animation = 'none'));
   box.classList.remove('hidden');
@@ -290,6 +378,19 @@ function updateHud(latest: Snapshot) {
   hb.classList.toggle('low', hpk < 0.3);
   hb.classList.toggle('guard', me.sneaking);
   $('lives').innerHTML = Array.from({ length: CONFIG.lives }, (_, i) => `<b class="${i < p.lives ? '' : 'lost'}">❤</b>`).join('');
+  const rg = $('rage');
+  rg.querySelector<HTMLElement>('i')!.style.width = `${p.rage * 100}%`;
+  rg.classList.toggle('full', p.rage >= 1);
+  rg.querySelector<HTMLElement>('span')!.textContent = p.rage >= 1 ? '🔥 역습 준비! 다음 공격 대박' : '역습';
+  const left = Math.ceil(latest.timeLeft);
+  const tm = $('timer');
+  tm.textContent = `⏱ ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  tm.classList.toggle('low', left <= 30);
+  const cp = $('captured');
+  if (p.captured > 0 && playing) {
+    cp.classList.remove('hidden');
+    cp.innerHTML = `<div class="ol">🧒 채집망에 갇혔다!</div><b class="ol">${Math.ceil(p.captured)}</b><div class="ol-thin">풀려나면 몸이 반쪽이 돼요</div>`;
+  } else cp.classList.add('hidden');
   const rs = $('respawn');
   if (p.respawnIn > 0 && p.lives > 0 && playing) {
     rs.classList.remove('hidden');
@@ -301,14 +402,12 @@ function updateHud(latest: Snapshot) {
 
   // 진화 게이지
   const g = $('gauge');
-  if (me.stage >= 5) {
-    g.classList.remove('full');
-    g.innerHTML = `<div class="gl ol-thin">👑 최종 단계! 왕지네를 쓰러뜨려라</div>`;
-  } else {
+  {
     const k = Math.min(1, p.gauge / p.need);
     const full = k >= 1;
     g.classList.toggle('full', full && !p.molting);
-    const label = p.molting ? '🦋 탈피 중…' : full ? '✨ 탈피 준비 완료!' : `다음 탈피까지 ${Math.ceil(p.need - p.gauge)}`;
+    const what = me.stage >= 5 ? '변신·강화' : '탈피';
+    const label = p.molting ? `🦋 ${what} 중…` : full ? `✨ ${what} 준비 완료!` : `다음 ${what}까지 ${Math.ceil(p.need - p.gauge)}`;
     if (!g.querySelector('.gb')) g.innerHTML = `<div class="gl ol-thin"></div><div class="gb"><i></i></div>`;
     g.querySelector<HTMLElement>('.gl')!.textContent = label;
     g.querySelector<HTMLElement>('.gb i')!.style.width = `${k * 100}%`;
@@ -334,16 +433,16 @@ function updateHud(latest: Snapshot) {
   } else btn.classList.add('none');
 
   // 순위
-  const ranked = latest.snakes.filter((s) => s.alive).sort((x, y) => y.length - x.length).slice(0, 5);
+  const all = latest.snakes.filter((s) => !s.isBoss).sort((x, y) => y.score - x.score);
+  const row = (s: SnakeView, i: number) => {
+    const icon = LIN_ICON[s.lineage];
+    return `<div class="row ${s.isPlayer ? 'me' : ''} ol-thin"><span class="rk">${i + 1}</span><span class="li" style="--c:${hex(LINEAGE[s.lineage].color)}">${icon}</span><span class="n">${s.isPlayer ? '나' : s.name}</span><span class="k">${s.kills}</span><span class="v">${s.score}</span></div>`;
+  };
+  const myI = all.findIndex((s) => s.isPlayer);
   $('board').innerHTML =
-    '<div class="hd">🏆 길이 순위</div>' +
-    ranked
-      .map((s, i) => {
-        const c = s.isBoss ? 0xff4a3a : LINEAGE[s.lineage].color;
-        const icon = s.isBoss ? '👑' : LIN_ICON[s.lineage];
-        return `<div class="row ${s.isPlayer ? 'me' : s.isBoss ? 'boss' : ''} ol-thin"><span class="rk">${i + 1}</span><span class="li" style="--c:${hex(c)}">${icon}</span><span class="n">${s.isPlayer ? '나' : s.name}</span><span class="v">${s.length}</span></div>`;
-      })
-      .join('');
+    '<div class="hd">🏆 순위 <span>처치 · 점수</span></div>' +
+    all.slice(0, 5).map(row).join('') +
+    (myI >= 5 ? `<div class="sep">⋯</div>${row(all[myI], myI)}` : '');
   // 갈래 분포
   $('dist').innerHTML =
     '<div class="db">' +
@@ -361,12 +460,32 @@ function drawMinimap(s: Snapshot) {
   if (!ctx) return;
   const W = c.width, R = CONFIG.arenaRadius, k = (W / 2 - 8) / R;
   ctx.clearRect(0, 0, W, W);
-  for (const sh of s.bird.shadows) {
+  ctx.fillStyle = 'rgba(40,30,20,.55)';
+  for (const rk of s.map.rocks) {
     ctx.beginPath();
-    ctx.arc(W / 2 + sh.x * k, W / 2 + sh.y * k, Math.max(8, sh.r * k), 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,60,40,.45)';
+    ctx.arc(W / 2 + rk.x * k, W / 2 + rk.y * k, Math.max(2, rk.r * k), 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.fillStyle = 'rgba(90,170,255,.55)';
+  for (const pd of s.map.puddles) {
+    ctx.beginPath();
+    ctx.arc(W / 2 + pd.x * k, W / 2 + pd.y * k, Math.max(3, pd.r * k), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const en = s.enemy;
+  if (en && en.warn <= 0 && (en.kind === 'frog' || en.kind === 'anteater' || en.kind === 'child' || en.kind === 'centipede')) {
+    ctx.font = '22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(ENEMY[en.kind].icon, W / 2 + en.x * k, W / 2 + en.y * k);
+  }
+  if (en && en.kind === 'bird')
+    for (const sh of en.shadows) {
+      ctx.beginPath();
+      ctx.arc(W / 2 + sh.x * k, W / 2 + sh.y * k, Math.max(8, sh.r * k), 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,60,40,.45)';
+      ctx.fill();
+    }
   for (const r of s.rings) {
     ctx.beginPath();
     ctx.arc(W / 2 + r.cx * k, W / 2 + r.cy * k, 10, 0, Math.PI * 2);
@@ -407,16 +526,17 @@ function showResult(latest: Snapshot) {
   playing = false;
   input.resetHolds();
   $('danger').classList.remove('on');
-  const won = latest.state === 'won';
+  const rank = latest.player.rank, total = latest.player.total;
+  const won = rank === 1;
+  const timeUp = latest.timeLeft <= 0.5;
   const prevBest = bestScore();
   const isNew = me.score > prevBest;
   saveBest(Math.max(prevBest, me.score));
   const over = $('over');
   over.classList.toggle('win', won);
-  $('overTitle').textContent = won ? '🏆 숲의 왕!' : '잡혔다!';
-  $('overSub').textContent = won
-    ? '왕지네를 쓰러뜨렸어요!'
-    : maxStage >= 5 ? '거의 다 왔어요! 왕지네만 남았어요' : maxStage <= 1 ? '애벌레 때 잡혔어요. 먹이를 먹고 탈피해 보세요' : `${maxStage}단계까지 진화했어요`;
+  over.classList.toggle('mid', !won && rank <= 3);
+  $('overTitle').textContent = won ? '🏆 1등! 숲의 왕' : rank <= 3 ? `${rank === 2 ? '🥈' : '🥉'} ${rank}등!` : timeUp ? `${rank}등` : '목숨을 다 썼어요';
+  $('overSub').textContent = `${total}마리 중 ${rank}등 · ${timeUp ? '8분 완주' : '중간 탈락'} · 최고 ${maxStage}단계`;
   countUp($('oScore'), me.score);
   $('oStage').textContent = `${maxStage}단계`;
   countUp($('oKills'), me.kills, 600);
@@ -443,7 +563,7 @@ function showResult(latest: Snapshot) {
 function startGame() {
   $('start').classList.add('hidden');
   $('over').classList.add('hidden');
-  for (const id of ['stats', 'board', 'minimap', 'gauge', 'dist', 'hpbar', 'lives']) $(id).classList.remove('hidden');
+  for (const id of ['stats', 'board', 'minimap', 'gauge', 'dist', 'hpbar', 'lives', 'rage', 'timer']) $(id).classList.remove('hidden');
   $('feed').innerHTML = '';
   snaps.length = 0;
   offset = null;
@@ -481,6 +601,7 @@ async function boot() {
   const how = input.touch
     ? [['👆', '화면을 끌어서 방향 · ⚡ <b>부스트</b>'], ['🦷', '머리로 상대 몸을 <b>물어</b> 체력을 깎아요'], ['🛡️', '<b>웅크리기</b>: 느려지지만 피해 절반'], ['✨', '<b>스킬</b> 버튼: 곤충마다 다른 기술'], ['🦋', '게이지가 차면 카드를 눌러 <b>탈피</b>']]
     : [['🖱️', '마우스로 방향 · <b>클릭/스페이스</b> 부스트'], ['🦷', '머리로 상대 몸을 <b>물어</b> 체력을 깎아요'], ['🛡️', '<b>Shift</b> 웅크리기: 느려지지만 피해 절반'], ['✨', '<b>E</b>/<b>오른쪽 클릭</b> 스킬 · <b>1·2·3</b> 탈피']];
+  how.push(['🎯', '강한 상대는 <b>꼬리 끝</b>을 물면 급소! 맞으면 <b>역습</b> 게이지']);
   how.push(['🌀', '한 바퀴 감싸면 <b>압착!</b> 한 방에 끝 · 목숨 ❤️❤️❤️']);
   $('howto').innerHTML = how.map(([i, t]) => `<div><span class="i">${i}</span><span>${t}</span></div>`).join('');
   $('lineup').innerHTML = ['caterpillar', 'ladybug', 'mantis', 'bee', 'widow'].map((id) => `<img src="${renderer.portrait(id)}" alt="">`).join('');
@@ -496,6 +617,7 @@ async function boot() {
     if (!frame) return;
     renderer.render(frame, dt);
     updateDanger(frame);
+    updateEnemyArrow(frame.enemy);
     const latest = snaps[snaps.length - 1];
     const me = latest.snakes.find((s) => s.id === latest.playerId);
     if (!me) return;

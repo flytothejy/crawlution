@@ -43,10 +43,24 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
   if (!target && !grace && s.moltT <= 0 && s.hp > s.maxHp * 0.5) {
     let best = s.hunter ? 380 : 220;
     for (const o of sim.snakes) {
-      if (!o.alive || o.id === s.id || o.isBoss || o.invulnT > 0) continue;
+      if (!sim.onField(o) || o.id === s.id || o.isBoss || o.invulnT > 0) continue;
       if (!sim.stronger(s, o)) continue;
       const d = Math.hypot(o.x - s.x, o.y - s.y);
       if (d < best) ((best = d), (prey = o));
+    }
+  }
+
+  // 약자의 한 방: 강한 곤충의 꼬리 끝이 가깝고 머리는 멀면 꼬리 급소를 노린다
+  let tailT: [number, number] | null = null;
+  if (!target && !prey && !grace && s.hp > s.maxHp * 0.5) {
+    for (const o of sim.snakes) {
+      if (!sim.onField(o) || o.id === s.id || o.isBoss || o.segN < 14 || !sim.stronger(o, s)) continue;
+      const ti = o.segN - 2;
+      const tx = o.segs[ti * 2], ty = o.segs[ti * 2 + 1];
+      if (Math.hypot(tx - s.x, ty - s.y) < 260 && Math.hypot(o.x - s.x, o.y - s.y) > 320) {
+        tailT = [tx, ty];
+        break;
+      }
     }
   }
 
@@ -58,6 +72,8 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
     const bend = Math.max(-0.9, Math.min(0.9, (d - R) / R)) * (Math.PI / 3);
     desired = toT + s.side * (Math.PI / 2 - bend);
     boost = d > R * 1.8 && s.segCount > 30 && sim.rng.next() < 0.6;
+  } else if (tailT) {
+    desired = Math.atan2(tailT[1] - s.y, tailT[0] - s.x);
   } else if (prey) {
     // 몸통 1/3 지점을 문다
     const i = Math.min(prey.segN - 1, Math.max(2, Math.floor(prey.segN / 3)));
@@ -207,17 +223,17 @@ function danger(sim: Simulation, s: Snake, a: number): number {
       if (z.owner === s.id) continue;
       if (Math.hypot(px - z.x, py - z.y) < z.r) worst = Math.max(worst, weight * (z.kind === 'slow' ? 0.3 : 0.6));
     }
-    for (const sh of sim.shadows) {
-      if (Math.hypot(px - sh.x, py - sh.y) < sh.r + 20) worst = Math.max(worst, weight * 0.9);
-    }
+    for (const rk of sim.map.rocks) if (Math.hypot(px - rk.x, py - rk.y) < rk.r + s.r + 10) worst = Math.max(worst, weight * 0.8);
+    const hz = sim.enemies.hazard(px, py);
+    if (hz > 0) worst = Math.max(worst, weight * hz);
     if (worst >= weight) break;
   }
   return worst;
 }
 
-/** 보스(왕지네): 플레이어를 쫓아 물다가, 가끔 주위를 돌며 감싸려 한다 */
+/** 왕지네(천적): 점수 1등을 쫓아 물다가, 가끔 주위를 돌며 감싸려 한다 */
 export function bossThink(sim: Simulation, s: Snake, dt: number): Command {
-  const p = sim.snakes[sim.playerId];
+  const p = sim.bossTarget() ?? sim.snakes[sim.playerId];
   s.modeT -= dt;
   if (s.modeT <= 0) {
     s.hunting = !s.hunting;

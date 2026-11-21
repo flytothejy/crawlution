@@ -1,9 +1,10 @@
 // 모든 밸런스 값은 여기 한 곳에 모은다. 서버·클라이언트가 같은 파일을 쓴다.
-// 프로토타입 C: 완성된 한 판(5단계, 5갈래, 봇 15, 보스 1, 천적 1) + 체력 싸움
+// 프로토타입 C: 8분 한 판(순위), 5단계·5갈래, 봇 20, 천적 6종, 체력 싸움
 
 export const CONFIG = {
   tickRate: 60, // 시뮬레이션 틱(초당). 멀티 서버에서는 20으로 낮춘다.
-  arenaRadius: 2200,
+  arenaRadius: 3300, // 1.5배
+  roundTime: 480, // 한 판 8분, 끝나면 점수 순위
 
   // 이동(조작감: 빠릿하게)
   stageSpeed: [0, 175, 183, 191, 199, 207], // 단계별 기본 속도 px/초 (인덱스 = 단계)
@@ -30,10 +31,10 @@ export const CONFIG = {
   hpPerSeg: 0.6,
   biteDamage: [0, 8, 13, 19, 26, 34],
   biteCooldown: 0.35,
-  stageDmgStep: 0.35, // 단계 1 차이마다 피해 ±35%
-  favorMul: 1.5, // 상성 유리
-  unfavorMul: 0.6, // 상성 불리
-  strongRatio: 1.15, // 피해 배수가 상대의 이 배 이상이면 '강함'
+  stageDmgStep: 0.25, // 단계 1 차이마다 피해 ±25%
+  favorMul: 1.25, // 상성 유리
+  unfavorMul: 0.8, // 상성 불리
+  strongRatio: 1.12, // 피해 배수가 상대의 이 배 이상이면 '강함'
   recoilMul: 0.6, // 강한 몸에 박으면 상대 물기의 이만큼 내가 받음
   guardMul: 0.5, // 웅크리기(살금) 중 받는 피해
   armorTakenMul: 0.8, // 갑옷 갈래 받는 피해
@@ -53,23 +54,31 @@ export const CONFIG = {
   lives: 3,
   respawnDelay: 2,
 
+  // 약자의 한 방
+  tailCritSegs: 0.12, // 꼬리 끝 이 비율(최소 4마디)을 물면 급소
+  tailCritFrac: 0.15, // 급소: 상성·단계 무시, 상대 최대 체력의 이만큼
+  rageMax: 100,
+  rageGain: 160, // 강한 적에게 받은 피해 비율(내 최대 체력 대비) × 이 값만큼 역습 게이지
+  rageFrac: 0.3, // 역습 일격: 상대 최대 체력의 이만큼 추가
+
   // 진화
-  stageGauge: [0, 40, 90, 160, 250, Infinity], // 그 단계에서 새로 모으는 EP(누적 아님)
+  stageGauge: [0, 40, 90, 160, 250, 300], // 그 단계에서 새로 모으는 EP(5단계는 변신·강화용)
   moltTime: 1.5,
   moltTimeSwitch: 2.5, // 갈래를 바꾸면
   moltSpeedMul: 0.5,
-  masteryMax: 3,
-  masteryCdCut: 0.1,
+  masteryMax: 5,
+  masteryCdCut: 0.07,
+  masteryHp: 0.06, // 숙련 ★마다 최대 체력
   cardScanRadius: 1200,
 
   // 먹이
-  foodCount: 560,
+  foodCount: 1150,
   foodEP: 1,
-  foodRadius: 4.5,
-  bigFoodCount: 40,
+  foodRadius: 9,
+  bigFoodCount: 90,
   bigFoodEP: 4,
-  bigFoodRadius: 8,
-  remainsRadius: 6,
+  bigFoodRadius: 15,
+  remainsRadius: 11,
 
   // 감싸기
   loopMinIndex: 12,
@@ -80,26 +89,48 @@ export const CONFIG = {
   comboBonus: 1.5,
 
   // 봇
-  botCount: 15,
+  botCount: 20,
   botRespawnDelay: 3,
   botHunterSegments: 38,
   botGraceSeconds: 12,
   botFavorableChance: 0.6,
 
-  // 보스(왕지네): 내가 5단계가 되면 등장
+  // 왕지네(천적): 45초 동안 1등을 쫓는다. 누구나 때릴 수 있고 잡으면 큰 점수
   bossSegments: 120,
   bossRadius: 30,
   bossSpeed: 150,
   bossTurn: (200 * Math.PI) / 180,
-  bossHp: 1400,
+  bossHp: 1100,
   bossBite: 40,
   bossCrushFrac: 0.3, // 감싸기 압착은 보스 최대 체력의 이만큼
 
-  // 천적: 새
-  birdFirst: 60,
-  birdEveryMin: 70,
-  birdEveryMax: 100,
-  birdWarn: 2.5,
+  // 천적: 판 중간중간 하나씩 나타난다(경보 3초 뒤 시작)
+  enemyFirst: 45,
+  enemyGapMin: 25, // 앞 천적이 끝난 뒤 다음까지
+  enemyGapMax: 40,
+  enemyWarn: 3,
+  centipedeLife: 45,
+  frogLife: 24,
+  frogEvery: 2.6,
+  frogAim: 1.1,
+  frogRange: 1400,
+  frogHead: 0.35, // 혀에 머리가 맞으면 최대 체력의 이만큼(몸은 0.2)
+  rainLife: 18,
+  rainEvery: 0.11,
+  rainWarn: 1.0,
+  rainRadius: 52,
+  rainDamage: 0.08,
+  anteaterLicks: 3,
+  anteaterAim: 1.6,
+  anteaterWidth: 160,
+  anteaterLen: 1900,
+  anteaterEat: 0.25, // 혀에 닿으면 몸의 이만큼을 뜯어 감
+  childLife: 22,
+  netRadius: 115,
+  netSpeed: 245, // 곤충보다 빠르다: 피하려면 방향을 틀어야 함
+  netEvery: 3.2,
+  netAim: 0.7,
+  netHold: 5, // 채집망에 갇혀 있는 시간
   birdDives: 4,
   birdDiveEvery: 4,
   birdShadowTime: 1.6,
@@ -114,7 +145,7 @@ export const CONFIG = {
   scoreKill: 50,
   scoreCrush: 100,
   scoreMolt: 200,
-  scoreBoss: 2000,
+  scoreBoss: 1500, // 왕지네 처치
 } as const;
 
 export type Config = typeof CONFIG;
@@ -124,6 +155,6 @@ export function radiusFor(stage: number, lineageRadius = 1, segCount: number = C
   return CONFIG.stageRadius[Math.max(1, Math.min(5, stage))] * lineageRadius * (1 + thick);
 }
 
-export function maxHpFor(stage: number, segCount: number): number {
-  return Math.round(CONFIG.stageHp[Math.max(1, Math.min(5, stage))] + segCount * CONFIG.hpPerSeg);
+export function maxHpFor(stage: number, segCount: number, mastery = 0): number {
+  return Math.round((CONFIG.stageHp[Math.max(1, Math.min(5, stage))] + segCount * CONFIG.hpPerSeg) * (1 + CONFIG.masteryHp * mastery));
 }

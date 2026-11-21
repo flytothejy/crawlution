@@ -3,7 +3,7 @@ import { Application, Container, Graphics, Rectangle, Sprite, Text, Texture, Til
 import { CONFIG } from '../shared/config';
 import { relation } from '../shared/combat';
 import { LINEAGE, SPECIES_BY_ID } from '../shared/species';
-import type { BirdView, GameEvent, ProjView, RingView, SnakeView, ZoneView } from '../shared/types';
+import type { EnemyView, GameEvent, MapTheme, MapView, ProjView, RingView, SnakeView, ZoneView } from '../shared/types';
 import { headKit, HR, type HeadKit, type HeadPart } from './heads';
 import { lookOf } from './look';
 
@@ -24,7 +24,8 @@ export interface Frame {
   rings: RingView[];
   zones: ZoneView[];
   projs: ProjView[];
-  bird: BirdView;
+  enemy: EnemyView | null;
+  map: MapView;
   playerId: number;
 }
 
@@ -67,9 +68,21 @@ interface Particle {
 
 interface Popup {
   t: Text;
+  vx: number;
   vy: number;
+  g: number; // 중력(피해 숫자는 튀어 올랐다 떨어짐)
   life: number;
   max: number;
+  big: number; // 등장할 때 부풀기 배율
+}
+
+interface Combo {
+  t: Text;
+  n: number;
+  total: number;
+  life: number;
+  x: number;
+  y: number;
 }
 
 interface Shape {
@@ -108,7 +121,12 @@ export class GameRenderer {
   private statusGfx = new Graphics();
   private shapeGfx = new Graphics();
   private fxLayer = new Container();
-  private birdGfx = new Graphics();
+  private enemyGfx = new Graphics();
+  private mapLayer = new Container();
+  private deco = new Container();
+  private screenGfx = new Graphics();
+  private mapKey = '';
+  private combos = new Map<number, Combo>();
   private hpGfx = new Graphics();
   private labelLayer = new Container();
   private popupLayer = new Container();
@@ -143,7 +161,7 @@ export class GameRenderer {
     parent.appendChild(this.app.canvas);
     this.makeTextures();
 
-    this.bg = new TilingSprite({ texture: this.tex.grass, width: CONFIG.arenaRadius * 2 + 400, height: CONFIG.arenaRadius * 2 + 400 });
+    this.bg = new TilingSprite({ texture: this.tex.ground_grass, width: CONFIG.arenaRadius * 2 + 400, height: CONFIG.arenaRadius * 2 + 400 });
     this.bg.position.set(-CONFIG.arenaRadius - 200, -CONFIG.arenaRadius - 200);
     const mask = new Graphics().circle(0, 0, CONFIG.arenaRadius).fill(0xffffff);
     this.bg.mask = mask;
@@ -152,15 +170,14 @@ export class GameRenderer {
       .stroke({ width: 28, color: 0x3d6b2f, alpha: 1 })
       .circle(0, 0, CONFIG.arenaRadius + 2)
       .stroke({ width: 4, color: 0xb8e08a, alpha: 0.6 });
-    const deco = this.makeDecorations();
     this.ghostLayer.blendMode = 'add';
 
     this.world.addChild(
-      this.bg, mask, deco, border, this.zoneGfx, this.foodLayer, this.ringGfx, this.markGfx,
+      this.bg, mask, this.deco, border, this.mapLayer, this.zoneGfx, this.foodLayer, this.ringGfx, this.markGfx,
       this.shadowLayer, this.glowLayer, this.legLayer, this.bodyLayer, this.ghostLayer, this.headLayer, this.statusGfx, this.shapeGfx,
-      this.fxLayer, this.birdGfx, this.hpGfx, this.labelLayer, this.popupLayer,
+      this.fxLayer, this.enemyGfx, this.hpGfx, this.labelLayer, this.popupLayer,
     );
-    this.app.stage.addChild(this.world);
+    this.app.stage.addChild(this.world, this.screenGfx);
   }
 
   private makeTextures() {
@@ -209,9 +226,10 @@ export class GameRenderer {
     this.tex.shadow = r.generateTexture({ target: shadow, resolution: 1 });
 
     const food = new Graphics();
-    for (let i = 8; i >= 1; i--) food.circle(32, 32, 10 + i * 2.6).fill({ color: 0xffffff, alpha: 0.045 });
-    food.circle(32, 32, 10).fill(0xffffff);
-    food.circle(29, 29, 4).fill({ color: 0xffffff, alpha: 1 });
+    for (let i = 8; i >= 1; i--) food.circle(32, 32, 11 + i * 2.4).fill({ color: 0xffffff, alpha: 0.06 });
+    food.circle(32, 32, 11.5).fill(0x3a3a3a); // 진한 테두리: 어떤 바닥에서도 잘 보이게
+    food.circle(32, 32, 9.5).fill(0xffffff);
+    food.circle(29, 28.5, 3.5).fill({ color: 0xffffff, alpha: 1 });
     this.tex.food = r.generateTexture({ target: food, resolution: 2 });
 
     const dot = new Graphics();
@@ -219,39 +237,104 @@ export class GameRenderer {
     dot.circle(16, 16, 4).fill(0xffffff);
     this.tex.dot = r.generateTexture({ target: dot, resolution: 2 });
 
+    for (const theme of ['grass', 'sand', 'forest'] as MapTheme[]) this.tex['ground_' + theme] = this.makeGround(theme);
+  }
+
+  /** 바닥 무늬(이음새 없이 반복) */
+  private makeGround(theme: MapTheme): Texture {
+    const r = this.app.renderer;
     const T = 256;
     const g = new Graphics();
-    g.rect(0, 0, T, T).fill(0x74b257);
-    let seed = 42;
+    const pal = {
+      grass: { base: 0x74b257, blob: [0x6aa64e, 0x7fbc60], line: [0x5c9a42, 0x8cc96b], dot: 0xe9f7c8 },
+      sand: { base: 0xe2c588, blob: [0xd6b676, 0xeed49c], line: [0xc9a462, 0xf2dcae], dot: 0xfff4d6 },
+      forest: { base: 0x5e4a30, blob: [0x6b5536, 0x524026], line: [0x7a8a3a, 0x8a5a2a], dot: 0xc8a46a },
+    }[theme];
+    g.rect(0, 0, T, T).fill(pal.base);
+    let seed = theme === 'grass' ? 42 : theme === 'sand' ? 7 : 99;
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
     const wrap = (draw: (ox: number, oy: number) => void) => {
       for (const ox of [-T, 0, T]) for (const oy of [-T, 0, T]) draw(ox, oy);
     };
     for (let i = 0; i < 26; i++) {
-      const x = rnd() * T, y = rnd() * T, rr = 18 + rnd() * 30, col = rnd() < 0.5 ? 0x6aa64e : 0x7fbc60;
+      const x = rnd() * T, y = rnd() * T, rr = 18 + rnd() * 30, col = pal.blob[rnd() < 0.5 ? 0 : 1];
       wrap((ox, oy) => g.circle(x + ox, y + oy, rr).fill({ color: col, alpha: 0.5 }));
     }
-    for (let i = 0; i < 140; i++) {
-      const x = rnd() * T, y = rnd() * T, h = 4 + rnd() * 7, lean = (rnd() - 0.5) * 4, col = rnd() < 0.5 ? 0x5c9a42 : 0x8cc96b;
-      wrap((ox, oy) => g.moveTo(x + ox, y + oy).lineTo(x + ox + lean, y + oy - h).stroke({ width: 1.6, color: col, alpha: 0.8, cap: 'round' }));
+    if (theme === 'grass') {
+      for (let i = 0; i < 140; i++) {
+        const x = rnd() * T, y = rnd() * T, h = 4 + rnd() * 7, lean = (rnd() - 0.5) * 4, col = pal.line[rnd() < 0.5 ? 0 : 1];
+        wrap((ox, oy) => g.moveTo(x + ox, y + oy).lineTo(x + ox + lean, y + oy - h).stroke({ width: 1.6, color: col, alpha: 0.8, cap: 'round' }));
+      }
+    } else if (theme === 'sand') {
+      // 바람 물결 무늬
+      for (let i = 0; i < 18; i++) {
+        const x = rnd() * T, y = rnd() * T, w = 30 + rnd() * 40;
+        wrap((ox, oy) => g.moveTo(x + ox, y + oy).quadraticCurveTo(x + ox + w / 2, y + oy - 6, x + ox + w, y + oy).stroke({ width: 2, color: pal.line[0], alpha: 0.55 }));
+      }
+    } else {
+      // 낙엽
+      for (let i = 0; i < 46; i++) {
+        const x = rnd() * T, y = rnd() * T, s2 = 4 + rnd() * 5, a = rnd() * Math.PI, col = [0x8a4a22, 0x9a6a2a, 0x5a5a22, 0x4a2a14][Math.floor(rnd() * 4)];
+        wrap((ox, oy) => g.ellipse(x + ox, y + oy, s2, s2 * 0.45).fill({ color: col, alpha: 0.55 }));
+        void a;
+      }
     }
     for (let i = 0; i < 22; i++) {
       const x = rnd() * T, y = rnd() * T, rr = 1.2 + rnd() * 1.5;
-      g.circle(x, y, rr).fill({ color: 0xe9f7c8, alpha: 0.7 });
+      g.circle(x, y, rr).fill({ color: pal.dot, alpha: 0.7 });
     }
-    this.tex.grass = r.generateTexture({ target: g, resolution: 1, frame: new Rectangle(0, 0, T, T) });
+    return r.generateTexture({ target: g, resolution: 1, frame: new Rectangle(0, 0, T, T) });
   }
 
-  private makeDecorations(): Container {
-    const c = new Container();
+  /** 판마다 바뀌는 지형: 바닥·장식·바위·웅덩이 */
+  setMap(map: MapView) {
+    const key = map.theme + map.rocks.map((o) => o.x.toFixed(0)).join(',');
+    if (key === this.mapKey) return;
+    this.mapKey = key;
+    this.bg.texture = this.tex['ground_' + map.theme];
+    this.deco.removeChildren().forEach((c) => c.destroy());
+    this.makeDecorations(map.theme);
+    this.mapLayer.removeChildren().forEach((c) => c.destroy());
+    const g = new Graphics();
+    for (const p of map.puddles) {
+      const col = map.theme === 'forest' ? 0x4a3a22 : map.theme === 'sand' ? 0x3ab0b8 : 0x4a9ad0;
+      g.ellipse(p.x + 4, p.y + 6, p.r * 1.02, p.r * 0.86).fill({ color: 0x000000, alpha: 0.12 });
+      g.ellipse(p.x, p.y, p.r, p.r * 0.84).fill({ color: col, alpha: 0.85 }).stroke({ width: 5, color: mix(col, 0x000000, 0.35), alpha: 0.6 });
+      g.ellipse(p.x - p.r * 0.3, p.y - p.r * 0.3, p.r * 0.35, p.r * 0.12).fill({ color: 0xffffff, alpha: 0.35 });
+      g.ellipse(p.x + p.r * 0.2, p.y + p.r * 0.25, p.r * 0.5, p.r * 0.1).fill({ color: 0xffffff, alpha: 0.15 });
+    }
+    for (const o of map.rocks) {
+      g.ellipse(o.x + 8, o.y + 12, o.r * 1.02, o.r * 0.92).fill({ color: 0x000000, alpha: 0.22 });
+      if (map.theme === 'forest') {
+        // 나무 그루터기
+        g.circle(o.x, o.y, o.r).fill(0x6a4424).stroke({ width: 6, color: 0x3a2412 });
+        for (let k = 1; k <= 4; k++) g.circle(o.x, o.y, o.r * (1 - k * 0.2)).stroke({ width: 3, color: 0x9a6a3a, alpha: 0.8 });
+        g.circle(o.x, o.y, o.r * 0.12).fill(0x8a5a2a);
+      } else {
+        const col = map.theme === 'sand' ? 0xc08a52 : 0x9aa39a;
+        const pts: number[] = [];
+        for (let k = 0; k < 9; k++) {
+          const a = (k / 9) * Math.PI * 2;
+          const rr = o.r * (0.88 + 0.12 * Math.sin(k * 2.3 + o.x));
+          pts.push(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr * 0.92);
+        }
+        g.poly(pts).fill(col).stroke({ width: 6, color: mix(col, 0x000000, 0.45) });
+        g.ellipse(o.x - o.r * 0.25, o.y - o.r * 0.3, o.r * 0.45, o.r * 0.22).fill({ color: 0xffffff, alpha: 0.3 });
+        g.ellipse(o.x + o.r * 0.2, o.y + o.r * 0.35, o.r * 0.5, o.r * 0.2).fill({ color: 0x000000, alpha: 0.12 });
+      }
+    }
+    this.mapLayer.addChild(g);
+  }
+
+  private makeDecorations(theme: MapTheme) {
     let seed = 7;
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
     const R = CONFIG.arenaRadius;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 90; i++) {
       const a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * (R - 80);
       const x = Math.cos(a) * d, y = Math.sin(a) * d;
       const g = new Graphics();
-      if (rnd() < 0.6) {
+      if (theme === 'grass') {
         const petal = [0xffffff, 0xffe066, 0xff9ec7, 0xb59cff][Math.floor(rnd() * 4)];
         const n = 5 + Math.floor(rnd() * 3), pr = 14 + rnd() * 10;
         for (let k = 0; k < n; k++) {
@@ -259,17 +342,30 @@ export class GameRenderer {
           g.ellipse(Math.cos(pa) * pr * 0.8, Math.sin(pa) * pr * 0.8, pr * 0.7, pr * 0.45).fill({ color: petal, alpha: 0.55 });
         }
         g.circle(0, 0, pr * 0.45).fill({ color: 0xffc94a, alpha: 0.7 });
-        g.rotation = rnd() * Math.PI;
+      } else if (theme === 'sand') {
+        if (rnd() < 0.5) {
+          // 조개껍데기
+          const s2 = 10 + rnd() * 8;
+          g.moveTo(0, 0).arc(0, 0, s2, Math.PI, 0).lineTo(0, 0).fill({ color: 0xfff0d8, alpha: 0.8 });
+          for (let k = 1; k < 5; k++) g.moveTo(0, 0).lineTo(Math.cos(Math.PI + (k * Math.PI) / 5) * s2, Math.sin(Math.PI + (k * Math.PI) / 5) * s2).stroke({ width: 1.5, color: 0xd8b48a });
+        } else {
+          // 마른 풀
+          for (let k = 0; k < 5; k++) g.moveTo(0, 0).lineTo((k - 2) * 5, -14 - rnd() * 8).stroke({ width: 2, color: 0xa88a4a, cap: 'round' });
+        }
       } else {
-        const s = 16 + rnd() * 22;
-        g.ellipse(4, 6, s, s * 0.7).fill({ color: 0x000000, alpha: 0.15 });
-        g.ellipse(0, 0, s, s * 0.72).fill({ color: 0x9aa39a, alpha: 0.75 });
-        g.ellipse(-s * 0.3, -s * 0.25, s * 0.4, s * 0.22).fill({ color: 0xffffff, alpha: 0.35 });
+        // 버섯·이끼
+        if (rnd() < 0.5) {
+          const s2 = 10 + rnd() * 10;
+          g.rect(-s2 * 0.2, 0, s2 * 0.4, s2 * 0.7).fill(0xf2e6cc);
+          g.ellipse(0, 0, s2, s2 * 0.6).fill(rnd() < 0.5 ? 0xd8402a : 0xe8a03a);
+          g.circle(-s2 * 0.4, -s2 * 0.1, s2 * 0.15).fill(0xffffff);
+          g.circle(s2 * 0.3, -s2 * 0.2, s2 * 0.12).fill(0xffffff);
+        } else g.circle(0, 0, 16 + rnd() * 16).fill({ color: 0x6a8a2a, alpha: 0.55 });
       }
+      g.rotation = rnd() * Math.PI;
       g.position.set(x, y);
-      c.addChild(g);
+      this.deco.addChild(g);
     }
-    return c;
   }
 
   private dropGfx(g: SnakeGfx) {
@@ -381,20 +477,23 @@ export class GameRenderer {
             }, 0.22);
             for (let i = 0; i < (big ? 12 : 6); i++) this.spawnParticle(e.x, e.y, i % 2 ? col : t ? lookOf(t.species).body : 0xffffff, 80 + Math.random() * 140, 0.35, 0.45);
           }
-          // 피해 숫자
-          if (mine || me || e.dmg >= 10) {
-            let col = 0xffffff, size = 17 + Math.min(20, e.dmg / 3);
-            let text = String(e.dmg);
+          // 피해 숫자: 튀어 올랐다 떨어지고, 급소·역습은 크게
+          const special = e.kind === 'crit' || e.kind === 'rage';
+          if (mine || me || e.dmg >= 10 || special) {
+            let col = 0xffffff, size = 24 + Math.min(30, e.dmg / 2.2);
             if (me) col = e.kind === 'recoil' ? 0xd08aff : 0xff5a4a;
-            else if (mine) {
-              col = e.good ? 0xffd23f : 0xffffff;
-              if (e.good) text += '!';
-              size += 4;
-            } else {
-              col = 0xdddddd;
-              size -= 4;
+            else if (mine) col = e.good ? 0xffd23f : 0xffffff;
+            else ((col = 0xe0e0e0), (size *= 0.7));
+            if (special) {
+              col = e.kind === 'crit' ? 0xff7a1a : 0xff3a8a;
+              size = Math.max(size, 40);
+              this.popup(e.x, e.y - 40, e.kind === 'crit' ? '급소!' : '역습!', 0xffffff, 26, 0.9, true);
+              this.shake = Math.max(this.shake, 16);
+              this.punch = Math.max(this.punch, 0.06);
+              for (let i = 0; i < 26; i++) this.spawnParticle(e.x, e.y, i % 2 ? col : 0xffffff, 140 + Math.random() * 260, 0.6, 0.7);
             }
-            this.popup(e.x + (Math.random() - 0.5) * 16, e.y - 12, text, col, size, 0.8);
+            this.dmgPop(e.x, e.y, e.dmg, col, size, mine && e.good);
+            if (mine && t) this.comboHit(t.id, e.dmg, e.x, e.y);
           }
           if (me) {
             this.shake = Math.max(this.shake, big ? 14 : 7);
@@ -416,7 +515,40 @@ export class GameRenderer {
             this.punch = Math.max(this.punch, 0.06);
           }
           if (e.by === playerId && e.cause !== 'crush') this.popup(e.x, e.y - 24, s?.isBoss ? '왕지네 처치!' : '처치!', 0xffffff, s?.isBoss ? 44 : 32);
-          if (e.cause === 'bird' && e.snake === playerId) this.popup(e.x, e.y - 20, '새에게 잡혔다', 0xffb0a0, 26);
+          if (e.cause === 'enemy' && e.snake === playerId) this.popup(e.x, e.y - 20, '천적에게 당했다', 0xffb0a0, 26);
+          break;
+        }
+        case 'drop': {
+          if (!this.isNear(e.x, e.y)) break;
+          this.addShape((g, k) => g.circle(e.x, e.y, e.r * (1.2 - k * 0.5)).stroke({ width: 6 * k, color: 0xbfe6ff, alpha: k }), 0.35);
+          for (let i = 0; i < 8; i++) this.spawnParticle(e.x, e.y, 0xbfe6ff, 80 + Math.random() * 120, 0.35, 0.4);
+          break;
+        }
+        case 'tongue': {
+          this.addShape((g, k) => {
+            g.moveTo(e.x0, e.y0).lineTo(e.x1, e.y1).stroke({ width: 26 * k, color: 0xff7aa8, alpha: k, cap: 'round' });
+            g.moveTo(e.x0, e.y0).lineTo(e.x1, e.y1).stroke({ width: 8 * k, color: 0xffc8dc, alpha: k, cap: 'round' });
+            g.circle(e.x1, e.y1, 22 * k).fill({ color: 0xff7aa8, alpha: k });
+          }, 0.35);
+          if (this.isNear(e.x1, e.y1)) this.shake = Math.max(this.shake, 10);
+          break;
+        }
+        case 'lick': {
+          this.addShape((g, k) => {
+            g.moveTo(e.x0, e.y0).lineTo(e.x1, e.y1).stroke({ width: e.w * (0.6 + 0.4 * k), color: 0xff8ab0, alpha: 0.85 * k, cap: 'round' });
+            g.moveTo(e.x0, e.y0).lineTo(e.x1, e.y1).stroke({ width: e.w * 0.25, color: 0xffd0e0, alpha: k, cap: 'round' });
+          }, 0.5);
+          this.shake = Math.max(this.shake, 12);
+          break;
+        }
+        case 'netSwoop': {
+          this.addShape((g, k) => g.circle(e.x, e.y, e.r * (1 + (1 - k) * 0.5)).stroke({ width: 10 * k, color: 0xffffff, alpha: k }), 0.4);
+          for (let i = 0; i < 20; i++) this.spawnParticle(e.x, e.y, 0xf0e6c0, 100 + Math.random() * 160, 0.5, 0.5);
+          if (this.isNear(e.x, e.y)) this.shake = Math.max(this.shake, 12);
+          break;
+        }
+        case 'released': {
+          for (let i = 0; i < 24; i++) this.spawnParticle(e.x, e.y, 0xffffff, 80 + Math.random() * 160, 0.6, 0.6);
           break;
         }
         case 'ring': {
@@ -470,12 +602,10 @@ export class GameRenderer {
           const col = LINEAGE[sp.lineage].color;
           for (let i = 0; i < 24; i++) this.spawnParticle(e.x, e.y, i % 2 ? col : 0xffffff, 80 + Math.random() * 180, 0.5, 0.6);
           this.addShape((g, k) => {
-            g.circle(e.x, e.y, 18 + (1 - k) * 70).stroke({ width: 8 * k, color: col, alpha: k });
-          }, 0.35);
-          if (e.snake === playerId) {
-            this.popup(e.x, e.y - 46, sp.skillName, 0xfff3b0, 26);
-            this.punch = Math.max(this.punch, 0.03);
-          }
+            g.circle(e.x, e.y, 18 + (1 - k) * 110).stroke({ width: 12 * k, color: col, alpha: k });
+            g.circle(e.x, e.y, 10 + (1 - k) * 60).stroke({ width: 6 * k, color: 0xffffff, alpha: k });
+          }, 0.5);
+          if (e.snake === playerId) this.punch = Math.max(this.punch, 0.05);
           break;
         }
         case 'skillHit': {
@@ -514,9 +644,9 @@ export class GameRenderer {
             g.circle(e.x, e.y, e.r * (0.3 + 0.8 * Math.sqrt(grow))).fill({ color: col, alpha: 0.3 * k });
             g.circle(e.x, e.y, e.r * (0.3 + 0.8 * Math.sqrt(grow))).stroke({ width: 14 * k, color: col, alpha: k });
             g.circle(e.x, e.y, e.r * (0.15 + 1.1 * grow)).stroke({ width: 5 * k, color: 0xffffff, alpha: k * 0.9 });
-            for (const c of cracks) g.poly(c, false).stroke({ width: 4 * k, color: 0x3a2a10, alpha: k * 0.7 });
-          }, 0.7);
-          for (let i = 0; i < 40; i++) this.spawnParticle(e.x, e.y, i % 2 ? col : 0xffffff, 120 + Math.random() * 360, 0.7, 0.7);
+            for (const c of cracks) g.poly(c, false).stroke({ width: 5 * k, color: 0x3a2a10, alpha: k * 0.7 });
+          }, 0.9);
+          for (let i = 0; i < 60; i++) this.spawnParticle(e.x, e.y, i % 2 ? col : 0xffffff, 120 + Math.random() * 360, 0.7, 0.7);
           if (this.isNear(e.x, e.y)) {
             this.shake = Math.max(this.shake, 12);
             this.punch = Math.max(this.punch, 0.04);
@@ -540,8 +670,15 @@ export class GameRenderer {
                 .lineTo(e.x + Math.cos(a) * e.range * (0.7 + 0.5 * grow), e.y + Math.sin(a) * e.range * (0.7 + 0.5 * grow))
                 .stroke({ width: 2.5 * k, color: 0xffffff, alpha: k * 0.7 });
             }
-          }, 0.4);
-          if (this.isNear(e.x, e.y)) this.shake = Math.max(this.shake, 7);
+          }, 0.6);
+          if (this.isNear(e.x, e.y)) {
+            this.shake = Math.max(this.shake, 12);
+            this.punch = Math.max(this.punch, 0.05);
+          }
+          for (let i = 0; i < 30; i++) {
+            const a = e.angle + (Math.random() - 0.5) * 2 * e.half;
+            this.spawnParticle(e.x + Math.cos(a) * e.range * 0.8, e.y + Math.sin(a) * e.range * 0.8, i % 2 ? 0xffd23f : 0xffffff, 60 + Math.random() * 160, 0.6, 0.6);
+          }
           break;
         }
         case 'birdDive': {
@@ -578,8 +715,8 @@ export class GameRenderer {
     this.particles.push({ s, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life, max: life, grow: -size * 0.6, drag: 3.2 });
   }
 
-  private popup(x: number, y: number, text: string, color: number, size: number, life?: number) {
-    const big = size >= 30;
+  private popup(x: number, y: number, text: string, color: number, size: number, life?: number, title = false) {
+    const big = size >= 30 || title;
     const t = new Text({
       text,
       style: {
@@ -597,7 +734,53 @@ export class GameRenderer {
     t.rotation = (Math.random() - 0.5) * 0.12;
     this.popupLayer.addChild(t);
     const L = life ?? (big ? 1.6 : 1.2);
-    this.popups.push({ t, vy: big ? -28 : -52, life: L, max: L });
+    this.popups.push({ t, vx: 0, vy: big ? -28 : -52, g: 0, life: L, max: L, big: 1.45 });
+    void title;
+  }
+
+  /** 피해 숫자: 옆으로 튀며 솟았다가 떨어진다 */
+  private dmgPop(x: number, y: number, dmg: number, color: number, size: number, bang: boolean) {
+    const t = new Text({
+      text: bang ? `${dmg}!` : String(dmg),
+      style: {
+        fontFamily: TITLE,
+        fontSize: size,
+        fill: color,
+        stroke: { color: INK, width: Math.max(5, size * 0.2), join: 'round' },
+        dropShadow: { color: 0x000000, alpha: 0.4, distance: 4, angle: Math.PI / 2, blur: 0 },
+        padding: 8,
+      },
+    });
+    t.anchor.set(0.5);
+    t.position.set(x + (Math.random() - 0.5) * 20, y - 10);
+    t.scale.set(0.2);
+    t.rotation = (Math.random() - 0.5) * 0.3;
+    this.popupLayer.addChild(t);
+    const iz = 1 / Math.max(0.5, this.zoom);
+    this.popups.push({ t, vx: (Math.random() - 0.5) * 240 * iz, vy: (-320 - Math.random() * 120) * iz, g: 900 * iz, life: 0.95, max: 0.95, big: 1.9 });
+  }
+
+  /** 내가 같은 상대를 연달아 때리면 콤보로 모아 보여 준다 */
+  private comboHit(id: number, dmg: number, x: number, y: number) {
+    let c = this.combos.get(id);
+    if (!c || c.life <= 0) {
+      if (c) c.t.destroy();
+      const t = new Text({
+        text: '',
+        style: { fontFamily: TITLE, fontSize: 22, fill: 0xffe066, stroke: { color: INK, width: 6, join: 'round' }, padding: 8 },
+      });
+      t.anchor.set(0.5);
+      this.popupLayer.addChild(t);
+      c = { t, n: 0, total: 0, life: 0, x, y };
+      this.combos.set(id, c);
+    }
+    c.n++;
+    c.total += dmg;
+    c.life = 1.1;
+    c.x = x;
+    c.y = y;
+    c.t.text = c.n >= 2 ? `${c.n}연타! ${c.total}` : '';
+    c.t.scale.set(1.5 / Math.max(0.6, this.zoom));
   }
 
   /** 종 초상화(카드·HUD·결과 화면용 이미지). 한 번 그려 두고 재사용 */
@@ -708,6 +891,7 @@ export class GameRenderer {
   render(frame: Frame, dt: number) {
     this.time += dt;
     this.shapeGfx.clear();
+    this.setMap(frame.map);
     const W = this.app.screen.width, H = this.app.screen.height;
     const player = frame.snakes.find((s) => s.id === frame.playerId);
 
@@ -751,7 +935,7 @@ export class GameRenderer {
       for (const w of g.wings) w.visible = false;
     }
     this.drawProjs(frame.projs);
-    this.drawBird(frame.bird);
+    this.drawEnemy(frame.enemy, frame.snakes);
     this.updateFx(dt);
   }
 
@@ -823,19 +1007,136 @@ export class GameRenderer {
     }
   }
 
-  private drawBird(bird: BirdView) {
-    const g = this.birdGfx;
+  /** 천적 그리기 */
+  private drawEnemy(en: EnemyView | null, snakes: FrameSnake[]) {
+    const g = this.enemyGfx;
     g.clear();
-    for (const sh of bird.shadows) {
-      const k = 1 - sh.t / sh.total;
-      const r = sh.r * (1.6 - 0.6 * k);
-      g.ellipse(sh.x, sh.y, r, r * 0.85).fill({ color: 0x000000, alpha: 0.12 + 0.35 * k });
-      const w = r * 1.1;
-      g.poly([sh.x - w, sh.y - r * 0.1, sh.x - w * 0.3, sh.y - r * 0.35, sh.x, sh.y - r * 0.15, sh.x + w * 0.3, sh.y - r * 0.35, sh.x + w, sh.y - r * 0.1, sh.x, sh.y + r * 0.3]).fill({
-        color: 0x000000,
-        alpha: 0.15 + 0.3 * k,
-      });
-      g.circle(sh.x, sh.y, sh.r).stroke({ width: 3, color: 0xff4a3a, alpha: 0.4 + 0.5 * Math.abs(Math.sin(this.time * 10)) * k });
+    const sg = this.screenGfx;
+    sg.clear();
+    if (!en) return;
+    const T = this.time;
+    if (en.kind === 'bird') {
+      for (const sh of en.shadows) {
+        const k = 1 - sh.t / sh.total;
+        const r = sh.r * (1.6 - 0.6 * k);
+        g.ellipse(sh.x, sh.y, r, r * 0.85).fill({ color: 0x000000, alpha: 0.12 + 0.35 * k });
+        const w = r * 1.1;
+        g.poly([sh.x - w, sh.y - r * 0.1, sh.x - w * 0.3, sh.y - r * 0.35, sh.x, sh.y - r * 0.15, sh.x + w * 0.3, sh.y - r * 0.35, sh.x + w, sh.y - r * 0.1, sh.x, sh.y + r * 0.3]).fill({ color: 0x000000, alpha: 0.15 + 0.3 * k });
+        g.circle(sh.x, sh.y, sh.r).stroke({ width: 4, color: 0xff4a3a, alpha: 0.4 + 0.5 * Math.abs(Math.sin(T * 10)) * k });
+      }
+    } else if (en.kind === 'frog') {
+      const { x, y } = en;
+      const a = en.angle;
+      if (en.warn > 0) g.circle(x, y, 120 + Math.sin(T * 8) * 10).stroke({ width: 6, color: 0xff4a3a, alpha: 0.7 });
+      if (en.aim) {
+        const k = 1 - en.aim.t / en.aim.total;
+        const dx = en.aim.x - x, dy = en.aim.y - y;
+        const d = Math.hypot(dx, dy) || 1;
+        const L = Math.min(CONFIG.frogRange, d + 140);
+        const ex = x + (dx / d) * L, ey = y + (dy / d) * L;
+        // 점선 예고선
+        const n = Math.floor(L / 40);
+        for (let i = 0; i < n; i += 2) {
+          const t0 = i / n, t1 = (i + 1) / n;
+          g.moveTo(x + (ex - x) * t0, y + (ey - y) * t0).lineTo(x + (ex - x) * t1, y + (ey - y) * t1);
+        }
+        g.stroke({ width: 6 + k * 10, color: 0xff3a2a, alpha: 0.5 + 0.4 * Math.abs(Math.sin(T * 14)) });
+        g.circle(en.aim.x, en.aim.y, 40 - k * 16).stroke({ width: 5, color: 0xff3a2a, alpha: 0.9 });
+      }
+      if (en.tongue) {
+        g.moveTo(x, y).lineTo(en.tongue.x, en.tongue.y).stroke({ width: 22, color: 0xff7aa8, cap: 'round' });
+        g.circle(en.tongue.x, en.tongue.y, 20).fill(0xff7aa8);
+      }
+      // 개구리 몸(가장자리에 앉아 안쪽을 본다)
+      const c = Math.cos(a), s2 = Math.sin(a);
+      const P = (fx: number, fy: number): [number, number] => [x + c * fx - s2 * fy, y + s2 * fx + c * fy];
+      const bob = Math.sin(T * 3) * 4;
+      g.ellipse(x + 10, y + 16, 110, 95).fill({ color: 0x000000, alpha: 0.2 });
+      for (const sd of [-1, 1]) {
+        const [lx, ly] = P(-50, sd * 85);
+        g.ellipse(lx, ly, 46, 28).fill(0x3f8f2a).stroke({ width: 6, color: INK });
+      }
+      g.circle(x, y, 95 + bob).fill(0x5cbf3a).stroke({ width: 7, color: INK });
+      g.ellipse(...P(10, 0), 60, 50).fill({ color: 0xc8f08a, alpha: 0.6 });
+      for (const sd of [-1, 1]) {
+        const [ex, ey] = P(40, sd * 52);
+        g.circle(ex, ey, 30).fill(0x5cbf3a).stroke({ width: 6, color: INK });
+        g.circle(ex, ey, 20).fill(0xfff6c8);
+        const [px, py] = P(46, sd * 52);
+        g.ellipse(px, py, 7, 14).fill(0x111111);
+      }
+      const [m1x, m1y] = P(80, -40), [m2x, m2y] = P(80, 40), [mcx, mcy] = P(96, 0);
+      g.moveTo(m1x, m1y).quadraticCurveTo(mcx, mcy, m2x, m2y).stroke({ width: 6, color: INK, cap: 'round' });
+    } else if (en.kind === 'rain') {
+      // 화면을 어둡게 + 빗줄기
+      const W = this.app.screen.width, H = this.app.screen.height;
+      sg.rect(0, 0, W, H).fill({ color: 0x1a2a48, alpha: en.warn > 0 ? 0.12 : 0.22 });
+      for (let i = 0; i < 70; i++) {
+        const rx = ((i * 137.5 + T * 900) % (W + 200)) - 100, ry = ((i * 91.3 + T * 1600) % (H + 200)) - 100;
+        sg.moveTo(rx, ry).lineTo(rx - 8, ry + 26).stroke({ width: 2, color: 0xcfe6ff, alpha: 0.45 });
+      }
+      for (const d of en.drops) {
+        const k = 1 - d.t / d.total;
+        g.circle(d.x, d.y, d.r).fill({ color: 0x2a5aa8, alpha: 0.12 + 0.22 * k });
+        g.circle(d.x, d.y, d.r * (1.6 - 0.6 * k)).stroke({ width: 4, color: 0x9ad0ff, alpha: 0.4 + 0.5 * k });
+      }
+    } else if (en.kind === 'centipede') {
+      // 왕지네는 곤충처럼 그려진다. 남은 시간만 표시
+    } else if (en.kind === 'anteater') {
+      const { x, y } = en;
+      if (en.strip) {
+        const st = en.strip;
+        if (st.t > 0) {
+          const k = 1 - st.t / st.total;
+          g.moveTo(x, y).lineTo(st.x1, st.y1).stroke({ width: st.w, color: 0xff3a2a, alpha: 0.12 + 0.2 * k, cap: 'round' });
+          // 화살표 무늬
+          const dx = st.x1 - x, dy = st.y1 - y, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
+          for (let d = ((T * 400) % 160); d < L; d += 160) {
+            const cx = x + ux * d, cy = y + uy * d;
+            g.moveTo(cx - ux * 30 - uy * 40, cy - uy * 30 + ux * 40).lineTo(cx, cy).lineTo(cx - ux * 30 + uy * 40, cy - uy * 30 - ux * 40).stroke({ width: 8, color: 0xff3a2a, alpha: 0.5 + 0.3 * k });
+          }
+          g.moveTo(x, y).lineTo(st.x1, st.y1).stroke({ width: 4, color: 0xff3a2a, alpha: 0.8 });
+        } else {
+          g.moveTo(x, y).lineTo(st.x1, st.y1).stroke({ width: st.w * 0.7, color: 0xff8ab0, alpha: 0.9, cap: 'round' });
+        }
+      }
+      // 주둥이
+      const a = en.angle, c = Math.cos(a), s2 = Math.sin(a);
+      g.poly([x - s2 * 90 - c * 60, y + c * 90 - s2 * 60, x + c * 130, y + s2 * 130, x + s2 * 90 - c * 60, y - c * 90 - s2 * 60]).fill(0x8a6a4a).stroke({ width: 7, color: INK, join: 'round' });
+      g.circle(x + c * 120, y + s2 * 120, 16).fill(0x2a1a10);
+      g.circle(x - s2 * 50, y + c * 50, 12).fill(0x111111);
+      g.circle(x + s2 * 50, y - c * 50, 12).fill(0x111111);
+    } else if (en.kind === 'child') {
+      const { x, y, r } = en;
+      const k = en.swoop;
+      // 그림자 → 내려칠수록 진해짐
+      g.circle(x, y, r * (1.25 - 0.25 * k)).fill({ color: 0x000000, alpha: 0.12 + 0.35 * k });
+      // 손잡이(화면 위쪽에서 내려옴)
+      g.moveTo(x + r * 0.7, y - r * 0.7).lineTo(x + r * 3, y - r * 6).stroke({ width: 14, color: 0x9a6a3a, cap: 'round' });
+      g.moveTo(x + r * 0.7, y - r * 0.7).lineTo(x + r * 3, y - r * 6).stroke({ width: 5, color: 0xd8a46a, cap: 'round' });
+      // 그물
+      const rr = r * (1.25 - 0.25 * k);
+      g.circle(x, y, rr).fill({ color: 0xffffff, alpha: 0.12 + 0.15 * k });
+      for (let i = -4; i <= 4; i++) {
+        const o = (i / 4.5) * rr;
+        const h = Math.sqrt(Math.max(0, rr * rr - o * o));
+        g.moveTo(x + o, y - h).lineTo(x + o, y + h);
+        g.moveTo(x - h, y + o).lineTo(x + h, y + o);
+      }
+      g.stroke({ width: 2, color: 0xffffff, alpha: 0.6 });
+      g.circle(x, y, rr).stroke({ width: 8, color: k > 0 ? 0xff3a2a : 0x3a7ad8 });
+    }
+    // 채집망에 갇힌 곤충: 흔들리는 그물 주머니
+    for (const s of snakes) {
+      if (!s.alive || !s.captured || s.segs.length < 2) continue;
+      const hx = s.segs[0] + Math.sin(T * 40) * 4, hy = s.segs[1];
+      const R = s.r * headMul(s) * 2.2;
+      g.circle(hx, hy, R).fill({ color: 0xffffff, alpha: 0.18 }).stroke({ width: 4, color: 0xffffff, alpha: 0.8 });
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + T;
+        g.moveTo(hx, hy).lineTo(hx + Math.cos(a) * R, hy + Math.sin(a) * R);
+      }
+      g.stroke({ width: 1.5, color: 0xffffff, alpha: 0.5 });
     }
   }
 
@@ -855,11 +1156,12 @@ export class GameRenderer {
         this.foodSprites.push(s);
       }
       s.visible = true;
-      s.position.set(x, y);
+      const ph = this.time * 3 + (x + y) * 0.05;
+      s.position.set(x, y + Math.sin(ph) * 2.5);
       const h = Math.abs(Math.floor(x * 7 + y * 13)) % FOOD_COLORS.length;
-      s.tint = kind === 1 ? 0xc8ff5a : kind === 2 ? 0xffb35a : FOOD_COLORS[h];
-      const pulse = 1 + 0.15 * Math.sin(this.time * 3 + i);
-      s.scale.set(((r * 4.2) / 64) * pulse * (kind === 1 ? 1.25 : 1));
+      s.tint = kind === 1 ? 0xb8ff3a : kind === 2 ? 0xffa03a : FOOD_COLORS[h];
+      const pulse = 1 + 0.18 * Math.sin(ph * 1.3);
+      s.scale.set(((r * 4.6) / 64) * pulse * (kind === 1 ? 1.3 : 1));
       used++;
     }
     for (let i = used; i < this.foodSprites.length; i++) this.foodSprites[i].visible = false;
@@ -1195,10 +1497,23 @@ export class GameRenderer {
         continue;
       }
       const age = p.max - p.life;
-      const pop = age < 0.12 ? 0.3 + (age / 0.12) * 1.15 : 1.45 - Math.min(0.45, (age - 0.12) * 2.6);
+      const peak = p.big;
+      const pop = age < 0.1 ? 0.3 + (age / 0.1) * (peak - 0.3) : peak - Math.min(peak - 1, (age - 0.1) * 3.2);
       p.t.scale.set(pop / Math.max(0.6, this.zoom));
+      p.vy += p.g * dt;
+      p.t.x += p.vx * dt;
       p.t.y += p.vy * dt;
-      p.t.alpha = Math.min(1, p.life / 0.35);
+      p.t.alpha = Math.min(1, p.life / 0.3);
+    }
+    for (const [id, c] of this.combos) {
+      c.life -= dt;
+      if (c.life <= 0) {
+        c.t.destroy();
+        this.combos.delete(id);
+        continue;
+      }
+      c.t.position.set(c.x, c.y - 70 / Math.max(0.6, this.zoom));
+      c.t.alpha = Math.min(1, c.life / 0.3);
     }
   }
 
