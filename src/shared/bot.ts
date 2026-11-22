@@ -171,7 +171,7 @@ function inFront(s: Snake, x: number, y: number, half: number, back = false) {
   return Math.abs(da) <= half;
 }
 
-function wantSkill(sim: Simulation, s: Snake, scared: boolean, target: Snake | null): boolean {
+export function wantSkill(sim: Simulation, s: Snake, scared: boolean, target: Snake | null): boolean {
   const parts = s.species.parts;
   const p: Part = parts[parts.length - 1];
   const main = parts[0];

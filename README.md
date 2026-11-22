@@ -33,6 +33,10 @@ npm test         # 게임 로직 자동 점검(화면 없이)
 npm run build    # dist/index.html 한 파일로 빌드
 npm run balance -- 1 8 > out.json   # 시드 1부터 8판을 화면 없이 돌려 밸런스 기록
 node scripts/balance-report.cjs out.json   # 진화 속도·단계 분포·싸움 양상 요약
+npx tsx scripts/species.ts field 1 8 > field.json     # 종별 실전 통계(피해·막은 피해·기술 1회당 피해·처치:쓰러짐)
+npx tsx scripts/species.ts duel 1 80 > duel.json      # 같은 단계 1:1 대결 승률표
+npx tsx scripts/species.ts ablate 1 200 > ablate.json # 기술 켜고/끄고 같은 종끼리 → 기술 자체의 가치
+node scripts/species-report.cjs field.json duel.json ablate.json
 ```
 
 시험용 주소 옵션: `?stage=3`(3단계로 시작), `?local=1`(시뮬레이션을 메인 스레드에서 돌림)
