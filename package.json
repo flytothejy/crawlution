@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "test": "tsx test/sim.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "balance": "tsx scripts/balance.ts"
   },
   "dependencies": {
     "pixi.js": "^8.23.0"

@@ -1,0 +1,45 @@
+// 사용: node scripts/balance-report.cjs out1.json out2.json ...
+const path = require('path');
+const A = process.argv.slice(2).map(f=>require(path.resolve(f)));
+const cat = k => A.flatMap(a=>a[k]);
+const R = A.reduce((s,a)=>s+a.rounds,0);
+const q=(arr,p)=>{if(!arr.length)return NaN;const s=[...arr].sort((a,b)=>a-b);return s[Math.min(s.length-1,Math.floor(p*(s.length)))]};
+const f=x=>Number.isFinite(x)?x.toFixed(0):'-';
+console.log('rounds',R);
+const lives=cat('lives');
+const gen0=lives.filter(l=>l.born===0||l.born<0.1);
+console.log('\n[1] 판 시작부터 태어난 곤충(플레이어 포함 '+gen0.length+'): 단계 도달 시간(초) p25/중앙/p75, 도달률');
+for(const st of [2,3,4,5]){const t=gen0.map(l=>l.reach[st]).filter(x=>x!==undefined);console.log(` ${st}단계: ${f(q(t,.25))}/${f(q(t,.5))}/${f(q(t,.75))}  도달 ${(100*t.length/gen0.length).toFixed(0)}%`)}
+const pl=lives.filter(l=>l.player);
+for(const st of [2,3,4,5]){const t=pl.map(l=>l.reach[st]).filter(x=>x!==undefined);console.log(` 플레이어 ${st}단계: ${f(q(t,.25))}/${f(q(t,.5))}/${f(q(t,.75))} 도달 ${t.length}/${pl.length}`)}
+const later=lives.filter(l=>l.born>=0.1);
+console.log(' 중간 투입 봇 '+later.length+'마리 시작 단계 분포', [1,2,3,4,5].map(s=>later.filter(l=>l.startStage===s).length));
+console.log(' 중간 투입 봇 5단계 도달 시간(태어난 뒤) 중앙', f(q(later.map(l=>l.reach[5]).filter(x=>x!==undefined),.5)), '도달률', (100*later.filter(l=>l.reach[5]!==undefined).length/later.length).toFixed(0)+'%');
+console.log('\n[2] 분별 단계 분포(%) 1~5단계');
+const sbm=Array.from({length:9},(_, m)=>[0,0,0,0,0,0]);
+for(const a of A) a.stageByMin.forEach((row,m)=>row.forEach((v,i)=>sbm[m][i]+=v));
+sbm.slice(0,8).forEach((row,m)=>{const t=row.reduce((a,b)=>a+b,0);console.log(` ${m}~${m+1}분: `+row.slice(1).map(v=>(100*v/t).toFixed(0).padStart(3)).join(' '))});
+const pst=[0,0,0,0,0,0];A.forEach(a=>a.playerStageTime.forEach((v,i)=>pst[i]+=v));const pt=pst.reduce((a,b)=>a+b,0);
+console.log('\n[3] 플레이어 단계별 시간 비율(%)', pst.slice(1).map(v=>(100*v/pt).toFixed(0)).join(' / '));
+const pf=cat('playerFinal');
+console.log(' 플레이어 순위', pf.map(p=>p.rank).join(','), '처치 평균', (pf.reduce((s,p)=>s+p.kills,0)/pf.length).toFixed(1), '길이 평균', f(pf.reduce((s,p)=>s+p.len,0)/pf.length), '쓰러짐/판', (A.reduce((s,a)=>s+a.playerDeaths,0)/R).toFixed(1));
+console.log(' 플레이어 보석 레벨 합 평균', (pf.reduce((s,p)=>s+p.st.reduce((a,b)=>a+b,0),0)/pf.length).toFixed(1), '능력치별', [0,1,2,3].map(i=>(pf.reduce((s,p)=>s+p.st[i],0)/pf.length).toFixed(1)).join('/'));
+const kills=cat('kills');
+const bySnake=kills.filter(k=>k.ks>0&&k.ks<9);
+console.log('\n[4] 쓰러짐 '+kills.length+'건 (판당 '+(kills.length/R).toFixed(0)+'), 원인', Object.entries(kills.reduce((m,k)=>(m[k.cause+(k.enemy?':'+k.enemy:'')]=(m[k.cause+(k.enemy?':'+k.enemy:'')]||0)+1,m),{})).map(([k,v])=>k+' '+(100*v/kills.length).toFixed(0)+'%').join(', '));
+const diff=d=>bySnake.filter(k=>k.ks-k.vs===d).length;
+console.log(' 곤충끼리 처치 '+bySnake.length+'건: 단계차(처치자-희생자)', [-3,-2,-1,0,1,2,3,4].map(d=>d+':'+(100*diff(d)/bySnake.length).toFixed(0)+'%').join(' '));
+console.log(' 약자가 이긴 비율(단계 낮음)', (100*bySnake.filter(k=>k.ks<k.vs).length/bySnake.length).toFixed(0)+'%', ' 같은 단계', (100*bySnake.filter(k=>k.ks===k.vs).length/bySnake.length).toFixed(0)+'%', ' 더 짧은 쪽이 이김', (100*bySnake.filter(k=>k.kl<k.vl).length/bySnake.length).toFixed(0)+'%');
+console.log(' 희생자 단계 분포', [1,2,3,4,5].map(s=>s+':'+(100*kills.filter(k=>k.vs===s).length/kills.length).toFixed(0)+'%').join(' '));
+const fd=cat('fightDur');console.log(' 싸움 시간(맞기 시작~쓰러짐, 초) p25/중앙/p75', q(fd,.25).toFixed(1), q(fd,.5).toFixed(1), q(fd,.75).toFixed(1));
+const dmg={};A.forEach(a=>Object.entries(a.dmg).forEach(([k,v])=>dmg[k]=(dmg[k]||0)+v));const dt=Object.values(dmg).reduce((a,b)=>a+b,0);
+console.log('\n[5] 피해 비중', Object.entries(dmg).sort((a,b)=>b[1]-a[1]).map(([k,v])=>k+' '+(100*v/dt).toFixed(0)+'%').join(', '));
+const ep={};A.forEach(a=>Object.entries(a.epSrc).forEach(([k,v])=>ep[k]=(ep[k]||0)+v));const et=Object.values(ep).reduce((a,b)=>a+b,0);
+console.log('\n[6] 진화 게이지(EP) 출처', Object.entries(ep).sort((a,b)=>b[1]-a[1]).map(([k,v])=>k+' '+(100*v/et).toFixed(0)+'%').join(', '));
+const ss=A.reduce((s,a)=>s+a.snakeSeconds,0);
+console.log('\n[7] 기술 사용: 곤충 1마리가 분당', (A.reduce((s,a)=>s+a.skillCasts,0)/(ss/60)).toFixed(1),'회 / 재진화(5단계에서 또 탈피) 판당', (A.reduce((s,a)=>s+a.reevolve,0)/R).toFixed(1), '/ 탈피 판당', (A.reduce((s,a)=>s+a.molts,0)/R).toFixed(0));
+const L={};A.forEach(a=>Object.entries(a.lineage).forEach(([k,v])=>{L[k]??={time:0,kills:0,deaths:0,dmg:0};for(const x in v)L[k][x]+=v[x]}));
+console.log('\n[8] 갈래별: 처치/분, 쓰러짐/분, 처치:쓰러짐, 피해/분, 상위3 횟수');
+const top={};A.forEach(a=>Object.entries(a.top3Lineage).forEach(([k,v])=>top[k]=(top[k]||0)+v));
+for(const [k,v] of Object.entries(L)) console.log(` ${k.padEnd(7)} ${(v.kills/(v.time/60)).toFixed(2)}  ${(v.deaths/(v.time/60)).toFixed(2)}  ${(v.kills/v.deaths).toFixed(2)}  ${f(v.dmg/(v.time/60))}  ${top[k]||0}`);
+console.log(' 상위3 애벌레', top.none||0);

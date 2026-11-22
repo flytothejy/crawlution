@@ -31,6 +31,8 @@ npm install
 npm run dev      # 개발 서버
 npm test         # 게임 로직 자동 점검(화면 없이)
 npm run build    # dist/index.html 한 파일로 빌드
+npm run balance -- 1 8 > out.json   # 시드 1부터 8판을 화면 없이 돌려 밸런스 기록
+node scripts/balance-report.cjs out.json   # 진화 속도·단계 분포·싸움 양상 요약
 ```
 
 시험용 주소 옵션: `?stage=3`(3단계로 시작), `?local=1`(시뮬레이션을 메인 스레드에서 돌림)
