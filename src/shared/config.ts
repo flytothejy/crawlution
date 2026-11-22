@@ -1,15 +1,17 @@
 // 모든 밸런스 값은 여기 한 곳에 모은다. 서버·클라이언트가 같은 파일을 쓴다.
-// 프로토타입 C: 8분 한 판(순위), 5단계·5갈래, 봇 20, 천적 6종, 체력 싸움
+// 2판 시험판: 8분 한 판(순위), 10계열 40종, 레벨 1~16 · 진화 3단계, 봇 20, 천적 6종
 
 export const CONFIG = {
   tickRate: 60, // 시뮬레이션 틱(초당). 멀티 서버에서는 20으로 낮춘다.
   arenaRadius: 3300, // 1.5배
   roundTime: 480, // 한 판 8분, 끝나면 점수 순위
 
-  // 이동(조작감: 빠릿하게)
-  stageSpeed: [0, 175, 183, 191, 199, 207], // 단계별 기본 속도 px/초 (인덱스 = 단계)
-  boostMul: 1.9,
-  sneakMul: 0.6,
+  // 이동(조작감: 빠릿하게). 속도 = (180 + 1.5 × (레벨−1) + 진화 보너스) × 계열 배율
+  baseSpeed: 180,
+  speedPerLevel: 1.5,
+  evoSpeed: [0, 0, 5, 10], // 단계(1 어린 모습, 2 성충, 3 각성)
+  boostMul: 1.75,
+  sneakMul: 0.55,
   turnRate: (560 * Math.PI) / 180, // 초당 최대 회전
   sneakTurnMul: 1.3,
   sizeTurnSlow: 0.15, // 몸이 가장 길 때 회전이 이만큼 둔해짐
@@ -18,55 +20,60 @@ export const CONFIG = {
 
   // 몸: 길이 제한 없음. 길수록 먹이당 성장이 느려지고 몸이 굵어진다.
   startSegments: 20,
-  stageGrowth: [0, 1 / 2, 1 / 3, 1 / 4, 1 / 5, 1 / 6], // 먹은 EP당 마디(길이 0 기준)
-  growthSlowLen: 220, // 성장량 = 기본 ÷ (1 + 길이/이 값)
-  stageRadius: [0, 9, 11.2, 13.6, 16.4, 19.8], // 탈피할 때마다 확 굵어짐
-  thickPerSeg: 1 / 380, // 길이에 따라 더 굵어짐(시작 길이 넘는 마디당)
+  evoGrowth: [0, 0.5, 0.36, 0.26], // 먹은 영양당 마디(길이 0 기준)
+  growthSlowLen: 220,
+  evoRadius: [0, 9, 13, 17],
+  thickPerSeg: 1 / 380,
   thickMax: 0.7,
   spacingRatio: 0.72,
-  botStartSegs: [0, 20, 35, 55, 80, 110],
 
-  // 체력·싸움
-  stageHp: [0, 50, 90, 140, 200, 270],
+  // 레벨과 영양
+  maxLevel: 16,
+  evoLevels: [0, 1, 5, 10], // 이 레벨에 이 단계가 된다
+  evoMul: [0, 1, 1.2, 1.45], // 진화 배율 E
+  nutBase: 20, // 다음 레벨까지 = 20 + 8 × (레벨 − 1)
+  nutStep: 7,
+  nutMul: 0.78, // 전체 영양 배율(시뮬레이션으로 맞춤: 각성 3분 40초 안팎)
+  remainsFrac: 0.3, // 잔해 = 그 곤충이 모은 영양의 30%
+  remainsWeakMul: 0.5, // 내 레벨이 더 높으면 절반
+  firstNewCards: 3, // 처음 세 번은 새 능력이 적어도 1장
+  rerolls: 1,
+
+  // 체력·싸움 (기술 수치표 공통 공식)
+  hpBase: 60,
+  hpPerLevel: 0.1,
   hpPerSeg: 0.6,
-  biteDamage: [0, 8, 13, 19, 26, 34],
+  biteBase: 8,
+  bitePerLevel: 0.06,
+  skillBase: 30, // 기준 피해 B
+  skillPerLevel: 0.08,
   biteCooldown: 0.35,
-  stageDmgStep: 0.25, // 단계 1 차이마다 피해 ±25%
-  favorMul: 1.1, // 상성 유리(약하게: 갈래 차이는 능력치로)
-  unfavorMul: 0.92, // 상성 불리
-  strongRatio: 1.2, // 피해 배수가 상대의 이 배 이상이면 '강함'(같은 단계 상성만으로는 안 됨) // 피해 배수가 상대의 이 배 이상이면 '강함'
-  recoilMul: 0.6, // 강한 몸에 박으면 상대 물기의 이만큼 내가 받음
-  guardMul: 0.5, // 웅크리기(살금) 중 받는 피해
-  huntBiteCooldown: 0.27,
-  poisonBiteDot: 0.5, // 독 갈래: 물기 피해의 이만큼을 2초에 걸쳐 추가
-  spiderBiteSlow: 0.8, // 거미 갈래: 물린 적 느려짐(초)
-  regenDelay: 3, // 마지막 피해 후 이 시간이 지나면 회복
-  regenRate: 0.05, // 초당 최대 체력의 비율
-  foodHeal: 1.5, // 먹이 EP당 회복
-  tailDropPerDmg: 1 / 12, // 피해 12마다 꼬리 1마디가 떨어짐
-  skillDamage: [0, 0, 40, 60, 80, 105], // 기술은 더 세게
+  recoilLevelGap: 3, // 나보다 레벨이 이만큼 높은 몸에 박으면 반동
+  recoilMul: 0.5,
+  guardMul: 0.5, // 웅크리기 중 받는 피해
+  regenDelay: 3,
+  regenRate: 0.05,
+  foodHeal: 1.5,
+  tailDropPerDmg: 1 / 12,
   knockback: 10,
-  wallDamage: 0.15, // 경계에 부딪히면 최대 체력의 이만큼
+  wallDamage: 0.15,
   invulnTime: 3,
   lives: 3,
   respawnDelay: 2,
+  evolveTime: 1, // 진화 연출(무적)
+  tailCritSegs: 0.12,
+  tailCritFrac: 0.15,
+  poisonTick: 0.4,
 
-  // 약자의 한 방
-  tailCritSegs: 0.12, // 꼬리 끝 이 비율(최소 4마디)을 물면 급소
-  tailCritFrac: 0.15, // 급소: 상성·단계 무시, 상대 최대 체력의 이만큼
-  rageMax: 100,
-  rageGain: 160, // 강한 적에게 받은 피해 비율(내 최대 체력 대비) × 이 값만큼 역습 게이지
-  rageFrac: 0.3, // 역습 일격: 상대 최대 체력의 이만큼 추가
-
-  // 진화
-  stageGauge: [0, 40, 90, 160, 250, 300], // 그 단계에서 새로 모으는 EP(5단계는 변신·강화용)
-  moltTime: 1.5,
-  moltTimeSwitch: 2.5, // 갈래를 바꾸면
-  moltSpeedMul: 0.5,
-  masteryMax: 5,
-  masteryCdCut: 0.07,
-  masteryHp: 0.06, // 숙련 ★마다 최대 체력
-  cardScanRadius: 1200,
+  // 필살기
+  ultMax: 100,
+  ultDealt: 12, // 준 피해 ÷ B × 12
+  ultTaken: 80 * 1.5, // 받은 피해 ÷ 최대 체력 × 80, 받는 쪽은 1.5배
+  ultKill: 15,
+  ultLike: 20,
+  ultPassive: 0.3,
+  ultCapFrac: 0.4, // 한 대상에게 최대 체력의 40%까지
+  ultTele: 0.5, // 0.5초 전에 범위 예고
 
   // 먹이
   foodCount: 1150,
@@ -76,33 +83,24 @@ export const CONFIG = {
   bigFoodEP: 4,
   bigFoodRadius: 15,
   remainsRadius: 11,
-  // 보석(능력치 성장): ❤ 체력 · 🦷 공격 · ⚡ 속도 · ✨ 기술
-  gemCount: 36,
-  gemRadius: 14,
-  gemEP: 3,
-  statMax: 10,
-  statHp: 0.06, // 레벨마다 최대 체력 +6%
-  statAtk: 0.06, // 물기 피해 +6%
-  statSpd: 0.02, // 이동 속도 +2%
-  statSkl: 0.06, // 기술 피해 +6%
-  statCd: 0.025, // 기술 재사용 시간 -2.5%
-  gemDropMax: 6, // 쓰러지면 보석 레벨 절반(최대 이만큼)을 떨어뜨린다
-  // 특별 먹이: 좋아하는 갈래는 폭풍 성장, 싫어하는 갈래는 느려짐
+  goldCount: 20,
+  goldEP: 12,
+  goldRadius: 15,
   specialCount: 30,
   specialRadius: 17,
-  specialEP: 6, // 보통 갈래
-  likeEP: 30, // 좋아하는 갈래
-  likeSegs: 8, // 좋아하면 바로 늘어나는 마디
+  specialEP: 6,
+  likeEP: 30,
+  likeSegs: 8,
   likeHeal: 0.3,
-  feastTime: 3, // 폭풍 성장 연출 시간
+  feastTime: 3,
   yuckTime: 4,
-  yuckMul: 0.6, // 싫어하면 이 배율로 느려짐
+  yuckMul: 0.6,
+  magnetRadius: 60, // 기본 먹이 끌어당김
 
   // 감싸기
   loopMinIndex: 12,
   loopMinRadiusPerR: 4, // 최소 고리 반지름 = 내 반지름 × 이 값
   crushDelay: 1.0,
-  crushDelayFast: 0.4, // 토종벌 '열 공' 중
   loopCooldown: 0.6,
   comboBonus: 1.5,
 
@@ -111,7 +109,6 @@ export const CONFIG = {
   botRespawnDelay: 3,
   botHunterSegments: 38,
   botGraceSeconds: 12,
-  botFavorableChance: 0.6,
 
   // 왕지네(천적): 45초 동안 1등을 쫓는다. 누구나 때릴 수 있고 잡으면 큰 점수
   bossSegments: 120,
@@ -155,24 +152,27 @@ export const CONFIG = {
   birdRadius: 130,
   birdDamage: 0.55, // 머리가 그림자 안: 최대 체력의 이만큼(몸만 걸리면 60%)
 
-  // 상태 이상
-  poisonTick: 0.4,
-  poisonZoneDps: 0.3, // 독 장판: 초당 (시전자 스킬 피해 × 이 값)
 
   // 점수
   scoreKill: 50,
   scoreCrush: 100,
-  scoreMolt: 200,
+  scoreLevel: 40,
   scoreBoss: 1500, // 왕지네 처치
 } as const;
 
 export type Config = typeof CONFIG;
 
-export function radiusFor(stage: number, lineageRadius = 1, segCount: number = CONFIG.startSegments): number {
+export function radiusFor(evo: number, segCount: number = CONFIG.startSegments, mul = 1): number {
   const thick = Math.min(CONFIG.thickMax, Math.max(0, segCount - CONFIG.startSegments) * CONFIG.thickPerSeg);
-  return CONFIG.stageRadius[Math.max(1, Math.min(5, stage))] * lineageRadius * (1 + thick);
+  return CONFIG.evoRadius[Math.max(1, Math.min(3, evo))] * (1 + thick) * mul;
 }
 
-export function maxHpFor(stage: number, segCount: number, mastery = 0, hpMul = 1, hpLv = 0): number {
-  return Math.round((CONFIG.stageHp[Math.max(1, Math.min(5, stage))] + segCount * CONFIG.hpPerSeg) * (1 + CONFIG.masteryHp * mastery) * hpMul * (1 + CONFIG.statHp * hpLv));
+/** 다음 레벨까지 필요한 영양 */
+export function nutNeed(level: number): number {
+  return CONFIG.nutBase + CONFIG.nutStep * (level - 1);
+}
+
+/** 레벨 → 진화 단계(1~3) */
+export function evoOf(level: number): number {
+  return level >= CONFIG.evoLevels[3] ? 3 : level >= CONFIG.evoLevels[2] ? 2 : 1;
 }

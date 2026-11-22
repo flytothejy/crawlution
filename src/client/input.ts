@@ -1,6 +1,6 @@
-// 조작 → 명령. PC: 마우스 방향 + 왼쪽 클릭/스페이스(부스트) + Shift(살금살금)
-// 스킬: E 또는 오른쪽 클릭 / 진화 카드: 1·2·3 키 또는 카드 누르기
-// 모바일: 화면 아무 곳이나 끌기(가상 조이스틱) + 부스트·살금·스킬 버튼
+// 조작 → 명령. PC: 마우스 방향 + 왼쪽 클릭/스페이스(질주) + Shift(웅크리기)
+// 주 기술: E 또는 오른쪽 클릭 / 보조 기술: Q / 카드: 1·2·3·4 키 또는 카드 누르기 / 다시 뽑기: R
+// 모바일: 화면 아무 곳이나 끌기(가상 조이스틱) + 질주·웅크리기·주 기술·보조 기술 버튼
 import type { Command } from '../shared/types';
 
 export class Input {
@@ -18,16 +18,27 @@ export class Input {
   private btnSneak = false;
   private joy: { id: number; ox: number; oy: number } | null = null;
   private skillSeq = 0;
-  private moltSeq = 0;
-  private moltChoice = 0;
+  private subSeq = 0;
+  private cardSeq = 0;
+  private cardChoice = 0;
+  private rerollSeq = 0;
+  onCardKey: (i: number) => void = () => {};
 
   skill() {
     this.skillSeq++;
   }
 
-  molt(choice: number) {
-    this.moltChoice = choice;
-    this.moltSeq++;
+  sub() {
+    this.subSeq++;
+  }
+
+  card(choice: number) {
+    this.cardChoice = choice;
+    this.cardSeq++;
+  }
+
+  reroll() {
+    this.rerollSeq++;
   }
 
   constructor(
@@ -37,6 +48,7 @@ export class Input {
     private joyEl: HTMLElement,
     private knobEl: HTMLElement,
     skillBtn: HTMLElement,
+    subBtn: HTMLElement,
   ) {
     this.touch = 'ontouchstart' in window || matchMedia('(pointer: coarse)').matches;
     canvas.style.touchAction = 'none';
@@ -90,7 +102,9 @@ export class Input {
       if (e.key === 'Shift') this.keySneak = true;
       if (e.repeat) return;
       if (e.code === 'KeyE') this.skill();
-      if (e.key === '1' || e.key === '2' || e.key === '3') this.molt(Number(e.key) - 1);
+      if (e.code === 'KeyQ') this.sub();
+      if (e.code === 'KeyR') this.reroll();
+      if (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4') this.onCardKey(Number(e.key) - 1);
     });
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space') this.keyBoost = false;
@@ -123,6 +137,11 @@ export class Input {
       e.stopPropagation();
       this.skill();
     });
+    subBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.sub();
+    });
   }
 
   /** headX, headY: 화면에서 내 머리 위치 */
@@ -133,11 +152,11 @@ export class Input {
     }
     this.sneak = this.keySneak || this.btnSneak;
     this.boost = !this.sneak && (this.mouseBoost || this.keyBoost || this.btnBoost);
-    return { angle: this.angle, boost: this.boost, sneak: this.sneak, skillSeq: this.skillSeq, moltSeq: this.moltSeq, moltChoice: this.moltChoice };
+    return { angle: this.angle, boost: this.boost, sneak: this.sneak, skillSeq: this.skillSeq, subSeq: this.subSeq, cardSeq: this.cardSeq, cardChoice: this.cardChoice, rerollSeq: this.rerollSeq };
   }
 
   resetSeq() {
-    this.skillSeq = this.moltSeq = 0;
+    this.skillSeq = this.subSeq = this.cardSeq = this.rerollSeq = 0;
   }
 
   resetHolds() {

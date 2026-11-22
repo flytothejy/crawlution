@@ -33,7 +33,7 @@ function loop() {
 self.onmessage = (e: MessageEvent<HostIn>) => {
   const m = e.data;
   if (m.type === 'start') {
-    sim = new Simulation(m.seed, m.playerName, m.startStage ?? 1, undefined, m.opts);
+    sim = new Simulation(m.seed, m.playerName, m.opts);
     last = performance.now();
     acc = 0;
     paused = false;

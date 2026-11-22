@@ -2,12 +2,18 @@
 import { Application, BitmapFont, BitmapText, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
 import { CONFIG } from '../shared/config';
 import { relation } from '../shared/combat';
-import { LINEAGE, SPECIAL_FOODS, SPECIES_BY_ID, STATS, taste, type Lineage } from '../shared/species';
-import type { EnemyView, GameEvent, MapTheme, MapView, ProjView, RingView, SnakeView, ZoneView } from '../shared/types';
+import { FAMILY, likerOf, SPECIAL_FOODS, SPECIES_BY_ID, taste, type FamilyId } from '../shared/species';
+import type { EnemyView, FxKind, GameEvent, MapTheme, MapView, MinionView, ProjView, RingView, SnakeView, TeleView, ZoneView } from '../shared/types';
 import { headKit, HR, type HeadKit, type HeadPart } from './heads';
-import { lookOf } from './look';
+import { lookKey, lookOf } from './look';
 
-export { lookOf };
+export { lookOf, lookKey };
+
+/** 계열 색(보스·없음은 빨강) */
+export function famColor(f: FamilyId | null | undefined, k: 1 | 2 = 1): number {
+  if (!f) return 0xff4a3a;
+  return k === 1 ? FAMILY[f].color : FAMILY[f].color2;
+}
 
 const FOOD_COLORS = [0xfff07a, 0xa6f37a, 0x7ae3f3, 0xf3a1d7, 0xffc37a, 0xd6a1ff];
 const FONT = 'Jua, system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif';
@@ -24,9 +30,19 @@ export interface Frame {
   rings: RingView[];
   zones: ZoneView[];
   projs: ProjView[];
+  minions: MinionView[];
+  teles: TeleView[];
   enemy: EnemyView | null;
   map: MapView;
   playerId: number;
+}
+
+interface Aura {
+  kind: 'whirl' | 'circle' | 'lantern' | 'compound' | 'sky';
+  life: number;
+  max: number;
+  r: number;
+  col: number;
 }
 
 interface PartSprite {
@@ -36,7 +52,8 @@ interface PartSprite {
 }
 
 interface SnakeGfx {
-  species: string;
+  species: string; // 모습 열쇠
+  level: number;
   kit: HeadKit;
   head: Container;
   wings: Sprite[];
@@ -141,8 +158,7 @@ interface Ghost {
 /** 머리 크기 = 몸 반지름 × 이 값(진화할수록 커짐) */
 function headMul(s: SnakeView) {
   if (s.isBoss) return 1.55;
-  if (s.stage <= 1) return 1.3;
-  return 1.35 + 0.09 * s.stage;
+  return [1.3, 1.3, 1.6, 1.78][s.stage] ?? 1.6;
 }
 
 export class GameRenderer {
@@ -151,6 +167,12 @@ export class GameRenderer {
   private bg!: TilingSprite;
   private foodLayer = new Container();
   private zoneGfx = new Graphics();
+  private teleGfx = new Graphics();
+  private minionGfx = new Graphics();
+  private auras = new Map<number, Aura[]>();
+  private playerFam: FamilyId | null = null;
+  private playerLv = 1;
+  reveal = false;
   private ringGfx = new Graphics();
   private markGfx = new Graphics();
   private shadowLayer = new Container();
@@ -192,6 +214,7 @@ export class GameRenderer {
   private fxSpriteLayer = new Container();
   private screenFx = new Graphics();
   private speedLines = 0;
+  private screenFlash = 0;
   private flashT = new Map<number, number>(); // 맞았을 때 하얗게 번쩍
   private biteT = new Map<number, number>(); // 물 때 큰턱 닫힘
   private strikeT = new Map<number, number>(); // 스킬 쓸 때 낫·턱 휘두름
@@ -220,7 +243,7 @@ export class GameRenderer {
     BitmapFont.install({
       name: 'dmg',
       style: { fontFamily: TITLE, fontSize: 64, fill: 0xffffff, stroke: { color: INK, width: 12, join: 'round' }, dropShadow: { color: 0x000000, alpha: 0.4, distance: 5, angle: Math.PI / 2, blur: 0 } },
-      chars: [['0', '9'], '!', '연타급소역습 ×+-'],
+      chars: [['0', '9'], '!', '연타급소역습필살 ×+-'],
       resolution: 1,
       padding: 8,
     });
@@ -238,8 +261,8 @@ export class GameRenderer {
     this.glowLayer.blendMode = 'add';
 
     this.world.addChild(
-      this.bg, mask, this.deco, border, this.mapLayer, this.decalLayer, this.zoneGfx, this.foodBackLayer, this.foodLayer, this.ringGfx, this.markGfx,
-      this.shadowLayer, this.glowLayer, this.legLayer, this.bodyLayer, this.ghostLayer, this.headLayer, this.statusGfx, this.shapeGfx,
+      this.bg, mask, this.deco, border, this.mapLayer, this.decalLayer, this.zoneGfx, this.teleGfx, this.foodBackLayer, this.foodLayer, this.ringGfx, this.markGfx,
+      this.shadowLayer, this.glowLayer, this.legLayer, this.bodyLayer, this.ghostLayer, this.headLayer, this.minionGfx, this.statusGfx, this.shapeGfx,
       this.fxSpriteLayer, this.fxLayer, this.enemyGfx, this.hpGfx, this.labelLayer, this.popupLayer,
     );
     this.fxSpriteLayer.blendMode = 'add';
@@ -353,6 +376,12 @@ export class GameRenderer {
     this.tex.like = badge(0x3fc83a, (g) => g.moveTo(16, 24).bezierCurveTo(4, 15, 9, 6, 16, 11.5).bezierCurveTo(23, 6, 28, 15, 16, 24).fill(0xffffff));
     this.tex.hate = badge(0xe0402a, (g) => g.moveTo(10, 10).lineTo(22, 22).moveTo(22, 10).lineTo(10, 22).stroke({ width: 4.5, color: 0xffffff, cap: 'round' }));
 
+    // 황금 꿀방울
+    const hd = new Graphics();
+    hd.moveTo(32, 4).bezierCurveTo(44, 22, 56, 34, 56, 44).bezierCurveTo(56, 58, 44, 64, 32, 64).bezierCurveTo(20, 64, 8, 58, 8, 44).bezierCurveTo(8, 34, 20, 22, 32, 4).fill(0xffc21a).stroke({ width: 5, color: INK });
+    hd.ellipse(24, 40, 6, 10).fill({ color: 0xffffff, alpha: 0.75 });
+    hd.ellipse(40, 52, 9, 5).fill({ color: 0xffef9a, alpha: 0.7 });
+    this.tex.honeydrop = r.generateTexture({ target: hd, resolution: 2 });
     const dot = new Graphics();
     for (let i = 5; i >= 1; i--) dot.circle(16, 16, 3 + i * 2.4).fill({ color: 0xffffff, alpha: 0.12 });
     dot.circle(16, 16, 4).fill(0xffffff);
@@ -495,17 +524,25 @@ export class GameRenderer {
     g.label.destroy();
   }
 
+  private labelText(s: FrameSnake) {
+    const spName = SPECIES_BY_ID.get(s.species)?.name ?? '';
+    return s.isBoss ? '👑 왕지네' : s.isPlayer ? `Lv${s.level} 나 · ${spName}` : `Lv${s.level} ${s.name} · ${spName}`;
+  }
+
   private getSnakeGfx(s: FrameSnake): SnakeGfx {
     let g = this.snakes.get(s.id);
-    if (g && g.species === s.species) return g;
+    const key = lookKey(s.species, s.stage);
+    if (g && g.species === key) {
+      if (g.level !== s.level) ((g.level = s.level), (g.label.text = this.labelText(s)));
+      return g;
+    }
     if (g) this.dropGfx(g);
-    const look = lookOf(s.species);
+    const look = lookOf(key);
     const feats = new Set(look.feats ?? []);
-    const kit = headKit(this.app.renderer, s.species);
+    const kit = headKit(this.app.renderer, key);
     const head = new Container();
-    const spName = SPECIES_BY_ID.get(s.species)?.name ?? '';
     const label = new Text({
-      text: s.isBoss ? '👑 왕지네' : s.isPlayer ? `나 · ${spName}` : `${s.name} · ${spName}`,
+      text: this.labelText(s),
       style: { fontFamily: FONT, fontSize: s.isBoss ? 20 : 14, fill: s.isBoss ? 0xffb0a0 : s.isPlayer ? 0xd6ff8a : 0xffffff, stroke: { color: INK, width: 4, join: 'round' } },
     });
     label.anchor.set(0.5, 1);
@@ -541,7 +578,7 @@ export class GameRenderer {
     this.headLayer.addChild(head);
     this.labelLayer.addChild(label);
     g = {
-      species: s.species, kit, head, wings, stinger, headBase, parts, label,
+      species: key, level: s.level, kit, head, wings, stinger, headBase, parts, label,
     };
     this.snakes.set(s.id, g);
     return g;
@@ -554,11 +591,10 @@ export class GameRenderer {
         case 'eat': {
           if (!this.isNear(e.x, e.y)) break;
           const mine = e.snake === playerId;
-          if (e.gem !== undefined) {
-            const st = STATS[e.gem];
-            for (let i = 0; i < 16; i++) this.spawnParticle(e.x, e.y, i % 3 ? st.color : 0xffffff, 90 + Math.random() * 160, 0.5, 0.55);
+          if (e.gold) {
+            for (let i = 0; i < 18; i++) this.spawnParticle(e.x, e.y, i % 3 ? 0xffc21a : 0xffffff, 90 + Math.random() * 160, 0.5, 0.55);
             if (mine) {
-              this.popup(e.x, e.y - 24, `${st.icon} ${st.name} Lv${e.lv}`, mix(st.color, 0xffffff, 0.35), 24, 1.3);
+              this.popup(e.x, e.y - 24, '🍯 다시 뽑기 +1', 0xffe066, 24, 1.3);
               this.punch = Math.max(this.punch, 0.025);
             }
             break;
@@ -594,8 +630,7 @@ export class GameRenderer {
           this.flashT.set(e.snake, 0.13);
           if (e.by >= 0 && e.kind === 'bite') this.biteT.set(e.by, 0.25);
           const big = e.dmg >= 25;
-          // 물기: 이빨 자국(두 호가 맞물림)
-          if (e.kind === 'bite' || e.kind === 'recoil') {
+          if (e.kind === 'bite' || e.kind === 'recoil' || e.kind === 'crit') {
             const col = e.good ? 0xffd23f : 0xffffff;
             const ang = Math.random() * Math.PI;
             this.addShape((g, k) => {
@@ -603,24 +638,24 @@ export class GameRenderer {
               g.moveTo(e.x + Math.cos(ang - 0.9) * rr, e.y + Math.sin(ang - 0.9) * rr).arc(e.x, e.y, rr, ang - 0.9, ang + 0.9).stroke({ width: 5 * k, color: col, alpha: k });
               g.moveTo(e.x + Math.cos(ang + Math.PI - 0.9) * rr, e.y + Math.sin(ang + Math.PI - 0.9) * rr).arc(e.x, e.y, rr, ang + Math.PI - 0.9, ang + Math.PI + 0.9).stroke({ width: 5 * k, color: col, alpha: k });
             }, 0.22);
-            for (let i = 0; i < (big ? 12 : 6); i++) this.spawnParticle(e.x, e.y, i % 2 ? col : t ? lookOf(t.species).body : 0xffffff, 80 + Math.random() * 140, 0.35, 0.45);
+            for (let i = 0; i < (big ? 12 : 6); i++) this.spawnParticle(e.x, e.y, i % 2 ? col : t ? lookOf(lookKey(t.species, t.stage)).body : 0xffffff, 80 + Math.random() * 140, 0.35, 0.45);
           }
-          // 피해 숫자: 튀어 올랐다 떨어지고, 급소·역습은 크게
-          const special = e.kind === 'crit' || e.kind === 'rage';
+          if (e.kind === 'poison' && e.dmg < 6 && !me) break;
+          const special = e.kind === 'crit' || e.kind === 'ult';
           if (mine || me || e.dmg >= 10 || special) {
             let col = 0xffffff, size = 24 + Math.min(30, e.dmg / 2.2);
-            if (me) col = e.kind === 'recoil' ? 0xd08aff : 0xff5a4a;
-            else if (mine) col = e.good ? 0xffd23f : 0xffffff;
+            if (me) col = e.kind === 'recoil' || e.kind === 'reflect' ? 0xd08aff : 0xff5a4a;
+            else if (mine) col = e.kind === 'poison' ? 0x9aff5a : e.kind === 'minion' ? 0xffe08a : 0xffd23f;
             else ((col = 0xe0e0e0), (size *= 0.7));
             if (special) {
               col = e.kind === 'crit' ? 0xff7a1a : 0xff3a8a;
               size = Math.max(size, 40);
-              this.popup(e.x, e.y - 40, e.kind === 'crit' ? '급소!' : '역습!', 0xffffff, 26, 0.9, true);
-              this.shake = Math.max(this.shake, 16);
+              if (e.kind === 'crit') this.popup(e.x, e.y - 40, '급소!', 0xffffff, 26, 0.9, true);
+              this.shake = Math.max(this.shake, e.kind === 'ult' ? 12 : 16);
               this.punch = Math.max(this.punch, 0.06);
-              for (let i = 0; i < 26; i++) this.spawnParticle(e.x, e.y, i % 2 ? col : 0xffffff, 140 + Math.random() * 260, 0.6, 0.7);
+              for (let i = 0; i < 20; i++) this.spawnParticle(e.x, e.y, i % 2 ? col : 0xffffff, 140 + Math.random() * 260, 0.6, 0.7);
             }
-            this.dmgPop(e.x, e.y, e.dmg, col, size, mine && e.good);
+            this.dmgPop(e.x, e.y, e.dmg, col, size, mine && special);
             if (mine && t) this.comboHit(t.id, e.dmg, e.x, e.y);
           }
           if (me) {
@@ -634,7 +669,7 @@ export class GameRenderer {
         }
         case 'death': {
           const s = snakesById.get(e.snake);
-          const col = s ? lookOf(s.species).body : 0xffffff;
+          const col = s ? lookOf(lookKey(s.species, s.stage)).body : 0xffffff;
           const n = s?.isBoss ? 140 : 34;
           for (let i = 0; i < n; i++) this.spawnParticle(e.x, e.y, i % 3 ? col : 0xffffff, 80 + Math.random() * (s?.isBoss ? 520 : 260), 0.8, s?.isBoss ? 1.1 : 0.7);
           this.addShape((g, k) => g.circle(e.x, e.y, 20 + (1 - k) * (s?.isBoss ? 300 : 120)).stroke({ width: 10 * k, color: col, alpha: k }), 0.5);
@@ -644,6 +679,7 @@ export class GameRenderer {
           }
           if (e.by === playerId && e.cause !== 'crush') this.popup(e.x, e.y - 24, s?.isBoss ? '왕지네 처치!' : '처치!', 0xffffff, s?.isBoss ? 44 : 32);
           if (e.cause === 'enemy' && e.snake === playerId) this.popup(e.x, e.y - 20, '천적에게 당했다', 0xffb0a0, 26);
+          this.auras.delete(e.snake);
           break;
         }
         case 'drop': {
@@ -700,23 +736,44 @@ export class GameRenderer {
           for (let i = 0; i < 4; i++) this.spawnParticle(e.x, e.y, 0xffffff, 60 + Math.random() * 60, 0.25, 0.3);
           break;
         }
-        case 'matchup':
-          this.popup(e.x, e.y - 34, e.text, e.good ? 0x9dff7a : 0xff8a7a, 24);
+        case 'pop':
+          if (e.snake === playerId || this.isNear(e.x, e.y)) this.popup(e.x, e.y, e.text, e.color, e.snake === playerId ? 24 : 17);
           break;
-        case 'molt': {
-          const sp = SPECIES_BY_ID.get(e.species);
-          const col = sp ? LINEAGE[sp.lineage].color : 0xffffff;
+        case 'levelUp': {
+          if (!this.isNear(e.x, e.y)) break;
+          const s = snakesById.get(e.snake);
+          const col = famColor(s?.family);
+          for (let i = 0; i < 14; i++) this.spawnParticle(e.x + (Math.random() - 0.5) * 40, e.y + (Math.random() - 0.5) * 40, i % 2 ? 0xfff3a0 : col, 40 + Math.random() * 80, 0.8, 0.45);
+          this.addShape((g, k) => g.circle(e.x, e.y - (1 - k) * 30, 14 + (1 - k) * 40).stroke({ width: 5 * k, color: 0xfff3a0, alpha: k }), 0.6);
+          if (e.snake === playerId) this.popup(e.x, e.y - 40, `레벨 ${e.level}!`, 0xfff3a0, 30, 1.2, true);
+          break;
+        }
+        case 'evolveStart':
+          this.pulseT.set(e.snake, 1);
+          break;
+        case 'evolve': {
+          const s = snakesById.get(e.snake);
+          const col = famColor(s?.family);
           this.pulseT.set(e.snake, 0.7);
           if (!this.isNear(e.x, e.y)) break;
-          for (let i = 0; i < 70; i++) this.spawnParticle(e.x, e.y, i % 3 ? col : 0xffffff, 100 + Math.random() * 320, 1, 0.8);
+          for (let i = 0; i < 80; i++) this.spawnParticle(e.x, e.y, i % 3 ? col : 0xffffff, 100 + Math.random() * 340, 1, 0.8);
+          this.fx('flare', e.x, e.y, col, 60, 420, 0.8, 0, 1.5);
+          this.fx('ring', e.x, e.y, 0xffffff, 40, 380, 0.7);
+          // 껍질 조각이 튄다
+          for (let j = 0; j < 10; j++) {
+            const a = (j / 10) * Math.PI * 2 + Math.random() * 0.3;
+            this.addShape((g, k) => {
+              const d = 20 + (1 - k) * 140;
+              const x = e.x + Math.cos(a) * d, y = e.y + Math.sin(a) * d;
+              g.poly([x - 8, y - 5, x + 7, y - 7, x + 5, y + 6, x - 6, y + 5]).fill({ color: col, alpha: k }).stroke({ width: 2, color: INK, alpha: k });
+            }, 0.8);
+          }
+          // 빛 기둥
           this.addShape((g, k) => {
-            g.circle(e.x, e.y, 20 + (1 - k) * 200).stroke({ width: 12 * k, color: col, alpha: k });
-            g.circle(e.x, e.y, 10 + (1 - k) * 120).stroke({ width: 6 * k, color: 0xffffff, alpha: k });
-            for (let j = 0; j < 12; j++) {
-              const a = (j / 12) * Math.PI * 2 + (1 - k);
-              g.moveTo(e.x + Math.cos(a) * 30, e.y + Math.sin(a) * 30).lineTo(e.x + Math.cos(a) * (60 + (1 - k) * 160), e.y + Math.sin(a) * (60 + (1 - k) * 160)).stroke({ width: 4 * k, color: 0xffffff, alpha: k * 0.8 });
-            }
-          }, 0.8);
+            const w = 50 * (0.4 + k);
+            g.rect(e.x - w / 2, e.y - 400, w, 400).fill({ color: col, alpha: 0.25 * k });
+            g.rect(e.x - w / 6, e.y - 400, w / 3, 400).fill({ color: 0xffffff, alpha: 0.5 * k });
+          }, 0.9);
           if (e.snake === playerId) {
             this.shake = Math.max(this.shake, 12);
             this.punch = Math.max(this.punch, 0.08);
@@ -724,106 +781,36 @@ export class GameRenderer {
           break;
         }
         case 'skill': {
-          const sp = SPECIES_BY_ID.get(e.species);
           this.strikeT.set(e.snake, 0.45);
-          if (!this.isNear(e.x, e.y) || !sp) break;
-          const col = LINEAGE[sp.lineage].color;
-          for (let i = 0; i < 24; i++) this.spawnParticle(e.x, e.y, i % 2 ? col : 0xffffff, 80 + Math.random() * 180, 0.5, 0.6);
-          this.fx('flare', e.x, e.y, col, 40, 260, 0.5, 0, 2);
-          this.fx('ring', e.x, e.y, col, 30, 300, 0.5);
-          this.addShape((g, k) => {
-            g.circle(e.x, e.y, 18 + (1 - k) * 110).stroke({ width: 12 * k, color: col, alpha: k });
-            g.circle(e.x, e.y, 10 + (1 - k) * 60).stroke({ width: 6 * k, color: 0xffffff, alpha: k });
-          }, 0.5);
-          if (e.snake === playerId) this.punch = Math.max(this.punch, 0.05);
+          if (!this.isNear(e.x, e.y)) break;
+          const col = famColor(e.fam);
+          const n = e.slot === 'ult' ? 40 : 14;
+          for (let i = 0; i < n; i++) this.spawnParticle(e.x, e.y, i % 2 ? col : 0xffffff, 80 + Math.random() * 180, 0.5, 0.6);
+          if (e.slot === 'ult') {
+            this.fx('flare', e.x, e.y, col, 60, 380, 0.6, 0, 2);
+            if (e.snake === playerId) this.punch = Math.max(this.punch, 0.08);
+          } else this.fx('flare', e.x, e.y, col, 30, 160, 0.35, 0, 2);
+          if (e.snake === playerId) this.punch = Math.max(this.punch, 0.04);
           break;
         }
+        case 'fx':
+          this.skillFx(e, playerId);
+          break;
+        case 'ultReady':
+          if (e.snake === playerId) this.pulseT.set(e.snake, 0.4);
+          break;
         case 'skillHit': {
           if (!this.isNear(e.x, e.y)) break;
-          const col = { cut: 0xffffff, stun: 0xffe066, push: 0xbfe0ff, slow: 0x9ad0ff, root: 0xd0c0ff }[e.kind];
-          for (let i = 0; i < 14; i++) this.spawnParticle(e.x, e.y, col, 80 + Math.random() * 160, 0.45, 0.55);
+          const col = { cut: 0xffffff, stun: 0xffe066, push: 0xbfe0ff, slow: 0x9ad0ff, root: 0xe8e0ff, blind: 0xf6ff8a, mark: 0xff7a5a, fear: 0xb88aff, silence: 0xff9a9a, grab: 0xd8b878, poison: 0x9aff5a }[e.kind];
+          for (let i = 0; i < 12; i++) this.spawnParticle(e.x, e.y, col, 80 + Math.random() * 160, 0.45, 0.55);
           if (e.kind === 'cut') {
-            // X자 베기 자국
             const a = Math.random() * Math.PI;
             this.fx('slash', e.x, e.y, 0xffd23f, 50, 90, 0.3, a, 0);
             this.fx('slash', e.x, e.y, 0xffffff, 50, 90, 0.3, a + Math.PI / 2, 0);
-            this.fx('flare', e.x, e.y, 0xffffff, 30, 110, 0.25);
-            this.addShape((g, k) => {
-              const L = 34 * (1.2 - k * 0.2);
-              for (const d of [a, a + Math.PI / 2]) {
-                g.moveTo(e.x - Math.cos(d) * L, e.y - Math.sin(d) * L).lineTo(e.x + Math.cos(d) * L, e.y + Math.sin(d) * L).stroke({ width: 10 * k, color: 0xffd23f, alpha: k * 0.6 });
-                g.moveTo(e.x - Math.cos(d) * L, e.y - Math.sin(d) * L).lineTo(e.x + Math.cos(d) * L, e.y + Math.sin(d) * L).stroke({ width: 4 * k, color: 0xffffff, alpha: k });
-              }
-            }, 0.3);
           } else if (e.kind === 'stun') {
             this.addShape((g, k) => g.star(e.x, e.y, 8, 16 + (1 - k) * 30, 8 + (1 - k) * 12).fill({ color: 0xffe066, alpha: k * 0.8 }), 0.35);
-          }
-          break;
-        }
-        case 'aoe': {
-          const col = { cut: 0xff9a3a, stun: 0xffe066, push: 0xbfe0ff }[e.kind];
-          this.fx('ring', e.x, e.y, col, e.r * 0.4, e.r * 2.6, 0.55);
-          this.fx('ring', e.x, e.y, 0xffffff, e.r * 0.2, e.r * 2.0, 0.4);
-          this.fx('flare', e.x, e.y, col, e.r * 0.8, e.r * 2.4, 0.45, 0, 1.5);
-          this.decal(e.x, e.y, e.r * 1.1, 0x1a1008);
-          if (this.isNear(e.x, e.y)) this.speedLines = 0.35;
-          const cracks: number[][] = [];
-          for (let j = 0; j < 9; j++) {
-            const pts = [e.x, e.y];
-            let a = (j / 9) * Math.PI * 2 + Math.random() * 0.4;
-            for (let s = 1; s <= 4; s++) {
-              a += (Math.random() - 0.5) * 0.6;
-              pts.push(e.x + Math.cos(a) * e.r * 0.22 * s, e.y + Math.sin(a) * e.r * 0.22 * s);
-            }
-            cracks.push(pts);
-          }
-          this.addShape((g, k) => {
-            const grow = 1 - k;
-            g.circle(e.x, e.y, e.r * (0.3 + 0.8 * Math.sqrt(grow))).fill({ color: col, alpha: 0.3 * k });
-            g.circle(e.x, e.y, e.r * (0.3 + 0.8 * Math.sqrt(grow))).stroke({ width: 14 * k, color: col, alpha: k });
-            g.circle(e.x, e.y, e.r * (0.15 + 1.1 * grow)).stroke({ width: 5 * k, color: 0xffffff, alpha: k * 0.9 });
-            for (const c of cracks) g.poly(c, false).stroke({ width: 5 * k, color: 0x3a2a10, alpha: k * 0.7 });
-          }, 0.9);
-          for (let i = 0; i < 60; i++) this.spawnParticle(e.x, e.y, i % 2 ? col : 0xffffff, 120 + Math.random() * 360, 0.7, 0.7);
-          if (this.isNear(e.x, e.y)) {
-            this.shake = Math.max(this.shake, 12);
-            this.punch = Math.max(this.punch, 0.04);
-          }
-          break;
-        }
-        case 'cone': {
-          const col = e.kind === 'cut' ? 0xffd23f : 0xffe066;
-          // 칼날 3겹이 부채꼴을 따라 휘두르듯 지나간다
-          for (let j = 0; j < 3; j++) {
-            const rr = e.range * (0.75 + j * 0.25);
-            this.fx('slash', e.x + Math.cos(e.angle) * rr * 0.35, e.y + Math.sin(e.angle) * rr * 0.35, j === 1 ? 0xffffff : col, rr * 1.1, rr * 1.5, 0.35 + j * 0.08, e.angle - 0.5 + j * 0.25, 2.5);
-          }
-          this.fx('flare', e.x, e.y, col, 60, 220, 0.35);
-          this.decal(e.x + Math.cos(e.angle) * e.range * 0.6, e.y + Math.sin(e.angle) * e.range * 0.6, e.range * 0.6, 0x2a1a08);
-          if (this.isNear(e.x, e.y)) this.speedLines = 0.3;
-          this.addShape((g, k) => {
-            const grow = 1 - k;
-            g.moveTo(e.x, e.y).arc(e.x, e.y, e.range * (0.5 + 0.55 * grow), e.angle - e.half, e.angle + e.half).lineTo(e.x, e.y).fill({ color: col, alpha: 0.22 * k });
-            // 겹친 초승달 베기
-            for (let j = 0; j < 3; j++) {
-              const rr = e.range * (0.55 + 0.22 * j) * (0.85 + 0.3 * grow);
-              const a0 = e.angle - e.half * (1.1 - j * 0.15), a1 = e.angle + e.half * (1.1 - j * 0.15);
-              g.moveTo(e.x + Math.cos(a0) * rr, e.y + Math.sin(a0) * rr).arc(e.x, e.y, rr, a0, a1).stroke({ width: (16 - j * 4) * k, color: j === 1 ? 0xffffff : col, alpha: k });
-            }
-            for (let j = 0; j < 7; j++) {
-              const a = e.angle - e.half + (j / 6) * e.half * 2;
-              g.moveTo(e.x + Math.cos(a) * e.range * 0.3, e.y + Math.sin(a) * e.range * 0.3)
-                .lineTo(e.x + Math.cos(a) * e.range * (0.7 + 0.5 * grow), e.y + Math.sin(a) * e.range * (0.7 + 0.5 * grow))
-                .stroke({ width: 2.5 * k, color: 0xffffff, alpha: k * 0.7 });
-            }
-          }, 0.6);
-          if (this.isNear(e.x, e.y)) {
-            this.shake = Math.max(this.shake, 12);
-            this.punch = Math.max(this.punch, 0.05);
-          }
-          for (let i = 0; i < 30; i++) {
-            const a = e.angle + (Math.random() - 0.5) * 2 * e.half;
-            this.spawnParticle(e.x + Math.cos(a) * e.range * 0.8, e.y + Math.sin(a) * e.range * 0.8, i % 2 ? 0xffd23f : 0xffffff, 60 + Math.random() * 160, 0.6, 0.6);
+          } else if (e.kind === 'mark' || e.kind === 'blind') {
+            this.fx('flare', e.x, e.y, col, 30, 120, 0.35);
           }
           break;
         }
@@ -835,6 +822,284 @@ export class GameRenderer {
         }
       }
     }
+  }
+
+  // ---------- 계열별 기술 연출 ----------
+
+  private addAura(id: number, kind: Aura['kind'], life: number, r: number, col: number) {
+    const list = this.auras.get(id) ?? [];
+    list.push({ kind, life, max: life, r, col });
+    this.auras.set(id, list);
+  }
+
+  private skillFx(e: Extract<GameEvent, { type: 'fx' }>, playerId: number) {
+    const c = famColor(e.fam), c2 = famColor(e.fam, 2);
+    const near = this.isNear(e.x, e.y);
+    const mine = e.snake === playerId;
+    const r = e.r ?? 100, a = e.angle ?? 0, len = e.len ?? 200, half = e.half ?? 0.6;
+    const hit = (shake: number, punch: number) => {
+      if (!near) return;
+      this.shake = Math.max(this.shake, mine ? shake : shake * 0.4);
+      if (mine) this.punch = Math.max(this.punch, punch);
+    };
+    switch (e.kind as FxKind) {
+      case 'charge':
+        this.lineFx(e.x, e.y, a, len, e.awake ? 90 : 50, c, 0xffe0a0);
+        for (let i = 0; i < 30; i++) this.spawnParticle(e.x + Math.cos(a) * Math.random() * len, e.y + Math.sin(a) * Math.random() * len, i % 2 ? 0x9a7a4a : 0xd8b88a, 60 + Math.random() * 120, 0.8, 0.6);
+        hit(10, 0.05);
+        break;
+      case 'shock':
+      case 'thud':
+      case 'slam':
+        this.aoeFx(e.x, e.y, r, e.kind === 'slam' ? 0xffb03a : 0xd89a4a, true);
+        hit(e.kind === 'slam' ? 20 : 14, 0.06);
+        break;
+      case 'lift':
+      case 'grab':
+      case 'scissor':
+        this.coneFx(e.x, e.y, a, r, e.kind === 'scissor' ? half : 0.7, e.kind === 'scissor' ? 0xffe8a0 : c, e.kind === 'scissor');
+        if (e.kind === 'scissor') {
+          const hx = e.x + Math.cos(a) * r * 0.6, hy = e.y + Math.sin(a) * r * 0.6;
+          this.fx('slash', hx, hy, 0xfff0b0, 60, 120, 0.3, a + 0.8, 0);
+          this.fx('slash', hx, hy, 0xffffff, 60, 120, 0.3, a - 0.8, 0);
+          for (let i = 0; i < 20; i++) this.spawnParticle(hx, hy, i % 2 ? 0xffd23f : 0xffffff, 120 + Math.random() * 200, 0.4, 0.4);
+        }
+        hit(8, 0.04);
+        break;
+      case 'throw':
+        this.lineFx(e.x, e.y, a, 160, 30, c, 0xffffff);
+        hit(10, 0.04);
+        break;
+      case 'push':
+        this.coneFx(e.x, e.y, a, r, 0.7, c, false);
+        for (let k = 1; k <= 3; k++) setTimeout(() => this.coneFx(e.x, e.y, a, r, 0.7, c, false), k * 450);
+        break;
+      case 'sweep':
+        this.coneFx(e.x, e.y, a, r, half, 0xd8ff9a, true);
+        hit(12, 0.05);
+        break;
+      case 'combo':
+        this.coneFx(e.x, e.y, a, r, half, e.awake ? 0xffffff : 0xc8ff8a, true);
+        hit(e.awake ? 12 : 6, 0.03);
+        break;
+      case 'stab':
+        this.lineFx(e.x, e.y, a, len, 26, 0xe8fff0, 0xb8ff7a);
+        hit(10, 0.05);
+        break;
+      case 'threat':
+        this.ringFx(e.x, e.y, r, 0xc88aff);
+        for (const sd of [-1, 1])
+          this.addShape((g, k) => {
+            const w = 60 * (1.4 - k * 0.4);
+            g.ellipse(e.x + sd * w * 0.6, e.y - 10, w * 0.6, w * 0.35).fill({ color: 0xe8f0ff, alpha: 0.55 * k }).stroke({ width: 3, color: INK, alpha: k });
+            g.circle(e.x + sd * w * 0.7, e.y - 10, 8).fill({ color: 0x5a3aa8, alpha: k });
+          }, 0.6);
+        hit(6, 0.03);
+        break;
+      case 'whirl':
+        this.addAura(e.snake, 'whirl', 2, r, 0xd8ff9a);
+        hit(10, 0.06);
+        break;
+      case 'dive':
+      case 'snatch':
+        this.lineFx(e.x, e.y, a, len, 36, c, c2);
+        break;
+      case 'land':
+        this.aoeFx(e.x, e.y, r, c, false);
+        hit(10, 0.05);
+        break;
+      case 'circle':
+        this.addAura(e.snake, 'circle', 1.5, r, c);
+        break;
+      case 'lip':
+        this.lineFx(e.x, e.y, a, len, 20, 0xd8b88a, 0xffffff);
+        break;
+      case 'compound':
+        this.ringFx(e.x, e.y, 160, c);
+        this.addAura(e.snake, 'compound', 3, 60, c);
+        break;
+      case 'sting':
+        this.fx('flare', e.x + Math.cos(a) * 20, e.y + Math.sin(a) * 20, 0xb8ff5a, 20, 90, 0.25);
+        break;
+      case 'rain':
+        this.ringFx(e.x, e.y, r, 0xf2c230);
+        hit(6, 0.03);
+        break;
+      case 'cloud':
+        for (let i = 0; i < 26; i++) this.spawnParticle(e.x + (Math.random() - 0.5) * r, e.y + (Math.random() - 0.5) * r, i % 2 ? 0xa8b850 : 0x7a8a3a, 30 + Math.random() * 50, 1.1, 0.9);
+        break;
+      case 'jet':
+        this.lineFx(e.x, e.y, a, len, 40, 0xb8c860, 0xe8f0a0);
+        break;
+      case 'backjet':
+        this.coneFx(e.x, e.y, a, len, half, 0xa8b850, false);
+        for (let i = 0; i < 24; i++) {
+          const aa = a + (Math.random() - 0.5) * half * 2;
+          this.spawnParticle(e.x + Math.cos(aa) * len * Math.random(), e.y + Math.sin(aa) * len * Math.random(), i % 2 ? 0xa8b850 : 0x7a8a3a, 30 + Math.random() * 60, 0.9, 0.8);
+        }
+        break;
+      case 'gasburst':
+        this.aoeFx(e.x, e.y, r, 0x9aa83a, false);
+        for (let i = 0; i < 60; i++) this.spawnParticle(e.x, e.y, i % 3 ? 0x8a9a3a : 0xd8e870, 120 + Math.random() * 300, 1.2, 1);
+        hit(16, 0.07);
+        break;
+      case 'web':
+      case 'prison':
+        this.ringFx(e.x, e.y, r, 0xf0f0ff);
+        if (e.kind === 'prison') hit(10, 0.06);
+        break;
+      case 'silk':
+        break;
+      case 'pit':
+      case 'hell':
+        this.ringFx(e.x, e.y, r, 0xd8b878);
+        for (let i = 0; i < 30; i++) this.spawnParticle(e.x + (Math.random() - 0.5) * r * 1.6, e.y + (Math.random() - 0.5) * r * 1.6, 0xe8d0a0, 40 + Math.random() * 80, 0.8, 0.5);
+        if (e.kind === 'hell') hit(14, 0.06);
+        break;
+      case 'sand':
+        this.coneFx(e.x, e.y, a, len, half, 0xe8d0a0, false);
+        for (let i = 0; i < 30; i++) {
+          const aa = a + (Math.random() - 0.5) * half * 2;
+          const d = Math.random() * len;
+          this.spawnParticle(e.x + Math.cos(aa) * d, e.y + Math.sin(aa) * d, i % 2 ? 0xe8d0a0 : 0xc8a870, 40 + Math.random() * 80, 0.6, 0.45);
+        }
+        break;
+      case 'ambush':
+        if (e.awake) {
+          this.aoeFx(e.x, e.y, r, 0xd8b878, true);
+          hit(14, 0.06);
+        } else for (let i = 0; i < 20; i++) this.spawnParticle(e.x, e.y, 0xd8b878, 60 + Math.random() * 100, 0.6, 0.6);
+        break;
+      case 'summon':
+      case 'alarm':
+        for (let i = 0; i < (e.awake ? 50 : 20); i++) this.spawnParticle(e.x, e.y, i % 2 ? 0xffd23f : 0x3a2a10, 80 + Math.random() * 200, 0.6, 0.5);
+        if (e.awake) this.ringFx(e.x, e.y, 200, 0xffd23f);
+        break;
+      case 'honey':
+        this.ringFx(e.x, e.y, r, 0xffc21a);
+        break;
+      case 'heat':
+        this.fx('flare', e.x, e.y, 0xff8a1c, 40, 140, 0.5);
+        break;
+      case 'waggle':
+        this.ringFx(e.x, e.y, r, 0xffd23f);
+        this.ringFx(e.x, e.y, r * 0.6, 0xffffff);
+        break;
+      case 'flash':
+        this.fx('flare', e.x, e.y, 0xf6ff8a, r * 0.6, r * 2.6, 0.5, 0, 2);
+        this.ringFx(e.x, e.y, r, 0xf6ff8a);
+        hit(6, 0.04);
+        if (near) this.screenFlash = Math.max(this.screenFlash, mine ? 0.25 : 0.45);
+        break;
+      case 'signal':
+        this.fx('flare', e.x, e.y, 0xd8ff5a, 20, 90, 0.3);
+        break;
+      case 'lantern':
+        this.addAura(e.snake, 'lantern', 4, r, 0xd8ff5a);
+        break;
+      case 'aurora':
+        this.fx('flare', e.x, e.y, 0x7affc8, r * 0.5, r * 3, 0.9, 0, 1);
+        for (let k = 0; k < 3; k++) setTimeout(() => this.ringFx(e.x, e.y, r * (0.6 + k * 0.25), [0x7affc8, 0xd8ff5a, 0x9ac8ff][k]), k * 120);
+        if (near) this.screenFlash = Math.max(this.screenFlash, 0.5);
+        hit(12, 0.07);
+        break;
+      case 'camo':
+        for (let i = 0; i < 18; i++) this.spawnParticle(e.x, e.y, i % 2 ? 0x7ac84a : 0x3a6a2a, 50 + Math.random() * 90, 0.6, 0.5);
+        break;
+      case 'hop':
+      case 'roll':
+      case 'backstep':
+      case 'escape':
+        for (let i = 0; i < 12; i++) this.spawnParticle(e.x, e.y, 0xffffff, 60 + Math.random() * 120, 0.4, 0.4);
+        break;
+      case 'curl':
+      case 'backplate':
+      case 'bitter':
+      case 'playdead':
+      case 'fang':
+        this.ringFx(e.x, e.y, 60, e.kind === 'bitter' ? 0x9aff5a : e.kind === 'fang' ? 0xb88aff : 0x9ad0ff);
+        if (e.kind === 'playdead' && near) this.popup(e.x, e.y - 30, 'Zzz…', 0xcfe8ff, 22);
+        break;
+      case 'heal':
+        for (let i = 0; i < 20; i++) this.spawnParticle(e.x + (Math.random() - 0.5) * 50, e.y + (Math.random() - 0.5) * 50, i % 2 ? 0x7dff5a : 0xffffff, 30 + Math.random() * 60, 0.8, 0.5);
+        break;
+      case 'chirp':
+        for (let k = 0; k < 3; k++) setTimeout(() => this.ringFx(e.x, e.y, r * (0.5 + k * 0.25), 0xfff3a0), k * 90);
+        hit(6, 0.03);
+        break;
+      case 'decoy':
+        if (e.x1 !== undefined && e.y1 !== undefined) this.lineFx(e.x1, e.y1, Math.atan2(e.y - e.y1, e.x - e.x1), Math.hypot(e.x - e.x1, e.y - e.y1), 20, 0xffffff, 0xcfe8ff);
+        break;
+    }
+  }
+
+  /** 부채꼴: 칼날 3겹이 휘두르듯 지나간다 */
+  private coneFx(x: number, y: number, angle: number, range: number, half: number, col: number, slashes: boolean) {
+    if (slashes)
+      for (let j = 0; j < 3; j++) {
+        const rr = range * (0.75 + j * 0.25);
+        this.fx('slash', x + Math.cos(angle) * rr * 0.35, y + Math.sin(angle) * rr * 0.35, j === 1 ? 0xffffff : col, rr * 1.1, rr * 1.5, 0.35 + j * 0.08, angle - 0.5 + j * 0.25, 2.5);
+      }
+    this.addShape((g, k) => {
+      const grow = 1 - k;
+      g.moveTo(x, y).arc(x, y, range * (0.5 + 0.55 * grow), angle - half, angle + half).lineTo(x, y).fill({ color: col, alpha: 0.22 * k });
+      for (let j = 0; j < 3; j++) {
+        const rr = range * (0.55 + 0.22 * j) * (0.85 + 0.3 * grow);
+        const a0 = angle - half * (1.1 - j * 0.15), a1 = angle + half * (1.1 - j * 0.15);
+        g.moveTo(x + Math.cos(a0) * rr, y + Math.sin(a0) * rr).arc(x, y, rr, a0, a1).stroke({ width: (14 - j * 4) * k, color: j === 1 ? 0xffffff : col, alpha: k });
+      }
+    }, 0.5);
+    if (this.isNear(x, y)) this.speedLines = Math.max(this.speedLines, 0.25);
+    for (let i = 0; i < 18; i++) {
+      const a = angle + (Math.random() - 0.5) * 2 * half;
+      this.spawnParticle(x + Math.cos(a) * range * 0.8, y + Math.sin(a) * range * 0.8, i % 2 ? col : 0xffffff, 60 + Math.random() * 160, 0.5, 0.55);
+    }
+  }
+
+  /** 원형 폭발: 충격파 + 금 간 땅 */
+  private aoeFx(x: number, y: number, r: number, col: number, cracks: boolean) {
+    this.fx('ring', x, y, col, r * 0.4, r * 2.6, 0.55);
+    this.fx('ring', x, y, 0xffffff, r * 0.2, r * 2.0, 0.4);
+    this.fx('flare', x, y, col, r * 0.8, r * 2.4, 0.45, 0, 1.5);
+    this.decal(x, y, r * 1.1, 0x1a1008);
+    if (this.isNear(x, y)) this.speedLines = 0.35;
+    const lines: number[][] = [];
+    if (cracks)
+      for (let j = 0; j < 9; j++) {
+        const pts = [x, y];
+        let a = (j / 9) * Math.PI * 2 + Math.random() * 0.4;
+        for (let s = 1; s <= 4; s++) {
+          a += (Math.random() - 0.5) * 0.6;
+          pts.push(x + Math.cos(a) * r * 0.22 * s, y + Math.sin(a) * r * 0.22 * s);
+        }
+        lines.push(pts);
+      }
+    this.addShape((g, k) => {
+      const grow = 1 - k;
+      g.circle(x, y, r * (0.3 + 0.8 * Math.sqrt(grow))).fill({ color: col, alpha: 0.3 * k });
+      g.circle(x, y, r * (0.3 + 0.8 * Math.sqrt(grow))).stroke({ width: 14 * k, color: col, alpha: k });
+      g.circle(x, y, r * (0.15 + 1.1 * grow)).stroke({ width: 5 * k, color: 0xffffff, alpha: k * 0.9 });
+      for (const c of lines) g.poly(c, false).stroke({ width: 5 * k, color: 0x3a2a10, alpha: k * 0.7 });
+    }, 0.8);
+    for (let i = 0; i < 40; i++) this.spawnParticle(x, y, i % 2 ? col : 0xffffff, 120 + Math.random() * 320, 0.7, 0.7);
+  }
+
+  /** 직선: 빛줄기 + 잔상 */
+  private lineFx(x: number, y: number, angle: number, len: number, w: number, col: number, core: number) {
+    const ex = x + Math.cos(angle) * len, ey = y + Math.sin(angle) * len;
+    this.addShape((g, k) => {
+      g.moveTo(x, y).lineTo(ex, ey).stroke({ width: w * (0.5 + 0.5 * k), color: col, alpha: 0.35 * k, cap: 'round' });
+      g.moveTo(x, y).lineTo(ex, ey).stroke({ width: w * 0.3 * k, color: core, alpha: 0.9 * k, cap: 'round' });
+    }, 0.4);
+    for (let i = 0; i < 16; i++) {
+      const t = Math.random();
+      this.spawnParticle(x + (ex - x) * t, y + (ey - y) * t, i % 2 ? col : core, 40 + Math.random() * 90, 0.45, 0.5);
+    }
+  }
+
+  private ringFx(x: number, y: number, r: number, col: number) {
+    this.fx('ring', x, y, col, r * 0.5, r * 2.1, 0.55);
+    this.addShape((g, k) => g.circle(x, y, r * (0.6 + 0.45 * (1 - k))).stroke({ width: 8 * k, color: col, alpha: k * 0.85 }), 0.5);
   }
 
   private addShape(draw: (g: Graphics, k: number) => void, life: number) {
@@ -951,15 +1216,17 @@ export class GameRenderer {
   }
 
   /** 종 초상화(카드·HUD·결과 화면용 이미지). 한 번 그려 두고 재사용 */
-  portrait(species: string): string {
-    const cached = this.portraits.get(species);
+  portrait(key: string): string {
+    if (!key.includes('@') && key !== 'boss') key = `${key}@2`;
+    const cached = this.portraits.get(key);
     if (cached) return cached;
-    const look = lookOf(species);
+    const look = lookOf(key);
     const feats = new Set(look.feats ?? []);
-    const kit = headKit(this.app.renderer, species);
+    const kit = headKit(this.app.renderer, key);
+    const grub = look.shape === 'cute';
     const c = new Container();
     const r = 22, scale = (r * 2) / 64;
-    const n = species === 'boss' ? 8 : species === 'caterpillar' ? 6 : 5;
+    const n = key === 'boss' ? 8 : grub ? 6 : 5;
     const ang = -0.65;
     const pts: [number, number][] = [[0, 0]];
     for (let i = 1; i < n; i++) {
@@ -969,7 +1236,7 @@ export class GameRenderer {
     }
     const spider = feats.has('legs8'), centi = feats.has('centipede');
     for (let i = 1; i < n; i++) {
-      const on = centi ? true : spider ? i <= 3 : species !== 'caterpillar' && i <= 3;
+      const on = centi ? true : spider ? i <= 3 : !grub && i <= 3;
       if (!on) continue;
       const leg = new Sprite(this.tex.legs);
       leg.anchor.set(0.5);
@@ -1008,8 +1275,16 @@ export class GameRenderer {
         sp.anchor.set(0.5);
         sp.position.set(x + 4, y - 2);
         sp.scale.set(scale * 0.55);
-        sp.tint = species === 'longhorn' ? 0xffffff : 0x1b1b1b;
+        sp.tint = 0x1b1b1b;
         c.addChild(sp);
+      }
+      if (feats.has('lamp') && i >= n - 2) {
+        const gl = new Sprite(this.tex.spot);
+        gl.anchor.set(0.5);
+        gl.position.set(x, y);
+        gl.scale.set(scale * 0.8);
+        gl.tint = 0xe8ff6a;
+        c.addChild(gl);
       }
     }
     if (feats.has('wings') || feats.has('wings4')) {
@@ -1025,7 +1300,7 @@ export class GameRenderer {
         c.addChild(w);
       }
     }
-    const headR = r * (species === 'caterpillar' ? 1.3 : 1.55);
+    const headR = r * (grub ? 1.3 : 1.55);
     const hk = headR / HR;
     const place = (front: boolean) => {
       for (const part of kit.parts) {
@@ -1051,7 +1326,7 @@ export class GameRenderer {
     const canvas = this.app.renderer.extract.canvas({ target: c, resolution: 2 }) as HTMLCanvasElement;
     const url = canvas.toDataURL();
     c.destroy({ children: true });
-    this.portraits.set(species, url);
+    this.portraits.set(key, url);
     return url;
   }
 
@@ -1067,8 +1342,8 @@ export class GameRenderer {
       this.camX += (player.segs[0] - this.camX) * k;
       this.camY += (player.segs[1] - this.camY) * k;
       const base = Math.max(0.85, Math.min(1.6, Math.min(W, H) / 560));
-      const lenZoom = Math.max(0.55, Math.min(1.12, 1.12 - player.length * 0.0026));
-      const sizeZoom = Math.max(0.6, Math.min(1, Math.pow(10 / player.r, 0.5)));
+      const lenZoom = Math.max(0.64, Math.min(1.12, 1.12 - player.length * 0.0022));
+      const sizeZoom = Math.max(0.72, Math.min(1, Math.pow(10 / player.r, 0.4)));
       this.zoom += (base * lenZoom * sizeZoom - this.zoom) * (1 - Math.exp(-dt * 2));
     }
     this.shake *= Math.exp(-dt * 7);
@@ -1088,8 +1363,11 @@ export class GameRenderer {
       }
     }
 
-    this.drawZones(frame.zones);
-    this.drawFoods(frame.foods, player && player.alive ? player.lineage : null);
+    this.playerFam = player ? player.family : null;
+    this.playerLv = player ? player.level : 1;
+    this.drawZones(frame.zones, frame.playerId);
+    this.drawTeles(frame.teles, frame.playerId, frame.snakes);
+    this.drawFoods(frame.foods, player && player.alive ? player.family : null);
     this.drawRings(frame.rings);
     this.drawMarks(frame.snakes, player);
 
@@ -1108,6 +1386,8 @@ export class GameRenderer {
       for (const w of g.wings) w.visible = false;
     }
     this.drawProjs(frame.projs);
+    this.drawMinions(frame.minions);
+    this.drawAuras(frame.snakes, dt);
     this.drawEnemy(frame.enemy, frame.snakes);
     this.updateFx(dt);
   }
@@ -1138,34 +1418,229 @@ export class GameRenderer {
     }
   }
 
-  private drawZones(zones: ZoneView[]) {
+  private drawZones(zones: ZoneView[], playerId: number) {
     const g = this.zoneGfx;
     g.clear();
+    const T = this.time;
     for (const z of zones) {
       if (!this.isNear(z.x, z.y)) continue;
-      const k = Math.min(1, z.life / 0.5);
-      if (z.kind === 'poison') {
-        g.circle(z.x, z.y, z.r).fill({ color: 0x7dff3a, alpha: 0.24 * k });
-        g.circle(z.x, z.y, z.r * 0.55).fill({ color: 0xc8ff5a, alpha: 0.22 * k });
-        if (Math.random() < 0.08) this.spawnParticle(z.x + (Math.random() - 0.5) * z.r, z.y + (Math.random() - 0.5) * z.r, 0xb8ff5a, 15, 0.6, 0.35);
-      } else {
-        const col = z.kind === 'root' ? 0xe6dcff : 0xffffff;
-        const a = (z.kind === 'root' ? 0.8 : 0.55) * k;
-        g.circle(z.x, z.y, z.r).fill({ color: col, alpha: 0.09 * k });
-        for (let i = 0; i < 12; i++) {
-          const ang = (i / 12) * Math.PI * 2;
-          g.moveTo(z.x, z.y).lineTo(z.x + Math.cos(ang) * z.r, z.y + Math.sin(ang) * z.r);
-        }
-        g.stroke({ width: 1.8, color: col, alpha: a });
-        for (let rr = z.r / 5; rr <= z.r + 1; rr += z.r / 5) {
-          const pts: number[] = [];
-          for (let i = 0; i <= 12; i++) {
-            const ang = (i / 12) * Math.PI * 2;
-            pts.push(z.x + Math.cos(ang) * rr, z.y + Math.sin(ang) * rr);
+      const k = Math.min(1, z.life / 0.5) * Math.min(1, (z.max - z.life) / 0.15 + 0.3);
+      const mine = z.owner === playerId;
+      switch (z.kind) {
+        case 'gas': {
+          // 뭉게뭉게 냄새 구름
+          for (let i = 0; i < 7; i++) {
+            const a = (i / 7) * Math.PI * 2 + T * 0.4;
+            const rr = z.r * (0.45 + 0.12 * Math.sin(T * 1.7 + i));
+            g.circle(z.x + Math.cos(a) * z.r * 0.42, z.y + Math.sin(a) * z.r * 0.42, rr).fill({ color: i % 2 ? 0x9aa83a : 0x7a8a2a, alpha: 0.16 * k });
           }
-          g.poly(pts, false);
+          g.circle(z.x, z.y, z.r * 0.6).fill({ color: 0xb8c860, alpha: 0.18 * k });
+          g.circle(z.x, z.y, z.r).stroke({ width: 3, color: mine ? 0xd8e870 : 0x7a8a2a, alpha: 0.4 * k });
+          if (Math.random() < 0.2) this.spawnParticle(z.x + (Math.random() - 0.5) * z.r * 1.4, z.y + (Math.random() - 0.5) * z.r * 1.4, 0xa8b850, 12, 1, 0.6);
+          break;
         }
-        g.stroke({ width: 1.6, color: col, alpha: a });
+        case 'web':
+        case 'prison': {
+          const col = z.kind === 'prison' ? 0xe8e0ff : 0xffffff;
+          const a0 = z.kind === 'prison' ? 0.9 : 0.65;
+          g.circle(z.x, z.y, z.r).fill({ color: col, alpha: 0.07 * k });
+          const sp = 12;
+          for (let i = 0; i < sp; i++) {
+            const ang = (i / sp) * Math.PI * 2;
+            g.moveTo(z.x, z.y).lineTo(z.x + Math.cos(ang) * z.r, z.y + Math.sin(ang) * z.r);
+          }
+          g.stroke({ width: 1.8, color: col, alpha: a0 * k });
+          for (let rr = z.r / 5; rr <= z.r + 1; rr += z.r / 5) {
+            const pts: number[] = [];
+            for (let i = 0; i <= sp; i++) {
+              const ang = (i / sp) * Math.PI * 2;
+              const sag = 1 - 0.06 * Math.sin(i * 1.7);
+              pts.push(z.x + Math.cos(ang) * rr * sag, z.y + Math.sin(ang) * rr * sag);
+            }
+            g.poly(pts, false);
+          }
+          g.stroke({ width: 1.6, color: col, alpha: a0 * k });
+          // 이슬 반짝
+          if (Math.random() < 0.12) this.spawnParticle(z.x + (Math.random() - 0.5) * z.r * 1.4, z.y + (Math.random() - 0.5) * z.r * 1.4, 0xd8f0ff, 5, 0.6, 0.3);
+          break;
+        }
+        case 'silk':
+          g.circle(z.x, z.y, z.r * 0.55).fill({ color: 0xffffff, alpha: 0.28 * k });
+          g.circle(z.x, z.y, z.r * 0.85).stroke({ width: 1.2, color: 0xffffff, alpha: 0.45 * k });
+          break;
+        case 'pit': {
+          // 깔때기: 안으로 감기는 나선 + 어두운 가운데
+          g.circle(z.x, z.y, z.r).fill({ color: 0xc8a870, alpha: 0.28 * k });
+          for (let rr = z.r; rr > 20; rr -= z.r / 5) g.circle(z.x, z.y, rr).stroke({ width: 2.5, color: 0x8a6a3a, alpha: 0.35 * k });
+          for (let j = 0; j < 4; j++) {
+            const pts: number[] = [];
+            for (let t = 0; t <= 1.001; t += 0.08) {
+              const a = j * (Math.PI / 2) + t * 4 + T * 2.2;
+              pts.push(z.x + Math.cos(a) * z.r * (1 - t), z.y + Math.sin(a) * z.r * (1 - t));
+            }
+            g.poly(pts, false).stroke({ width: 2.5, color: 0xf0dca8, alpha: 0.6 * k });
+          }
+          g.circle(z.x, z.y, 40).fill({ color: 0x3a2a14, alpha: 0.55 * k });
+          if (Math.random() < 0.3) {
+            const a = Math.random() * Math.PI * 2;
+            this.spawnParticle(z.x + Math.cos(a) * z.r, z.y + Math.sin(a) * z.r, 0xe8d0a0, 20, 0.6, 0.35);
+          }
+          break;
+        }
+        case 'honey':
+          g.ellipse(z.x, z.y, z.r, z.r * 0.86).fill({ color: 0xffc21a, alpha: 0.3 * k }).stroke({ width: 4, color: 0xd8901a, alpha: 0.6 * k });
+          for (let i = 0; i < 6; i++) {
+            const a = (i / 6) * Math.PI * 2;
+            const hx = z.x + Math.cos(a) * z.r * 0.5, hy = z.y + Math.sin(a) * z.r * 0.5;
+            const pts: number[] = [];
+            for (let j = 0; j < 6; j++) pts.push(hx + Math.cos((j / 6) * Math.PI * 2) * 12, hy + Math.sin((j / 6) * Math.PI * 2) * 12);
+            g.poly(pts).stroke({ width: 2, color: 0xffe066, alpha: 0.6 * k });
+          }
+          break;
+        case 'blade':
+          for (let i = 0; i < 4; i++) {
+            const a = i * 1.6 + z.x * 0.01;
+            const rr = z.r * (0.4 + i * 0.15);
+            g.moveTo(z.x + Math.cos(a - 0.6) * rr, z.y + Math.sin(a - 0.6) * rr).arc(z.x, z.y, rr, a - 0.6, a + 0.6).stroke({ width: 4, color: 0xe8fff0, alpha: 0.7 * k });
+          }
+          break;
+        case 'stingers':
+          for (let i = 0; i < 3; i++) {
+            const a = i * 2.1, x = z.x + Math.cos(a) * 9, y = z.y + Math.sin(a) * 9;
+            g.poly([x - 3, y + 4, x, y - 10, x + 3, y + 4]).fill({ color: 0x1b1b1b, alpha: k }).stroke({ width: 1.5, color: 0x9aff5a, alpha: 0.6 * k });
+          }
+          break;
+        case 'nest': {
+          for (let i = 0; i < 7; i++) {
+            const a = (i / 6) * Math.PI * 2;
+            const hx = i === 6 ? z.x : z.x + Math.cos(a) * 20, hy = i === 6 ? z.y : z.y + Math.sin(a) * 20;
+            const pts: number[] = [];
+            for (let j = 0; j < 6; j++) pts.push(hx + Math.cos((j / 6) * Math.PI * 2 + 0.5) * 11, hy + Math.sin((j / 6) * Math.PI * 2 + 0.5) * 11);
+            g.poly(pts).fill({ color: 0xe8dcc0, alpha: 0.9 * k }).stroke({ width: 2, color: 0x8a7a5a, alpha: k });
+          }
+          if (mine) g.circle(z.x, z.y, z.r).stroke({ width: 2, color: 0xe8dcc0, alpha: 0.35 * k });
+          break;
+        }
+        case 'bait':
+          g.circle(z.x, z.y, 13).fill({ color: 0xff9ad8, alpha: k }).stroke({ width: 3, color: 0x3a3a3a, alpha: k });
+          g.circle(z.x - 3, z.y - 4, 4).fill({ color: 0xffffff, alpha: k });
+          if (mine) g.circle(z.x, z.y, z.r + 8).stroke({ width: 2, color: 0xff9ad8, alpha: 0.6 });
+          break;
+        case 'lantern':
+          break;
+        case 'rain':
+          g.circle(z.x, z.y, z.r).fill({ color: 0x3a2a10, alpha: 0.14 * k }).stroke({ width: 3, color: 0xf2c230, alpha: 0.4 * k });
+          for (let i = 0; i < 6; i++) {
+            const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * z.r;
+            const x = z.x + Math.cos(a) * d, y = z.y + Math.sin(a) * d;
+            this.addShape((gg, kk) => gg.moveTo(x - 6, y - 40 * kk).lineTo(x, y - 4 * kk).stroke({ width: 3, color: 0x1b1b1b, alpha: kk }), 0.15);
+            if (Math.random() < 0.3) this.spawnParticle(x, y, 0xb8ff5a, 30, 0.3, 0.3);
+          }
+          break;
+        case 'decoy':
+          g.circle(z.x, z.y, z.r).fill({ color: 0xffffff, alpha: 0.12 * k }).stroke({ width: 2, color: 0xffffff, alpha: 0.5 * k });
+          break;
+        case 'heat': {
+          g.circle(z.x, z.y, z.r).fill({ color: 0xff8a1c, alpha: 0.18 * k });
+          for (let i = 0; i < 6; i++) {
+            const a = T * 6 + (i / 6) * Math.PI * 2;
+            const bx = z.x + Math.cos(a) * z.r * 0.8, by = z.y + Math.sin(a) * z.r * 0.8;
+            g.ellipse(bx, by, 7, 5).fill(0xffd23f).stroke({ width: 1.5, color: INK });
+          }
+          if (Math.random() < 0.4) this.spawnParticle(z.x, z.y, Math.random() < 0.5 ? 0xff8a1c : 0xffd23f, 60, 0.4, 0.5);
+          break;
+        }
+      }
+    }
+  }
+
+  /** 기술 예고(필살기): 내 것은 계열 색, 남의 것은 빨강 */
+  private drawTeles(teles: TeleView[], playerId: number, snakes: FrameSnake[]) {
+    const g = this.teleGfx;
+    g.clear();
+    for (const te of teles) {
+      if (!this.isNear(te.x, te.y)) continue;
+      const k = 1 - te.t / te.total;
+      const ow = snakes.find((s) => s.id === te.owner);
+      const col = te.owner === playerId ? famColor(ow?.family) : 0xff3a2a;
+      const pulse = 0.5 + 0.5 * Math.sin(this.time * 24);
+      if (te.shape === 'circle') {
+        g.circle(te.x, te.y, te.r).fill({ color: col, alpha: 0.1 + 0.18 * k });
+        g.circle(te.x, te.y, te.r * k).fill({ color: col, alpha: 0.18 });
+        g.circle(te.x, te.y, te.r).stroke({ width: 5, color: col, alpha: 0.6 + 0.35 * pulse });
+      } else if (te.shape === 'line') {
+        const c = Math.cos(te.angle), s = Math.sin(te.angle), w = te.w / 2;
+        const pts = [te.x - s * w, te.y + c * w, te.x + c * te.len - s * w, te.y + s * te.len + c * w, te.x + c * te.len + s * w, te.y + s * te.len - c * w, te.x + s * w, te.y - c * w];
+        g.poly(pts).fill({ color: col, alpha: 0.12 + 0.18 * k }).stroke({ width: 4, color: col, alpha: 0.6 + 0.35 * pulse });
+        g.moveTo(te.x, te.y).lineTo(te.x + c * te.len * k, te.y + s * te.len * k).stroke({ width: te.w * 0.5, color: col, alpha: 0.25 });
+      }
+    }
+  }
+
+  /** 부른 벌 */
+  private drawMinions(minions: MinionView[]) {
+    const g = this.minionGfx;
+    g.clear();
+    const T = this.time;
+    for (const m of minions) {
+      if (!this.isNear(m.x, m.y)) continue;
+      const c = Math.cos(m.angle), s = Math.sin(m.angle);
+      const wasp = m.kind === 'wasp';
+      const L = wasp ? 13 : 10;
+      g.ellipse(m.x + 3, m.y + 5, L, L * 0.6).fill({ color: 0x000000, alpha: 0.18 });
+      const flap = Math.sin(T * 60 + m.x) * 0.5;
+      for (const sd of [-1, 1]) {
+        const wx = m.x - s * sd * 6, wy = m.y + c * sd * 6;
+        g.ellipse(wx, wy, 7, 4 + flap * 2).fill({ color: 0xffffff, alpha: 0.6 });
+      }
+      g.ellipse(m.x, m.y, L, L * 0.62).fill(wasp ? 0xf2c230 : 0xf6c94a).stroke({ width: 2, color: INK });
+      for (let k = -1; k <= 1; k += 2) g.moveTo(m.x + c * k * 3 - s * 5, m.y + s * k * 3 + c * 5).lineTo(m.x + c * k * 3 + s * 5, m.y + s * k * 3 - c * 5).stroke({ width: 2.5, color: 0x2a1e10 });
+      g.circle(m.x + c * L * 0.8, m.y + s * L * 0.8, 4).fill(0x2a1e10);
+    }
+  }
+
+  /** 몸을 따라다니는 기술 연출(천 개의 낫·맴돌기·유인등·겹눈) */
+  private drawAuras(snakes: FrameSnake[], dt: number) {
+    const g = this.statusGfx;
+    for (const [id, list] of this.auras) {
+      const s = snakes.find((x) => x.id === id);
+      if (!s || !s.alive || s.segs.length < 2) {
+        this.auras.delete(id);
+        continue;
+      }
+      const hx = s.segs[0], hy = s.segs[1];
+      for (let i = list.length - 1; i >= 0; i--) {
+        const a = list[i];
+        a.life -= dt;
+        if (a.life <= 0) {
+          list.splice(i, 1);
+          continue;
+        }
+        const k = Math.min(1, a.life / 0.3);
+        if (!this.isNear(hx, hy)) continue;
+        if (a.kind === 'whirl' || a.kind === 'circle') {
+          const n = a.kind === 'whirl' ? 8 : 4;
+          const spin = this.time * (a.kind === 'whirl' ? 14 : 9);
+          g.circle(hx, hy, a.r).stroke({ width: 3, color: a.col, alpha: 0.35 * k });
+          for (let j = 0; j < n; j++) {
+            const ang = spin + (j / n) * Math.PI * 2;
+            const rr = a.r * (0.75 + 0.2 * Math.sin(this.time * 7 + j));
+            g.moveTo(hx + Math.cos(ang - 0.45) * rr, hy + Math.sin(ang - 0.45) * rr).arc(hx, hy, rr, ang - 0.45, ang + 0.15).stroke({ width: 6, color: j % 2 ? 0xffffff : a.col, alpha: 0.9 * k });
+          }
+          if (Math.random() < 0.6) {
+            const ang = Math.random() * Math.PI * 2;
+            this.spawnParticle(hx + Math.cos(ang) * a.r * 0.8, hy + Math.sin(ang) * a.r * 0.8, a.col, 60, 0.3, 0.4);
+          }
+        } else if (a.kind === 'lantern') {
+          const pulse = 0.5 + 0.5 * Math.sin(this.time * 4);
+          g.circle(hx, hy, a.r).fill({ color: a.col, alpha: (0.06 + 0.05 * pulse) * k }).stroke({ width: 2, color: a.col, alpha: 0.4 * k });
+          if (Math.random() < 0.5) {
+            const ang = Math.random() * Math.PI * 2, d = Math.random() * a.r;
+            this.spawnParticle(hx + Math.cos(ang) * d, hy + Math.sin(ang) * d, a.col, 10, 0.8, 0.4);
+          }
+        } else if (a.kind === 'compound') {
+          g.circle(hx, hy, a.r + 10 * Math.sin(this.time * 6)).stroke({ width: 2.5, color: a.col, alpha: 0.6 * k });
+        }
       }
     }
   }
@@ -1173,12 +1648,32 @@ export class GameRenderer {
   private drawProjs(projs: ProjView[]) {
     const g = this.shapeGfx;
     for (const p of projs) {
+      if (!this.isNear(p.x, p.y)) continue;
       const c = Math.cos(p.angle), s = Math.sin(p.angle);
-      g.moveTo(p.x - c * 70, p.y - s * 70).lineTo(p.x + c * 6, p.y + s * 6).stroke({ width: 14, color: 0xffb03a, alpha: 0.25 });
-      g.moveTo(p.x - c * 30, p.y - s * 30).lineTo(p.x + c * 6, p.y + s * 6).stroke({ width: 8, color: 0xffe066, alpha: 0.5 });
-      g.circle(p.x, p.y, 12).fill({ color: 0xfff3b0, alpha: 0.35 });
-      g.moveTo(p.x - c * 12, p.y - s * 12).lineTo(p.x + c * 10, p.y + s * 10).stroke({ width: 3.5, color: 0x1b1b1b });
-      g.circle(p.x + c * 10, p.y + s * 10, 3).fill(0xffffff);
+      switch (p.kind) {
+        case 'sting':
+        case 'bigsting': {
+          const big = p.kind === 'bigsting' ? 1.6 : 1;
+          g.moveTo(p.x - c * 70 * big, p.y - s * 70 * big).lineTo(p.x + c * 6, p.y + s * 6).stroke({ width: 12 * big, color: 0x9aff5a, alpha: 0.22 });
+          g.moveTo(p.x - c * 30 * big, p.y - s * 30 * big).lineTo(p.x + c * 6, p.y + s * 6).stroke({ width: 7 * big, color: 0xd8ff8a, alpha: 0.5 });
+          g.moveTo(p.x - c * 12 * big, p.y - s * 12 * big).lineTo(p.x + c * 10 * big, p.y + s * 10 * big).stroke({ width: 3.5 * big, color: 0x1b1b1b });
+          g.circle(p.x + c * 10 * big, p.y + s * 10 * big, 3 * big).fill(0xffffff);
+          break;
+        }
+        case 'silk':
+          g.moveTo(p.x - c * 90, p.y - s * 90).lineTo(p.x, p.y).stroke({ width: 3, color: 0xffffff, alpha: 0.85 });
+          g.circle(p.x, p.y, 7).fill({ color: 0xffffff, alpha: 0.9 });
+          break;
+        case 'orb':
+          g.circle(p.x, p.y, 18).fill({ color: 0xd8ff5a, alpha: 0.25 });
+          g.circle(p.x, p.y, 9).fill(0xf6ffb0).stroke({ width: 2, color: 0xd8ff5a });
+          if (Math.random() < 0.5) this.spawnParticle(p.x, p.y, 0xd8ff5a, 20, 0.4, 0.4);
+          break;
+        case 'spit':
+          g.circle(p.x, p.y, 9).fill({ color: 0x9ad0ff, alpha: 0.85 }).stroke({ width: 2, color: INK });
+          g.moveTo(p.x - c * 30, p.y - s * 30).lineTo(p.x, p.y).stroke({ width: 6, color: 0x9ad0ff, alpha: 0.35 });
+          break;
+      }
     }
   }
 
@@ -1315,7 +1810,7 @@ export class GameRenderer {
     }
   }
 
-  private drawFoods(foods: Float32Array, myLineage: Lineage | null) {
+  private drawFoods(foods: Float32Array, myFam: FamilyId | null) {
     const n = foods.length / 5;
     const viewW = this.app.screen.width / this.zoom / 2 + 40, viewH = this.app.screen.height / this.zoom / 2 + 40;
     let used = 0, back = 0, badges = 0;
@@ -1340,18 +1835,18 @@ export class GameRenderer {
       const ph = this.time * 3 + (x + y) * 0.05;
       const pulse = 1 + 0.18 * Math.sin(ph * 1.3);
       if (kind === 3) {
-        // 보석: 능력치 색 빛 + 반짝이며 흔들림
-        const c = STATS[sub]?.color ?? 0xffffff;
+        // 황금 꿀방울: 금빛 + 반짝이며 흔들림
         const gl = take(this.foodBack, this.foodBackLayer, back++, this.tex.glow);
         gl.position.set(x, y);
-        gl.tint = c;
-        gl.scale.set(((r * 6) / 96) * (1 + 0.25 * Math.sin(ph * 2)));
-        gl.alpha = 0.9;
-        const d = take(this.foodSprites, this.foodLayer, used++, this.tex.diamond);
+        gl.tint = 0xffc21a;
+        gl.scale.set(((r * 6.5) / 96) * (1 + 0.25 * Math.sin(ph * 2)));
+        gl.alpha = 0.95;
+        const d = take(this.foodSprites, this.foodLayer, used++, this.tex.honeydrop);
+        d.anchor.set(0.5, 0.6);
         d.position.set(x, y + Math.sin(ph) * 3);
-        d.tint = mix(c, 0xffffff, 0.15);
-        d.rotation = Math.sin(ph * 0.8) * 0.18;
-        d.scale.set(((r * 3.1) / 64) * (1 + 0.08 * Math.sin(ph * 2.2)));
+        d.tint = 0xffffff;
+        d.rotation = Math.sin(ph * 0.8) * 0.15;
+        d.scale.set(((r * 2.6) / 64) * (1 + 0.08 * Math.sin(ph * 2.2)));
         if (Math.random() < 0.025) this.spawnParticle(x + (Math.random() - 0.5) * r * 2, y + (Math.random() - 0.5) * r * 2, 0xffffff, 10, 0.5, 0.35);
         continue;
       }
@@ -1359,7 +1854,7 @@ export class GameRenderer {
         // 특별 먹이: 접시(좋아하는 갈래 색) + 그림, 내 입맛 표시
         const f = SPECIAL_FOODS[sub];
         if (!f) continue;
-        const t = myLineage ? taste(myLineage, sub) : 0;
+        const t = taste(myFam, sub);
         const bob = Math.sin(ph) * 3;
         if (t !== 0) {
           const gl = take(this.foodBack, this.foodBackLayer, back++, this.tex.glow);
@@ -1370,9 +1865,10 @@ export class GameRenderer {
         }
         const pl = take(this.foodBack, this.foodBackLayer, back++, this.tex.plate);
         pl.position.set(x, y + bob);
-        pl.tint = mix(LINEAGE[f.like].color, 0xffffff, 0.45);
+        pl.tint = mix(likerOf(sub)?.color ?? 0xffffff, 0xffffff, 0.45);
         pl.scale.set((r * 2.8) / 68);
         const ic = take(this.foodSprites, this.foodLayer, used++, this.tex['sp_' + f.id]);
+        ic.anchor.set(0.5);
         ic.position.set(x, y + bob - 1);
         ic.tint = 0xffffff;
         ic.rotation = Math.sin(ph * 0.7) * 0.12;
@@ -1386,6 +1882,7 @@ export class GameRenderer {
         continue;
       }
       const s = take(this.foodSprites, this.foodLayer, used++, this.tex.food);
+      s.anchor.set(0.5);
       s.position.set(x, y + Math.sin(ph) * 2.5);
       const h = Math.abs(Math.floor(x * 7 + y * 13)) % FOOD_COLORS.length;
       s.tint = kind === 1 ? 0xb8ff3a : kind === 2 ? 0xffa03a : FOOD_COLORS[h];
@@ -1420,9 +1917,12 @@ export class GameRenderer {
     g.label.visible = vis;
     for (const w of g.wings) w.visible = vis;
     if (!vis) return;
-    const look = lookOf(s.species);
+    const look = lookOf(g.species);
     const feats = new Set(look.feats ?? []);
-    const lcol = s.isBoss ? 0xff4a3a : LINEAGE[s.lineage].color;
+    const lcol = famColor(s.family);
+    const grub = look.shape === 'cute';
+    const lamp = feats.has('lamp');
+    const longLegs = feats.has('longLegs');
     const n = s.segs.length / 2;
     const pulse = this.pulseT.get(s.id) ?? 0;
     const grow = 1 + (pulse > 0 ? Math.sin((pulse / 0.7) * Math.PI) * 0.35 : 0);
@@ -1443,15 +1943,16 @@ export class GameRenderer {
       if (s.poisoned) out = mix(out, 0x8aff5a, 0.3 + 0.15 * Math.sin(this.time * 12));
       if (s.yuck) out = mix(out, 0x8a9a50, 0.4);
       if (s.feast) out = mix(out, 0xffe066, 0.22 + 0.18 * Math.sin(this.time * 14));
-      if (s.molt > 0) out = mix(out, 0xffffff, s.molt * 0.6);
+      if (s.evolving > 0) out = mix(out, mix(lcol, 0xffffff, 0.5), Math.min(0.85, s.evolving * 1.2));
+      if (s.mark) out = mix(out, 0xff7a5a, 0.18 + 0.12 * Math.sin(this.time * 10));
       if (flash > 0) out = mix(out, 0xffffff, Math.min(1, flash / 0.13) * 0.85);
       return out;
     };
-    // 진화 단계가 높을수록 화려하게: 빛 테두리(2+), 보석(4+), 반짝이(5)
-    const glowA = s.isBoss ? 0.3 : [0, 0, 0.08, 0.18, 0.28, 0.42][s.stage];
-    const gems = !s.isBoss && s.stage >= 4;
+    // 진화 단계가 높을수록 화려하게: 빛 테두리(성충), 보석·반짝이(각성)
+    const glowA = s.isBoss ? 0.3 : [0, 0, 0.14, 0.38][s.stage] ?? 0;
+    const gems = !s.isBoss && s.stage >= 3;
 
-    const fade = s.sneaking ? 0.8 : 1;
+    const fade = s.hidden > 0 ? (s.isPlayer ? 0.45 : s.hidden >= 1 ? 0.08 : 0.2) : s.sneaking ? 0.8 : 1;
     const vw = this.view;
     const inView = (i: number) => {
       const x = s.segs[i * 2], y = s.segs[i * 2 + 1];
@@ -1484,15 +1985,23 @@ export class GameRenderer {
         gl.position.set(x, y);
         gl.scale.set(scale * taper * 1.15);
         gl.tint = lcol;
-        gl.alpha = glowA * (0.6 + 0.4 * Math.sin(this.time * 5 - i * 0.35));
+        gl.alpha = glowA * (0.6 + 0.4 * Math.sin(this.time * 5 - i * 0.35)) * fade;
       }
-      const legOn = allLegs ? i > 0 : spider ? i >= 1 && i <= 4 : s.species !== 'caterpillar' && i >= 1 && i <= 3;
+      // 반딧불이: 꼬리 마디가 빛난다
+      if (lamp && i >= n - 3 && i > 0) {
+        const lg = this.glowPool.take(this.tex.glow);
+        lg.position.set(x, y);
+        lg.scale.set(scale * taper * (1.9 + 0.3 * Math.sin(this.time * 6)));
+        lg.tint = 0xe8ff6a;
+        lg.alpha = (0.55 + 0.3 * Math.sin(this.time * 6 + i)) * fade;
+      }
+      const legOn = allLegs ? i > 0 : spider ? i >= 1 && i <= 4 : !grub && i >= 1 && i <= 3;
       if (legOn && !s.fly) {
         const leg = this.legPool.take(this.tex.legs);
         const swing = Math.sin(this.time * 16 + i * 1.3) * 0.35;
         leg.position.set(x, y);
         leg.rotation = dirA + swing;
-        leg.scale.set(scale * (spider ? 1.6 : allLegs ? 1.15 : 1.1) * lift);
+        leg.scale.set(scale * (spider ? 1.6 : longLegs ? 2.3 : allLegs ? 1.15 : 1.1) * lift);
         leg.alpha = fade;
       }
       if (i === 0) continue;
@@ -1500,7 +2009,7 @@ export class GameRenderer {
       b.position.set(x, y);
       b.scale.set(scale * taper * wiggle * unit * lift);
       const stripeOn = swarm ? i % 3 === 0 : Math.floor(i / 2) % 2 === 1;
-      b.tint = tint(stripeOn ? look.stripe : look.body);
+      b.tint = tint(lamp && i >= n - 3 ? 0xf0ff9a : stripeOn ? look.stripe : look.body);
       b.alpha = (blink ? 0.45 : 1) * fade;
       const shine = this.bodyPool.take(this.tex.shine);
       shine.position.set(x - s.r * 0.25 * taper, y - s.r * 0.35 * taper);
@@ -1521,15 +2030,15 @@ export class GameRenderer {
           const side = i % 4 === 1 ? 1 : -1;
           spot.position.set(x + Math.cos(dirA + Math.PI / 2) * s.r * 0.35 * side, y + Math.sin(dirA + Math.PI / 2) * s.r * 0.35 * side);
           spot.scale.set(scale * 0.55 * taper);
-          spot.tint = s.species === 'longhorn' ? 0xffffff : 0x1b1b1b;
+          spot.tint = 0x1b1b1b;
           spot.alpha = fade;
         }
       }
     }
-    // 5단계 반짝이
-    if (!s.isBoss && s.stage >= 5 && Math.random() < 0.5 && this.isNear(s.segs[0], s.segs[1])) {
+    // 각성: 계열 색 입자가 흩날린다
+    if (!s.isBoss && s.stage >= 3 && s.hidden <= 0 && Math.random() < 0.45 && this.isNear(s.segs[0], s.segs[1])) {
       const i = Math.floor(Math.random() * n);
-      this.spawnParticle(s.segs[i * 2], s.segs[i * 2 + 1], Math.random() < 0.5 ? 0xffe066 : 0xffffff, 25, 0.6, 0.35);
+      this.spawnParticle(s.segs[i * 2], s.segs[i * 2 + 1], Math.random() < 0.5 ? lcol : 0xffffff, 25, 0.6, 0.35);
     }
     // 날개(1~2번 마디 위, 퍼덕임)
     if (g.wings.length) {
@@ -1555,7 +2064,7 @@ export class GameRenderer {
     g.headBase.rotation = s.angle;
     g.headBase.scale.set(hk);
     g.headBase.tint = flash > 0 ? 0xffd0d0 : 0xffffff;
-    g.headBase.alpha = blink ? 0.45 : 1;
+    g.headBase.alpha = (blink ? 0.45 : 1) * fade;
     const bite = this.biteT.get(s.id) ?? 0;
     const strike = this.strikeT.get(s.id) ?? 0;
     for (const { sp, part, side } of g.parts) {
@@ -1575,16 +2084,24 @@ export class GameRenderer {
       }
       sp.rotation = s.angle + side * rot;
       sp.scale.set(hk, hk * side);
-      sp.alpha = blink ? 0.45 : 1;
+      sp.alpha = (blink ? 0.45 : 1) * fade;
     }
+    for (const w of g.wings) w.alpha = 0.75 * fade;
     // 이름표 + 체력바(화면 기준 일정한 크기)
     const iz = 1 / Math.max(0.5, this.zoom);
     const barW = (s.isBoss ? 110 : 50) * iz, barH = (s.isBoss ? 10 : 7) * iz;
     const barY = hy - headR - 12 * iz - barH;
     g.label.position.set(hx, barY - 3 * iz);
     g.label.scale.set(iz);
+    g.label.alpha = s.hidden > 0 && !s.isPlayer ? 0 : 1;
+    // 이름표 색: 나보다 레벨이 3 이상 높으면 빨강, 3 이상 낮으면 초록
+    if (!s.isPlayer && !s.isBoss) {
+      const dl = s.level - this.playerLv;
+      const col = dl >= 3 ? 0xff8a7a : dl <= -3 ? 0xa8ff8a : 0xffffff;
+      if (g.label.style.fill !== col) g.label.style.fill = col;
+    }
     const nearMe = !!player && player.alive && player.segs.length >= 2 && !s.isPlayer && Math.hypot(hx - player.segs[0], hy - player.segs[1]) < 320;
-    const showHp = s.isBoss || s.hp < s.maxHp - 0.5 || nearMe;
+    const showHp = (s.isBoss || s.hp < s.maxHp - 0.5 || nearMe) && !(s.hidden > 0 && !s.isPlayer);
     if (showHp && this.isNear(hx, hy)) {
       const k = Math.max(0, Math.min(1, s.hp / Math.max(1, s.maxHp)));
       const col = s.isBoss ? 0xff5a3a : k > 0.5 ? 0x7dde4a : k > 0.25 ? 0xffc93a : 0xff4a3a;
@@ -1601,12 +2118,55 @@ export class GameRenderer {
       st.circle(hx, hy, headR + 6).stroke({ width: 4, color: 0x9ad0ff, alpha: 0.75 });
       st.circle(hx, hy, headR + 11).stroke({ width: 2, color: 0xffffff, alpha: 0.35 });
     }
-    if (s.molt > 0) {
+    if (s.evolving > 0) {
+      // 고치: 계열 색 빛이 몸을 감싼다
       const glow = 0.35 + 0.25 * Math.sin(this.time * 12);
-      st.circle(hx, hy, headR * 1.6).fill({ color: 0xffffff, alpha: glow * 0.5 });
-      st.moveTo(hx, hy - headR * 1.9).arc(hx, hy, headR * 1.9, -Math.PI / 2, -Math.PI / 2 + s.molt * Math.PI * 2).stroke({ width: 5, color: 0xffffff, alpha: 0.95 });
-      if (Math.random() < 0.5) this.spawnParticle(hx + (Math.random() - 0.5) * headR * 3, hy + (Math.random() - 0.5) * headR * 3, 0xffffff, 20, 0.5, 0.4);
+      st.ellipse(hx, hy, headR * 1.8, headR * 1.5).fill({ color: mix(lcol, 0xffffff, 0.5), alpha: glow * 0.6 });
+      for (let j = 0; j < 5; j++) {
+        const yy = hy - headR * 1.2 + j * headR * 0.6;
+        st.moveTo(hx - headR * 1.6, yy).quadraticCurveTo(hx, yy + Math.sin(this.time * 6 + j) * 8, hx + headR * 1.6, yy).stroke({ width: 3, color: 0xffffff, alpha: 0.6 });
+      }
+      st.moveTo(hx, hy - headR * 2.1).arc(hx, hy, headR * 2.1, -Math.PI / 2, -Math.PI / 2 + s.evolving * Math.PI * 2).stroke({ width: 5, color: 0xffffff, alpha: 0.95 });
+      if (Math.random() < 0.6) this.spawnParticle(hx + (Math.random() - 0.5) * headR * 3, hy + (Math.random() - 0.5) * headR * 3, Math.random() < 0.5 ? lcol : 0xffffff, 20, 0.5, 0.4);
     }
+    if (s.root) {
+      for (let k = 0; k < 4; k++) {
+        const a = k * 0.8 + 0.3;
+        st.moveTo(hx + Math.cos(a) * headR * 1.3, hy + Math.sin(a) * headR * 1.3).lineTo(hx - Math.cos(a) * headR * 1.3, hy - Math.sin(a) * headR * 1.3).stroke({ width: 2.5, color: 0xffffff, alpha: 0.85 });
+      }
+      st.circle(hx, hy, headR * 1.15).stroke({ width: 2, color: 0xffffff, alpha: 0.7 });
+    }
+    if (s.mark) {
+      const R = headR * 1.5, sp = this.time * 2;
+      st.circle(hx, hy, R).stroke({ width: 3, color: 0xff6a4a, alpha: 0.85 });
+      for (let k = 0; k < 4; k++) {
+        const a = sp + (k * Math.PI) / 2;
+        st.moveTo(hx + Math.cos(a) * (R - 6), hy + Math.sin(a) * (R - 6)).lineTo(hx + Math.cos(a) * (R + 9), hy + Math.sin(a) * (R + 9)).stroke({ width: 3.5, color: 0xff6a4a });
+      }
+    }
+    if (s.blind) {
+      for (let k = 0; k < 4; k++) {
+        const ang = this.time * 9 + (k * Math.PI) / 2;
+        st.star(hx + Math.cos(ang) * headR * 1.1, hy - headR * 1.2 + Math.sin(ang) * headR * 0.35, 4, 7, 3).fill(0xf6ff8a).stroke({ width: 1.5, color: INK });
+      }
+    }
+    if (s.fear) {
+      for (let k = 0; k < 2; k++) {
+        const kk = (this.time * 1.3 + k / 2) % 1;
+        st.ellipse(hx + (k ? 1 : -1) * headR * 0.9, hy - headR * (0.6 + kk), 3.5, 5).fill({ color: 0x9ad0ff, alpha: 1 - kk }).stroke({ width: 1.2, color: INK, alpha: 1 - kk });
+      }
+      st.circle(hx, hy, headR * 1.25).stroke({ width: 2, color: 0xb88aff, alpha: 0.6 });
+    }
+    if (s.silence) {
+      const bx = hx + headR * 1.1, by = hy - headR * 1.3;
+      st.circle(bx, by, 8).fill(0xffffff).stroke({ width: 2.5, color: 0xe0402a });
+      st.moveTo(bx - 5, by + 5).lineTo(bx + 5, by - 5).stroke({ width: 2.5, color: 0xe0402a });
+    }
+    if (s.buff && (s.isPlayer || this.isNear(hx, hy))) {
+      st.circle(hx, hy, headR * 1.35 + Math.sin(this.time * 8) * 3).stroke({ width: 2.5, color: mix(lcol, 0xffffff, 0.4), alpha: 0.8 });
+      if (Math.random() < 0.3) this.spawnParticle(hx + (Math.random() - 0.5) * headR * 2, hy + (Math.random() - 0.5) * headR * 2, lcol, 30, 0.5, 0.35);
+    }
+    if (s.ultReady && s.isPlayer) st.circle(hx, hy, headR + 9).stroke({ width: 2.5, color: 0xffd23f, alpha: 0.45 + 0.35 * Math.sin(this.time * 7) });
     if (s.shield) {
       const R = headR * 1.7;
       const pts: number[] = [];
@@ -1617,12 +2177,6 @@ export class GameRenderer {
       for (let k = 0; k < 3; k++) {
         const ang = this.time * 6 + (k * Math.PI * 2) / 3;
         st.star(hx + Math.cos(ang) * headR * 1.2, hy - headR * 1.3 + Math.sin(ang) * headR * 0.4, 5, 7, 3).fill(0xffe066).stroke({ width: 1.5, color: INK });
-      }
-    }
-    if (s.magnet) {
-      for (let j = 0; j < 3; j++) {
-        const k = (this.time * 1.5 + j / 3) % 1;
-        st.circle(hx, hy, 40 + (1 - k) * 200).stroke({ width: 3, color: 0xfff3b0, alpha: 0.5 * k });
       }
     }
     if (s.feast) {
@@ -1638,11 +2192,8 @@ export class GameRenderer {
         st.circle(hx + Math.sin(this.time * 3 + k * 2) * headR * 0.8, hy - headR * (0.8 + kk * 1.8), 3 + kk * 5).fill({ color: 0xb8d870, alpha: 0.8 * (1 - kk) }).stroke({ width: 1.5, color: INK, alpha: 0.6 * (1 - kk) });
       }
     }
-    if (s.ringFast) {
-      for (let i = 0; i < n; i += 4) if (Math.random() < 0.3) this.spawnParticle(s.segs[i * 2], s.segs[i * 2 + 1], Math.random() < 0.5 ? 0xff8a1c : 0xffd23f, 30, 0.4, 0.5);
-    }
     if (s.isBoss) st.circle(hx, hy, headR + 8).stroke({ width: 3, color: 0xff6a4a, alpha: 0.4 + 0.3 * Math.sin(this.time * 5) });
-    if (!s.isBoss && s.stage >= 5) st.circle(hx, hy, headR + 5).stroke({ width: 2.5, color: 0xffe066, alpha: 0.35 + 0.25 * Math.sin(this.time * 4) });
+    if (!s.isBoss && s.stage >= 3 && s.hidden <= 0) st.circle(hx, hy, headR + 5).stroke({ width: 2.5, color: lcol, alpha: 0.35 + 0.25 * Math.sin(this.time * 4) });
     // 돌진: 머리 잔상 + 속도선
     if (s.dash && this.isNear(hx, hy)) {
       const gh = new Sprite(g.kit.base);
@@ -1686,6 +2237,10 @@ export class GameRenderer {
     // 기술을 쓰면 화면 가장자리에 집중선
     const sf = this.screenFx;
     sf.clear();
+    if (this.screenFlash > 0) {
+      this.screenFlash = Math.max(0, this.screenFlash - dt * 1.6);
+      sf.rect(0, 0, this.app.screen.width, this.app.screen.height).fill({ color: 0xfaffd0, alpha: this.screenFlash });
+    }
     if (this.speedLines > 0) {
       this.speedLines -= dt;
       const W = this.app.screen.width, H = this.app.screen.height, k = Math.max(0, this.speedLines / 0.35);

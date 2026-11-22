@@ -6,7 +6,7 @@ import type { Command, GameOpts, HostIn, HostOut, Snapshot } from '../shared/typ
 
 export interface SimHost {
   readonly kind: string;
-  start(seed: number, playerName: string, startStage?: number, opts?: GameOpts): void;
+  start(seed: number, playerName: string, opts: GameOpts): void;
   send(cmd: Command): void;
   setOpts(opts: GameOpts): void;
   pause(paused: boolean): void;
@@ -27,8 +27,8 @@ class WorkerHost implements SimHost {
   private post(m: HostIn) {
     this.w.postMessage(m);
   }
-  start(seed: number, playerName: string, startStage = 1, opts?: GameOpts) {
-    this.post({ type: 'start', seed, playerName, startStage, opts });
+  start(seed: number, playerName: string, opts: GameOpts) {
+    this.post({ type: 'start', seed, playerName, opts });
   }
   setOpts(opts: GameOpts) {
     this.post({ type: 'opts', opts });
@@ -52,8 +52,8 @@ class LocalHost implements SimHost {
   private last = 0;
   private acc = 0;
   private paused = false;
-  start(seed: number, playerName: string, startStage = 1, opts?: GameOpts) {
-    this.sim = new Simulation(seed, playerName, startStage, undefined, opts);
+  start(seed: number, playerName: string, opts: GameOpts) {
+    this.sim = new Simulation(seed, playerName, opts);
     (globalThis as { __sim?: Simulation }).__sim = this.sim; // 시험용
     this.last = performance.now();
     this.acc = 0;
@@ -97,7 +97,7 @@ class LocalHost implements SimHost {
 }
 
 /** 워커를 먼저 시도하고, 1초 안에 응답이 없거나 만들 수 없으면 메인 스레드로 돌린다 */
-export function createHost(seed: number, playerName: string, startStage: number, onSnap: (s: Snapshot) => void, opts?: GameOpts): SimHost {
+export function createHost(seed: number, playerName: string, onSnap: (s: Snapshot) => void, opts: GameOpts): SimHost {
   let host: SimHost;
   let forceLocal = false;
   try {
@@ -115,14 +115,14 @@ export function createHost(seed: number, playerName: string, startStage: number,
     got = true;
     onSnap(s);
   };
-  host.start(seed, playerName, startStage, opts);
+  host.start(seed, playerName, opts);
   if (host.kind === 'worker') {
     setTimeout(() => {
       if (got) return;
       host.stop();
       const local = new LocalHost();
       local.onSnap = onSnap;
-      local.start(seed, playerName, startStage, opts);
+      local.start(seed, playerName, opts);
       Object.assign(proxy, { inner: local });
     }, 1000);
   }
@@ -132,8 +132,8 @@ export function createHost(seed: number, playerName: string, startStage: number,
     get kind() {
       return this.inner.kind;
     },
-    start(s: number, n: string, st?: number, o?: GameOpts) {
-      this.inner.start(s, n, st, o);
+    start(s: number, n: string, o: GameOpts) {
+      this.inner.start(s, n, o);
     },
     setOpts(o: GameOpts) {
       this.inner.setOpts(o);

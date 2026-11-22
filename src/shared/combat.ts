@@ -1,34 +1,39 @@
-// 싸움 공식: 시뮬레이션·화면·봇이 같은 계산을 쓴다.
+// 싸움 공식(기술 수치표 '공통 공식'). 시뮬레이션·화면·봇이 같은 계산을 쓴다.
 import { CONFIG } from './config';
-import { beats, LINEAGE, type Lineage } from './species';
+import { FAMILY, type FamilyId } from './species';
 
 export interface Fighter {
-  stage: number;
-  lineage: Lineage;
+  level: number;
+  stage: number; // 진화 단계 1~3
+  family: FamilyId | null;
   isBoss: boolean;
-  st?: number[]; // 보석 능력치 레벨(공격은 [1])
 }
 
-/** a가 b를 칠 때 피해 배수(단계 차이 × 상성) */
-export function dmgMult(a: Fighter, b: Fighter): number {
-  if (b.isBoss) return 1;
-  const sa = a.isBoss ? 6 : a.stage, sb = b.stage;
-  let m = Math.max(0.35, Math.min(2.4, 1 + CONFIG.stageDmgStep * (sa - sb)));
-  if (beats(a.lineage, b.lineage)) m *= CONFIG.favorMul;
-  else if (beats(b.lineage, a.lineage)) m *= CONFIG.unfavorMul;
-  return m;
+const E = (stage: number) => CONFIG.evoMul[Math.max(1, Math.min(3, stage))];
+
+/** 기준 피해 B: 30 × (1 + 0.08 × (L−1)) × E × 계열 공격 */
+export function baseB(f: Fighter): number {
+  if (f.isBoss || !f.family) return 80;
+  return CONFIG.skillBase * (1 + CONFIG.skillPerLevel * (f.level - 1)) * E(f.stage) * FAMILY[f.family].atk;
 }
 
-/** 내 기준 상대와의 관계: 1 내가 강함, 0 비슷함, -1 상대가 강함 */
+/** 물기: 8 × (1 + 0.06 × (L−1)) × E × 계열 공격 */
+export function biteOf(f: Fighter): number {
+  if (f.isBoss || !f.family) return CONFIG.bossBite;
+  return CONFIG.biteBase * (1 + CONFIG.bitePerLevel * (f.level - 1)) * E(f.stage) * FAMILY[f.family].atk;
+}
+
+/** 최대 체력: (60 × (1 + 0.1 × (L−1)) × E + 마디 × 0.6) × 계열 체력 */
+export function maxHpOf(f: Fighter, segCount: number, extra = 1): number {
+  if (f.isBoss || !f.family) return CONFIG.bossHp;
+  return Math.round((CONFIG.hpBase * (1 + CONFIG.hpPerLevel * (f.level - 1)) * E(f.stage) + segCount * CONFIG.hpPerSeg) * FAMILY[f.family].hp * extra);
+}
+
+/** 내 기준 상대와의 관계: 1 내가 셈(레벨 3 이상 높음), 0 비슷, -1 상대가 셈 */
 export function relation(me: Fighter, other: Fighter): -1 | 0 | 1 {
   if (other.isBoss) return -1;
-  const mine = dmgMult(me, other), theirs = dmgMult(other, me);
-  if (mine >= theirs * CONFIG.strongRatio) return 1;
-  if (theirs >= mine * CONFIG.strongRatio) return -1;
+  const d = me.level - other.level;
+  if (d >= CONFIG.recoilLevelGap) return 1;
+  if (d <= -CONFIG.recoilLevelGap) return -1;
   return 0;
-}
-
-export function biteOf(a: Fighter): number {
-  if (a.isBoss) return CONFIG.bossBite;
-  return CONFIG.biteDamage[a.stage] * LINEAGE[a.lineage].biteMul * (1 + CONFIG.statAtk * (a.st?.[1] ?? 0));
 }

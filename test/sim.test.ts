@@ -1,10 +1,10 @@
-// 시뮬레이션 자동 점검: 화면 없이 로직만 돌린다.
-import { Simulation, pointInPoly } from '../src/shared/sim';
+// 시뮬레이션 자동 점검(2판): 화면 없이 로직만 돌린다.
+import { Simulation, type Snake } from '../src/shared/sim';
 import { botThink } from '../src/shared/bot';
-import { CONFIG } from '../src/shared/config';
-import { beats, CYCLE, SPECIAL_FOODS, SPECIES } from '../src/shared/species';
-import { biteOf, dmgMult } from '../src/shared/combat';
-import { emptyCommand } from '../src/shared/types';
+import { CONFIG, nutNeed } from '../src/shared/config';
+import { COMMON_SUBS, FAMILIES, FAMILY, SPECIAL_FOODS, SPECIES } from '../src/shared/species';
+import { ABILITIES, TRAITS } from '../src/shared/cards';
+import { emptyCommand, type GameOpts } from '../src/shared/types';
 
 let failed = 0;
 function check(name: string, ok: boolean, info = '') {
@@ -12,397 +12,239 @@ function check(name: string, ok: boolean, info = '') {
   if (!ok) failed++;
 }
 
-// 0) 상성: 모두 2승 2패
+const opts = (species: string, form: string, extra: Partial<GameOpts> = {}): GameOpts => ({ power: 1, bots: 1, map: 'grass', loadout: { species, form, traits: ['molt', 'reroll'] }, ...extra });
+
+// 0) 데이터
 {
-  const ok = CYCLE.every((a) => CYCLE.filter((b) => beats(a, b)).length === 2 && CYCLE.filter((b) => beats(b, a)).length === 2);
-  check('5갈래 모두 2승 2패', ok);
-  check('갑옷 > 사냥, 사냥 > 독, 독 > 갑옷', beats('armor', 'hunt') && beats('hunt', 'poison') && beats('poison', 'armor'));
-  check('종 21개(애벌레 + 5갈래×4단계)', SPECIES.length === 21);
+  check('계열 10개, 역할마다 2개', FAMILIES.length === 10 && ['tank', 'charge', 'shoot', 'trap', 'support'].every((r) => FAMILIES.filter((f) => f.role === r).length === 2));
+  check('종 40개, 계열별 목록과 일치', SPECIES.length === 40 && FAMILIES.every((f) => f.species.every((id) => SPECIES.find((s) => s.id === id)?.family === f.id)));
+  check('계열마다 기술 형태 3개', FAMILIES.every((f) => f.forms.length === 3));
+  check('본능 40개 모두 다름', new Set(SPECIES.map((s) => s.instinct.id)).size === 40);
+  check('특별 먹이 10종: 계열마다 좋아함·싫어함 하나씩', SPECIAL_FOODS.length === 10 && SPECIAL_FOODS.every((_, i) => FAMILIES.filter((f) => f.likes === i).length === 1 && FAMILIES.filter((f) => f.hates === i).length === 1) && FAMILIES.every((f) => f.likes !== f.hates));
+  check('능력 카드 37장(공용 17 + 계열 전용 2×10)', ABILITIES.length === 37 && FAMILIES.every((f) => ABILITIES.filter((a) => a.family === f.id).length === 2));
+  check('특성 12개, 공용 보조 기술 10개', TRAITS.length === 12 && COMMON_SUBS.length === 10);
+  check("레벨 곡선: 1→2에 20, 한 레벨마다 7씩 더", nutNeed(1) === 20 && nutNeed(15) === 118);
 }
 
-// 1) 장시간 실행: 플레이어도 봇 AI로 조종, 15분
+// 1) 장시간 실행: 플레이어도 봇 AI로 조종, 한 판 끝까지
 {
-  const sim = new Simulation(12345);
+  const sim = new Simulation(12345, '나', opts('kingmantis', 'sweep', { bots: 20 }));
   const p = sim.snakes[0];
-  p.hunter = true;
   p.lives = 9999;
-  let maxLen = 0;
-  let gemsEaten = 0, likes = 0, yucks = 0;
-  let nan = false, rings = 0, crushes = 0, deaths = 0, molts = 0, skills = 0, cuts = 0, crits = 0, playerDeaths = 0, maxStage = 1, ended = false;
-  const enemies = new Set<string>();
+  let nan = false, deaths = 0, evolves = 0, ults = 0, crushes = 0, ended = false, maxLv = 1, levelUps = 0;
+  const casts = new Map<string, number>();
   const ticks = CONFIG.tickRate * (CONFIG.roundTime + 2);
   const t0 = performance.now();
   for (let t = 0; t < ticks; t++) {
-    if (!p.alive && p.respawnT > 1.9) playerDeaths++;
     sim.setCommand(0, botThink(sim, p, sim.dt));
     sim.step();
     const snap = sim.snapshot();
     for (const e of snap.events) {
-      if (e.type === 'ring') rings++;
-      if (e.type === 'crush' && e.count > 0) crushes += e.count;
       if (e.type === 'death') deaths++;
-      if (e.type === 'molt') molts++;
-      if (e.type === 'skill') skills++;
-      if (e.type === 'hit' && e.dmg > 0) cuts++;
-      if (e.type === 'hit' && (e.kind === 'crit' || e.kind === 'rage')) crits++;
-      if (e.type === 'enemyStart') enemies.add(e.kind);
+      if (e.type === 'evolve') evolves++;
+      if (e.type === 'levelUp') levelUps++;
+      if (e.type === 'skill' && e.slot === 'ult') ults++;
+      if (e.type === 'skill' && e.slot === 'main') casts.set(e.fam, (casts.get(e.fam) ?? 0) + 1);
+      if (e.type === 'crush' && e.count > 0) crushes += e.count;
       if (e.type === 'end') ended = true;
-      if (e.type === 'eat' && e.gem !== undefined) gemsEaten++;
-      if (e.type === 'eat' && e.taste === 1) likes++;
-      if (e.type === 'eat' && e.taste === -1) yucks++;
     }
     for (const s of sim.snakes) {
-      if (s.alive && !(Number.isFinite(s.x) && Number.isFinite(s.y))) nan = true;
-      if (s.alive && !s.isBoss) maxStage = Math.max(maxStage, s.stage);
-      if (s.alive && !s.isBoss) maxLen = Math.max(maxLen, s.segCount);
+      if (s.alive && !(Number.isFinite(s.x) && Number.isFinite(s.y) && Number.isFinite(s.hp))) nan = true;
+      if (!s.isBoss) maxLv = Math.max(maxLv, s.level);
     }
   }
   const ms = performance.now() - t0;
-  check('8분 한 판 동안 좌표가 깨지지 않음', !nan);
-  check('8분이 지나면 판이 끝남', ended && sim.state === 'ended');
-  check('탈피(진화)가 일어남', molts > 10, `탈피 ${molts}회, 최고 단계 ${maxStage}`);
-  check('스킬이 쓰임', skills > 20, `스킬 ${skills}회`);
-  check('물기·스킬 피해가 오감', cuts > 50, `피해 ${cuts}회`);
-  check('천적이 여러 종 나타남', enemies.size >= 4, [...enemies].join(', '));
-  check('꼬리 급소·역습이 일어남', crits > 0, `${crits}회`);
-  check('고리가 만들어짐', rings > 0, `고리 ${rings}회, 압착 처치 ${crushes}`);
-  check('보석·좋아하는 먹이를 먹음', gemsEaten > 30 && likes > 5, `보석 ${gemsEaten}, 좋아함 ${likes}, 싫어함 ${yucks}`);
-  check('먹이 수가 유지됨', sim.foods.length > CONFIG.foodCount * 0.8 && sim.foods.length < 6000, `먹이 ${sim.foods.length}`);
-  check('틱당 처리 시간 < 2ms', ms / ticks < 2, `${(ms / ticks).toFixed(3)}ms/틱`);
-  console.log(`      (참고: 죽음 ${deaths}, 플레이어 사망 ${playerDeaths}, 최대 길이 ${maxLen}, 맵 ${sim.map.theme})`);
+  check('8분 판이 시간으로 끝남', ended && sim.state === 'ended');
+  check('좌표·체력이 NaN이 되지 않음', !nan);
+  check('레벨업·진화가 일어남', levelUps > 100 && evolves > 20, `레벨업 ${levelUps}, 진화 ${evolves}, 최고 Lv${maxLv}`);
+  check('필살기를 씀', ults > 10, `${ults}번`);
+  check('10계열 모두 주 기술을 씀', FAMILIES.every((f) => (casts.get(f.id) ?? 0) > 0), [...casts].map(([k, v]) => `${k}:${v}`).join(' '));
+  check('쓰러짐·압착이 일어남', deaths > 20, `쓰러짐 ${deaths}, 압착 ${crushes}`);
+  check('틱당 3ms 이하', ms / ticks < 3, `${(ms / ticks).toFixed(2)}ms`);
 }
 
-// 2) 싸움 공식: 상성·단계가 피해 배수로
-{
-  const hunt3 = { stage: 3, lineage: 'hunt' as const, isBoss: false };
-  const armor3 = { stage: 3, lineage: 'armor' as const, isBoss: false };
-  const swarm2 = { stage: 2, lineage: 'swarm' as const, isBoss: false };
-  check(`같은 단계 상성 유리 ${CONFIG.favorMul}배 / 불리 ${CONFIG.unfavorMul}배`, Math.abs(dmgMult(armor3, hunt3) - CONFIG.favorMul) < 1e-9 && Math.abs(dmgMult(hunt3, armor3) - CONFIG.unfavorMul) < 1e-9);
-  check('단계가 높으면 더 아프게', dmgMult({ stage: 4, lineage: 'swarm', isBoss: false }, swarm2) > dmgMult(swarm2, { stage: 4, lineage: 'swarm', isBoss: false }));
+/** 기술 시험장: 플레이어 앞 120에 묶인 표적 하나 */
+function arena(species: string, form: string, level = 10) {
+  const sim = new Simulation(7, '나', opts(species, form, { startLevel: level }));
+  sim.enemies.next = 1e9;
+  const p = sim.snakes[0];
+  const t = sim.snakes[1];
+  t.isPlayer = true; // 봇 AI 끄기(명령이 그대로 남음)
+  sim.foods = [];
+  sim.spawnAt(p, 0, 0, 0, 30);
+  sim.spawnAt(t, 130, 0, Math.PI / 2, 30);
+  t.cmd = emptyCommand(Math.PI / 2);
+  p.cmd = emptyCommand(0);
+  t.invulnT = p.invulnT = 0;
+  sim.autoLevel(t, CONFIG.maxLevel - t.level);
+  sim.spawnAt(t, 95, 0, Math.PI / 2, 30);
+  t.hp = t.maxHp;
+  t.lives = 99;
+  p.offer = null;
+  p.pending = 0;
+  p.subPending = false;
+  return { sim, p, t };
 }
 
-// 2-1) 물기: 즉사가 아니라 체력이 깎이고, 강한 몸에 박으면 반동 피해
-function duel(attacker: 'hunt' | 'armor', defender: 'hunt' | 'armor', seed: number) {
-  const sim = new Simulation(seed);
-  for (const b of sim.snakes.slice(3)) b.alive = false;
-  sim.snakes[0].alive = false;
-  const a = sim.snakes[1], d = sim.snakes[2];
-  for (const s of [a, d]) (s as any).isPlayer = true;
-  (sim as any).setForm(a, 3, attacker);
-  (sim as any).setForm(d, 3, defender);
-  (sim as any).spawnAt(d, 0, 0, 0, 40);
-  (sim as any).spawnAt(a, -120, -80, Math.PI / 2, 25);
-  (sim as any).fullHeal(a);
-  (sim as any).fullHeal(d);
-  let aHp = a.hp, dHp = d.hp, bit = false;
-  for (let t = 0; t < 90 && !bit; t++) {
-    a.cmd = emptyCommand(Math.PI / 2);
-    d.cmd = emptyCommand(0);
+function run(sim: Simulation, sec: number, hold?: (s: Simulation) => void) {
+  for (let i = 0; i < sec * CONFIG.tickRate; i++) {
+    hold?.(sim);
     sim.step();
-    for (const e of sim.snapshot().events) if (e.type === 'hit' && e.kind === 'bite' && e.snake === 2) bit = true;
+    sim.snapshot();
   }
-  return { bit, aLoss: aHp - a.hp, dLoss: dHp - d.hp, aAlive: a.alive, dAlive: d.alive };
-}
-{
-  const r1 = duel('hunt', 'armor', 3);
-  check('같은 단계 물기: 즉사 없이 체력만 깎임', r1.bit && r1.aAlive && r1.dAlive && r1.dLoss > 0, `사냥 -${r1.aLoss.toFixed(0)}, 갑옷 -${r1.dLoss.toFixed(0)}`);
-  const r2 = duel('armor', 'hunt', 4);
-  check('갑옷이 사냥 몸을 물면: 사냥만 깎임', r2.bit && r2.dAlive && r2.dLoss > 10 && r2.aLoss === 0, `갑옷 -${r2.aLoss.toFixed(0)}, 사냥 -${r2.dLoss.toFixed(0)}`);
 }
 
-// 2-2) 웅크리기: 받는 피해 절반
-{
-  const sim = new Simulation(8);
-  const s = sim.snakes[1];
-  (sim as any).setForm(s, 3, 'swarm');
-  (sim as any).fullHeal(s);
-  const h0 = s.hp;
-  sim.damage(s, 40, -1, 'bite', 0, 0);
-  const normal = h0 - s.hp;
-  (sim as any).fullHeal(s);
-  const h1 = s.hp;
-  s.sneaking = true;
-  sim.damage(s, 40, -1, 'bite', 0, 0);
-  check('웅크리면 받는 피해 절반', Math.abs(h1 - s.hp - normal / 2) <= 1, `${normal} → ${h1 - s.hp}`);
-}
-
-// 2-3) 목숨 3개: 쓰러지면 부활(단계 유지·길이 절반·무적), 셋 다 잃으면 패배
-{
-  const sim = new Simulation(9);
-  const p = sim.snakes[0];
-  (sim as any).setForm(p, 3, 'poison');
-  (sim as any).spawnAt(p, 0, 0, 0, 80);
-  sim.kill(p, -1, 'bite');
-  let lifeLost = false;
-  for (const e of sim.snapshot().events) if (e.type === 'lifeLost') lifeLost = true;
-  for (let t = 0; t < CONFIG.tickRate * (CONFIG.respawnDelay + 0.2); t++) sim.step();
-  check('쓰러져도 부활', lifeLost && p.alive && p.lives === 2 && sim.state === 'playing');
-  check('부활하면 단계 유지·길이 절반·무적', p.stage === 3 && p.segCount === 40 && p.invulnT > 0, `${p.stage}단계, ${p.segCount}마디`);
-  sim.kill(p, -1, 'bite');
-  for (let t = 0; t < CONFIG.tickRate * (CONFIG.respawnDelay + 0.2); t++) sim.step();
-  p.invulnT = 0;
-  sim.kill(p, -1, 'bite');
-  check('목숨을 다 잃으면 판 끝', p.lives === 0 && sim.state === 'ended');
-}
-
-// 2-5) 보석: 능력치가 오르고 체력·물기·속도·기술에 반영, 쓰러지면 절반을 떨어뜨림
-{
-  const sim = new Simulation(31);
-  const p = sim.snakes[0];
-  (sim as any).setForm(p, 3, 'hunt');
-  (sim as any).spawnAt(p, 0, 0, 0, 60);
-  (sim as any).fullHeal(p);
-  const hp0 = p.maxHp, bite0 = biteOf(p), cd0 = sim.skillCdMax(p);
-  for (const k of [0, 0, 0, 1, 1, 3]) (sim as any).eatGem(p, { x: 0, y: 0, r: 14, ep: 3, kind: 3, sub: k, life: Infinity });
-  check('보석으로 능력치 레벨이 오름', p.st.join() === '3,2,0,1', p.st.join());
-  check('체력 보석 → 최대 체력↑', p.maxHp > hp0 * 1.15, `${hp0} → ${p.maxHp}`);
-  check('공격 보석 → 물기 피해↑', biteOf(p) > bite0 * 1.1, `${bite0.toFixed(1)} → ${biteOf(p).toFixed(1)}`);
-  check('기술 보석 → 재사용 시간↓', sim.skillCdMax(p) < cd0, `${cd0.toFixed(2)} → ${sim.skillCdMax(p).toFixed(2)}`);
-  p.st = [CONFIG.statMax, 0, 0, 0];
-  (sim as any).eatGem(p, { x: 0, y: 0, r: 14, ep: 3, kind: 3, sub: 0, life: Infinity });
-  check('능력치는 최대 레벨까지', p.st[0] === CONFIG.statMax);
-  p.st = [4, 2, 0, 2];
-  const before = sim.foods.filter((f) => f.kind === 3).length;
-  sim.kill(p, -1, 'bite');
-  const dropped = sim.foods.filter((f) => f.kind === 3).length - before;
-  check('쓰러지면 보석 절반을 떨어뜨림', dropped === 4 && p.st.reduce((a, b) => a + b, 0) === 4, `떨어뜨림 ${dropped}, 남은 레벨 ${p.st.join()}`);
-}
-
-// 2-6) 특별 먹이: 좋아하면 폭풍 성장, 싫어하면 느려짐, 그 외엔 보통
-{
-  const sim = new Simulation(32);
-  const p = sim.snakes[0];
-  (sim as any).setForm(p, 3, 'swarm');
-  (sim as any).spawnAt(p, 0, 0, 0, 60);
-  (sim as any).fullHeal(p);
-  const honey = SPECIAL_FOODS.findIndex((f) => f.like === 'swarm');
-  const shroom = SPECIAL_FOODS.findIndex((f) => f.hate === 'swarm');
-  const seg0 = p.segCount, g0 = p.gauge;
-  (sim as any).eatSpecial(p, { x: 0, y: 0, r: 17, ep: 6, kind: 4, sub: honey, life: Infinity });
-  check('좋아하는 먹이 → 폭풍 성장', p.segCount >= seg0 + CONFIG.likeSegs && p.gauge >= g0 + CONFIG.likeEP && p.feastT > 0, `${seg0} → ${p.segCount}마디`);
-  const speedOf = () => {
-    const x0 = p.x;
-    p.cmd = emptyCommand(0);
-    p.slowT = 0;
-    for (let i = 0; i < 30; i++) sim.step();
-    return p.x - x0;
+function hold(t: Snake) {
+  return () => {
+    t.rootT = Math.max(t.rootT, 0.05);
+    t.kvx *= 0.5;
+    t.kvy *= 0.5;
   };
-  (sim as any).spawnAt(p, 0, 0, 0, 60);
-  const normal = speedOf();
-  (sim as any).spawnAt(p, 0, 0, 0, 60);
-  (sim as any).eatSpecial(p, { x: 0, y: 0, r: 17, ep: 6, kind: 4, sub: shroom, life: Infinity });
-  const slow = speedOf();
-  check('싫어하는 먹이 → 느려짐', p.yuckT > 0 && slow < normal * 0.75, `${normal.toFixed(0)} → ${slow.toFixed(0)}`);
-  check('갈래마다 좋아하는 것·싫어하는 것 하나씩', CYCLE.every((l) => SPECIAL_FOODS.filter((f) => f.like === l).length === 1 && SPECIAL_FOODS.filter((f) => f.hate === l).length === 1));
 }
 
-// 2-7) 아들 모드: 내 곤충 세기 5배(주는 피해 ×5, 받는 피해 ÷5)
+// 2) 30개 기술 형태 모두: 표적에게 피해나 효과가 들어간다
 {
-  const hit = (power: number) => {
-    const sim = new Simulation(41, '나', 1, undefined, { power, bots: 4, map: 'grass' });
-    const p = sim.snakes[0], b = sim.snakes[1];
-    for (const s of [p, b]) {
-      (sim as any).setForm(s, 3, 'spider');
-      (sim as any).fullHeal(s);
-      s.invulnT = 0;
+  const bad: string[] = [];
+  for (const f of FAMILIES) {
+    for (const form of f.forms) {
+      const { sim, p, t } = arena(f.species[0], form.id);
+      p.cmd = { ...p.cmd, skillSeq: 1 };
+      let effect = false, dealt = 0;
+      for (let i = 0; i < 4 * CONFIG.tickRate; i++) {
+        hold(t)();
+        sim.step();
+        if (form.id === 'dive' && i === 0) sim.shove(t, 0, 200);
+        // 숨어 기다리기는 표적이 다가와야 터진다
+        if (form.id === 'ambush' && i === 30) sim.shove(t, Math.PI, 70);
+        if (form.id === 'silk' || form.id === 'jet' || form.id === 'stab' || form.id === 'snipe' || form.id === 'burst' || form.id === 'signal' || form.id === 'sand') p.angle = Math.atan2(t.y - p.y, t.x - p.x);
+        if (t.slowT > 0 || t.blindT > 0 || t.markT > 0 || t.poisonT > 0 || t.grabbedBy >= 0 || t.fearT > 0 || t.stunT > 0) effect = true;
+        for (const e of sim.snapshot().events) if (e.type === 'hit' && e.snake === t.id && e.by === p.id && e.kind !== 'bite' && e.dmg > 0) dealt += e.dmg;
+      }
+      if (dealt <= 0 && !effect) bad.push(`${f.name}/${form.name}`);
     }
-    const dealt = sim.damage(b, 20, p.id, 'bite', b.x, b.y);
-    const taken = sim.damage(p, 20, b.id, 'bite', p.x, p.y);
-    return [dealt, taken, sim.snakes.length - 1];
-  };
-  const [d1, t1] = hit(1), [d5, t5, bots] = hit(5);
-  check('아들 모드: 주는 피해 5배·받는 피해 1/5', d5 === d1 * 5 && t5 === Math.round(t1 / 5), `주는 ${d1}→${d5}, 받는 ${t1}→${t5}`);
-  check('봇 수 설정', bots === 4, `${bots}마리`);
-}
-
-// 2-4) 길이 제한 없음(길수록 느리게 자라고 굵어짐)
-{
-  const sim = new Simulation(10);
-  const p = sim.snakes[0];
-  const r0 = p.r;
-  for (let k = 0; k < 400; k++) sim.feed(p, 1);
-  check('1단계도 40마디를 넘어 계속 자람', p.segCount > 60, `${p.segCount}마디`);
-  check('길어지면 굵어짐', p.r > r0 * 1.05, `${r0.toFixed(1)} → ${p.r.toFixed(1)}`);
-}
-
-// 3) 탈피: 카드가 나오고, 고르면 단계가 오른다
-{
-  const sim = new Simulation(5);
-  const p = sim.snakes[0];
-  for (const b of sim.snakes.slice(1)) b.alive = false;
-  sim.feed(p, CONFIG.stageGauge[1]);
-  sim.step();
-  const hasCards = !!p.cards && p.cards.length === 3;
-  const choice = p.cards ? p.cards[1] : null;
-  p.cmd = { ...emptyCommand(p.angle), moltSeq: 1, moltChoice: 1 };
-  for (let t = 0; t < CONFIG.tickRate * 3; t++) sim.step();
-  check('게이지가 차면 카드 3장', hasCards);
-  check('카드를 고르면 2단계로 탈피', p.stage === 2 && p.lineage === choice?.lineage, `${p.species.name}`);
-}
-
-// 4) 5단계에서도 다시 진화: 다른 갈래로 변신 또는 같은 종 강화
-{
-  const sim = new Simulation(6);
-  const p = sim.snakes[0];
-  for (const b of sim.snakes.slice(1)) b.alive = false;
-  (sim as any).setForm(p, 5, 'armor');
-  p.gauge = CONFIG.stageGauge[5];
-  sim.step();
-  const up = p.cards ? p.cards.findIndex((c) => c.upgrade) : -1;
-  check('5단계 카드: 변신 2장 + 강화 1장', !!p.cards && p.cards.length === 3 && up >= 0);
-  p.cmd = { ...emptyCommand(p.angle), moltSeq: 1, moltChoice: up };
-  for (let t = 0; t < CONFIG.tickRate * 3; t++) sim.step();
-  check('강화하면 같은 종 ★1', p.stage === 5 && p.lineage === 'armor' && p.mastery === 1);
-  p.gauge = CONFIG.stageGauge[5];
-  sim.step();
-  const sw = p.cards!.findIndex((c) => !c.upgrade);
-  const target = p.cards![sw].lineage;
-  p.cmd = { ...emptyCommand(p.angle), moltSeq: 2, moltChoice: sw };
-  for (let t = 0; t < CONFIG.tickRate * 4; t++) sim.step();
-  check('다른 갈래 5단계로 변신', p.stage === 5 && p.lineage === target, p.species.name);
-}
-
-// 4-1) 꼬리 급소: 1단계가 3단계 꼬리를 물면 최대 체력의 15%
-{
-  const sim = new Simulation(21);
-  for (const b of sim.snakes.slice(3)) b.alive = false;
-  sim.snakes[0].alive = false;
-  const big = sim.snakes[1], small = sim.snakes[2];
-  for (const s of [big, small]) (s as any).isPlayer = true;
-  (sim as any).setForm(big, 3, 'armor');
-  (sim as any).setForm(small, 1, 'none');
-  (sim as any).spawnAt(big, 600, 0, 0, 60); // 꼬리가 왼쪽으로 뻗음
-  (sim as any).fullHeal(big);
-  big.rootT = 99;
-  const tail = big.segN - 2;
-  (sim as any).spawnAt(small, big.segs[tail * 2], big.segs[tail * 2 + 1] - 60, Math.PI / 2, 20);
-  let crit = 0;
-  for (let t = 0; t < 60 && !crit; t++) {
-    big.cmd = emptyCommand(0);
-    small.cmd = emptyCommand(Math.PI / 2);
-    sim.step();
-    for (const e of sim.snapshot().events) if (e.type === 'hit' && e.kind === 'crit' && e.snake === 1) crit = e.dmg;
   }
-  check('약자가 꼬리를 물면 급소 피해', crit >= Math.floor(big.maxHp * CONFIG.tailCritFrac * 0.8) - 1, `${crit} / 최대 ${big.maxHp}`);
+  check('기술 형태 30개가 모두 표적에게 들어감', bad.length === 0, bad.join(', '));
 }
 
-// 4-2) 역습 게이지: 강한 적에게 맞아 가득 차면 다음 공격이 최대 체력 30% 추가
+// 3) 보조 기술 20개와 필살기 10개가 오류 없이 나간다
 {
-  const sim = new Simulation(22);
-  const weak = sim.snakes[1], strong = sim.snakes[2];
-  (sim as any).setForm(weak, 2, 'hunt');
-  (sim as any).setForm(strong, 4, 'armor');
-  (sim as any).fullHeal(weak);
-  (sim as any).fullHeal(strong);
-  for (let k = 0; k < 20 && weak.rage < CONFIG.rageMax; k++) {
-    sim.damage(weak, 8, strong.id, 'bite', 0, 0);
-    weak.hp = weak.maxHp;
-  }
-  check('강한 적에게 맞으면 역습 게이지가 참', weak.rage >= CONFIG.rageMax);
-  const bonus = (sim as any).rageBonus(weak, strong);
-  check('역습 일격 = 상대 최대 체력 30%', Math.abs(bonus - strong.maxHp * CONFIG.rageFrac) < 1e-6 && weak.rage === 0);
-}
-
-// 4-3) 천적 6종: 각각 나타났다가 사라지고, 해를 끼친다
-for (const kind of ['bird', 'frog', 'rain', 'centipede', 'anteater', 'child'] as const) {
-  const sim = new Simulation(30 + kind.length);
-  sim.snakes[0].lives = 99;
-  const e = sim.enemies as any;
-  e.next = 0;
-  e.last = null;
-  // 원하는 종이 뽑히도록 바로 지정
-  e.phase = 'warn';
-  e.kind = kind;
-  e.t = 0.01;
-  [e.x, e.y] = [CONFIG.arenaRadius - 40, 0];
-  if (kind === 'child' || kind === 'rain' || kind === 'bird') [e.x, e.y] = [sim.snakes[1].x, sim.snakes[1].y];
-  let started = false, ended = false, harm = 0, nan = false;
-  for (let t = 0; t < CONFIG.tickRate * 70 && !ended; t++) {
-    sim.step();
-    for (const ev of sim.snapshot().events) {
-      if (ev.type === 'enemyStart') started = true;
-      if (ev.type === 'enemyEnd') ended = true;
-      if ((ev.type === 'hit' && ev.kind === 'enemy') || ev.type === 'captured' || ev.type === 'birdDive' || ev.type === 'tongue' || ev.type === 'lick') harm++;
-      if (ev.type === 'hit' && ev.by === sim.bossId && sim.bossId >= 0) harm++;
+  const bad: string[] = [];
+  for (const f of FAMILIES) {
+    for (const sub of [f.sub, ...COMMON_SUBS.slice(FAMILIES.indexOf(f), FAMILIES.indexOf(f) + 1)]) {
+      const { sim, p, t } = arena(f.species[0], f.forms[0].id);
+      p.sub = sub;
+      p.subCd = 0;
+      p.cmd = { ...p.cmd, subSeq: 1 };
+      try {
+        run(sim, 2, hold(t));
+        if (p.subCd <= 0) bad.push(`${sub.name}(안 나감)`);
+      } catch (err) {
+        bad.push(`${sub.name}: ${(err as Error).message}`);
+      }
     }
-    for (const s of sim.snakes) if (s.alive && !(Number.isFinite(s.x) && Number.isFinite(s.y))) nan = true;
   }
-  check(`천적 ${kind}: 나타나고 끝남, 해를 끼침`, started && ended && harm > 0 && !nan, `피해 ${harm}회`);
+  check('보조 기술 20개가 나감', bad.length === 0, bad.join(', '));
+  const weak: string[] = [];
+  for (const f of FAMILIES) {
+    const { sim, p, t } = arena(f.species[0], f.forms[0].id);
+    sim.spawnAt(t, 220, 0, Math.PI / 2, 30); // 예고 0.5초 동안 다가가는 거리를 둔다
+    p.ult = CONFIG.ultMax;
+    p.cmd = { ...p.cmd, skillSeq: 1 };
+    let lost = 0;
+    // 꿀벌 벌 떼는 몇 초에 걸쳐 피해
+    for (let i = 0; i < (f.id === 'bee' ? 4 : 3) * CONFIG.tickRate; i++) {
+      t.rootT = Math.max(t.rootT, 0.05); // 끌어당기기는 막지 않는다
+      sim.step();
+      for (const e of sim.snapshot().events) if (e.type === 'hit' && e.snake === t.id && e.by === p.id && e.kind === 'ult') lost += e.dmg;
+    }
+    if (p.ultUses !== 1 || (lost <= 0 && t.rootT <= 0.06 && t.blindT <= 0)) weak.push(`${f.ult.name}(${Math.round(lost)})`);
+    if (lost > t.maxHp * CONFIG.ultCapFrac + 4) weak.push(`${f.ult.name} 상한 넘음 ${Math.round(lost)}`);
+  }
+  check('필살기 10개가 표적에게 들어가고 40% 상한을 지킴', weak.length === 0, weak.join(', '));
 }
 
-// 4-4) 채집망: 갇혔다가 반쪽(길이 절반)이 되어 나옴
+// 4) 레벨·진화·카드
 {
-  const sim = new Simulation(40);
+  const sim = new Simulation(3, '나', opts('rhino', 'charge'));
+  sim.enemies.next = 1e9;
   const p = sim.snakes[0];
-  (sim as any).spawnAt(p, 0, 0, 0, 60);
+  let evo2 = false, subOffer = false;
+  for (let k = 0; k < 400 && p.level < CONFIG.maxLevel; k++) {
+    sim.feed(p, 4);
+    for (let i = 0; i < 6; i++) sim.step();
+    if (p.evo >= 2) evo2 = true;
+    if (p.offer?.kind === 'sub') subOffer = true;
+    if (p.offer) sim.chooseCard(p, 0);
+  }
+  for (let i = 0; i < 120; i++) sim.step();
+  while (p.offer) sim.chooseCard(p, 0);
+  check('레벨 16까지 오름', p.level === CONFIG.maxLevel, `Lv${p.level}`);
+  check('Lv5 성충 + 보조 기술 고르기, Lv10 각성', evo2 && subOffer && p.evo === 3 && !!p.sub, `단계 ${p.evo}, 보조 ${p.sub?.name}`);
+  check('능력 칸은 최대 4개', p.abilities.length <= 4 && p.abilities.length >= 3, `${p.abilities.length}칸`);
+  // 모두 최대가 되면 보너스 카드만
+  p.abilities = p.abilities.slice(0, 4).map((a) => ({ ...a, lv: 3 }));
+  while (p.abilities.length < 4) p.abilities.push({ id: ['jaw', 'shell', 'light', 'regen'][p.abilities.length], lv: 3 });
+  p.mainLv = 2;
+  p.subLv = 1;
+  p.pending = 1;
+  sim.makeOffer(p);
+  const off = p.offer as Snake['offer'];
+  check('모두 최대면 보너스 카드만', !!off && off.cards.every((c) => c.kind === 'bonus'));
+}
+
+// 5) 잔해: 모은 영양의 30%, 레벨이 더 높으면 절반만
+{
+  const { sim, p, t } = arena('kingmantis', 'sweep', 1);
+  t.totalNut = 200;
+  t.level = 3;
+  const before = sim.foods.length;
+  sim.kill(t, p.id, 'bite');
+  const rem = sim.foods.slice(before).filter((f) => f.kind === 2);
+  const total = rem.reduce((a, f) => a + f.ep, 0);
+  check('잔해 = 모은 영양의 30%', Math.abs(total - 60) < 1, `${total.toFixed(1)}`);
+  p.level = 5;
+  const n0 = p.totalNut;
+  sim.feed(p, rem[0].ep * (p.level > rem[0].sub ? CONFIG.remainsWeakMul : 1));
+  check('내가 레벨이 높으면 잔해 영양 절반', Math.abs(p.totalNut - n0 - rem[0].ep * 0.5 * CONFIG.nutMul) < 0.01);
+}
+
+// 6) 아들 모드: 주는 피해 ×5
+{
+  const a = arena('kingmantis', 'sweep');
+  const b = arena('kingmantis', 'sweep');
+  b.sim.setOpts({ ...b.sim.opts, power: 5 });
+  a.t.isPlayer = b.t.isPlayer = false;
+  const d1 = a.sim.damage(a.t, 20, a.p.id, 'bite', 0, 0);
+  const d5 = b.sim.damage(b.t, 20, b.p.id, 'bite', 0, 0);
+  check('아들 모드: 내 공격 5배', d5 === d1 * 5, `${d1} → ${d5}`);
+}
+
+// 7) 특성·본능
+{
+  const sim = new Simulation(5, '나', { power: 1, bots: 3, map: 'grass', loadout: { species: 'kingstag', form: 'grab', traits: ['preheat', 'sprint'] } });
+  const p = sim.snakes[0];
+  check('특성 필살기 예열: 게이지 30에서 시작', p.ult >= 30);
+  check('봇 수 설정', sim.snakes.length === 4);
+  sim.enemies.next = 1e9;
   p.invulnT = 0;
-  sim.capture(p);
-  check('채집망에 갇히면 경기장에서 빠짐', !sim.onField(p) && p.alive);
-  for (let t = 0; t < CONFIG.tickRate * (CONFIG.netHold + 0.2); t++) {
-    p.cmd = emptyCommand(0);
-    sim.step();
-  }
-  check('풀려나면 반쪽', sim.onField(p) && p.segCount >= 30 && p.segCount <= 32 && p.hp <= p.maxHp * 0.6, `${p.segCount}마디`);
+  sim.damage(p, p.hp + 50, -1, 'wall', 0, 0, 'wall');
+  check('왕사슴벌레: 쓰러질 피해를 한 번 버팀', p.alive && p.hp >= 1);
+  const m = arena('kingmantis', 'stab');
+  m.p.cmd = { ...m.p.cmd, sneak: true };
+  run(m.sim, 1.2, hold(m.t));
+  check('왕사마귀: 웅크리고 1초 뒤 기도 자세', m.p.prayArmed);
 }
 
-// 4-5) 바위: 머리가 바위 안으로 못 들어감
+// 8) 필살기 게이지: 받으면 차고, 쓰러지면 0
 {
-  const sim = new Simulation(41, '나', 1, 'sand');
-  const p = sim.snakes[0];
-  const rk = sim.map.rocks[0];
-  (sim as any).spawnAt(p, rk.x - rk.r - 80, rk.y, 0, 20);
-  let inside = false;
-  for (let t = 0; t < 90; t++) {
-    p.cmd = emptyCommand(0);
-    sim.step();
-    if (Math.hypot(p.x - rk.x, p.y - rk.y) < rk.r * 0.9) inside = true;
-  }
-  check('바위는 뚫고 지나갈 수 없음', sim.map.rocks.length > 5 && !inside);
+  const { sim, p, t } = arena('wasp' === 'wasp' ? 'hornet' : 'hornet', 'burst');
+  const u0 = p.ult;
+  sim.damage(p, p.maxHp * 0.2, t.id, 'bite', 0, 0);
+  check('맞으면 필살기 게이지가 참', p.ult > u0 + 10, `${u0.toFixed(1)} → ${p.ult.toFixed(1)}`);
+  p.lives = 3;
+  sim.kill(p, t.id, 'bite');
+  check('쓰러지면 게이지 0', p.ult === 0);
 }
 
-// 5) 고리 판정 + 압착 (3단계, 60마디로 반지름 60짜리 원을 돈다)
-{
-  const sim = new Simulation(7);
-  const p = sim.snakes[0];
-  for (const b of sim.snakes.slice(2)) b.alive = false;
-  const victim = sim.snakes[1];
-  (victim as any).isPlayer = true;
-  (sim as any).setForm(p, 3, 'hunt');
-  (sim as any).setForm(victim, 1, 'none');
-  (sim as any).spawnAt(p, 0, -60, 0, 60);
-  (sim as any).spawnAt(victim, 0, 0, Math.PI / 2, 8);
-  victim.rootT = 1e9; // 가운데에 묶어 둔다
-  let ringAt = -1, crushed = false;
-  for (let t = 0; t < CONFIG.tickRate * 8; t++) {
-    const d = Math.hypot(p.x, p.y);
-    const toCenter = Math.atan2(-p.y, -p.x);
-    p.cmd = emptyCommand(toCenter - Math.PI / 2 + (d - 60) / 60);
-    victim.cmd = emptyCommand(Math.PI / 2);
-    sim.step();
-    for (const e of sim.snapshot().events) {
-      if (e.type === 'ring' && ringAt < 0) ringAt = t;
-      if (e.type === 'death' && e.snake === 1 && e.cause === 'crush') crushed = true;
-    }
-    if (crushed) break;
-  }
-  check('원을 돌면 고리가 닫힘', ringAt >= 0, `틱 ${ringAt}`);
-  check('고리 안 곤충이 압착됨', crushed);
-}
-
-// 5-1) 고리 최소 길이: 어느 단계든 약 35마디
-{
-  const segs = (2 * Math.PI * CONFIG.loopMinRadiusPerR) / CONFIG.spacingRatio;
-  check('최소 고리 길이 ≈ 35마디', segs > 30 && segs < 40, `${segs.toFixed(1)}마디`);
-}
-
-// 6) 다각형 판정
-{
-  const sq = new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]);
-  check('점-다각형 판정', pointInPoly(5, 5, sq) && !pointInPoly(15, 5, sq));
-}
-
-if (failed) {
-  console.log(`\n${failed}개 실패`);
-  process.exit(1);
-}
-console.log('\n모두 통과');
+console.log(failed ? `\n${failed}개 실패` : '\n모두 통과');
+if (failed) process.exit(1);

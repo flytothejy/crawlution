@@ -1,25 +1,41 @@
 // 시뮬레이션 ↔ 화면 사이에 오가는 데이터. 화면은 이것만 보고 그린다.
-import type { Lineage } from './species';
+import type { FamilyId } from './species';
 
 /** 플레이어·봇·원격 플레이어가 모두 보내는 같은 형식의 명령 */
 export interface Command {
   angle: number; // 가고 싶은 방향(rad)
   boost: boolean;
   sneak: boolean;
-  skillSeq: number; // 누를 때마다 1씩 증가(눌림을 놓치지 않게)
-  moltSeq: number;
-  moltChoice: number; // 카드 번호 0~2
+  skillSeq: number; // 주 기술(게이지가 차 있으면 필살기). 누를 때마다 1씩 증가
+  subSeq: number; // 보조 기술
+  cardSeq: number; // 카드 고르기
+  cardChoice: number; // 카드 번호
+  rerollSeq: number; // 다시 뽑기
 }
 
-export const emptyCommand = (angle = 0): Command => ({ angle, boost: false, sneak: false, skillSeq: 0, moltSeq: 0, moltChoice: 0 });
+export const emptyCommand = (angle = 0): Command => ({ angle, boost: false, sneak: false, skillSeq: 0, subSeq: 0, cardSeq: 0, cardChoice: 0, rerollSeq: 0 });
 
-export type DeathCause = 'bite' | 'wall' | 'crush' | 'enemy' | 'poison' | 'skill';
-export type HitKind = 'bite' | 'recoil' | 'skill' | 'poison' | 'enemy' | 'wall' | 'crush' | 'crit' | 'rage';
+export type DeathCause = 'bite' | 'wall' | 'crush' | 'enemy' | 'poison' | 'skill' | 'ult';
+export type HitKind = 'bite' | 'recoil' | 'skill' | 'poison' | 'enemy' | 'wall' | 'crush' | 'crit' | 'ult' | 'minion' | 'reflect';
 export type EnemyKind = 'bird' | 'frog' | 'rain' | 'centipede' | 'anteater' | 'child';
 export type MapTheme = 'grass' | 'sand' | 'forest';
 
+/** 화면 효과 종류(계열별 연출) */
+export type FxKind =
+  | 'charge' | 'shock' | 'lift' | 'push' | 'thud'
+  | 'grab' | 'throw' | 'scissor' | 'slam'
+  | 'sweep' | 'stab' | 'combo' | 'threat' | 'whirl'
+  | 'dive' | 'land' | 'snatch' | 'circle' | 'lip' | 'compound'
+  | 'sting' | 'rain'
+  | 'cloud' | 'jet' | 'backjet' | 'gasburst'
+  | 'web' | 'silk' | 'prison'
+  | 'pit' | 'sand' | 'ambush' | 'hell'
+  | 'summon' | 'honey' | 'heat' | 'waggle'
+  | 'flash' | 'signal' | 'lantern' | 'aurora'
+  | 'camo' | 'hop' | 'escape' | 'curl' | 'heal' | 'chirp' | 'decoy' | 'roll' | 'backstep' | 'playdead' | 'backplate' | 'bitter' | 'fang' | 'alarm';
+
 export type GameEvent =
-  | { type: 'eat'; snake: number; x: number; y: number; big: boolean; gem?: number; lv?: number; special?: number; taste?: number }
+  | { type: 'eat'; snake: number; x: number; y: number; big: boolean; gold?: boolean; special?: number; taste?: number }
   | { type: 'death'; snake: number; x: number; y: number; by: number; cause: DeathCause; enemy?: EnemyKind }
   | { type: 'ring'; snake: number; cx: number; cy: number; trapped: number }
   | { type: 'crush'; snake: number; cx: number; cy: number; count: number }
@@ -27,14 +43,16 @@ export type GameEvent =
   | { type: 'respawn'; snake: number }
   | { type: 'hit'; snake: number; by: number; dmg: number; x: number; y: number; kind: HitKind; good: boolean; blocked?: boolean }
   | { type: 'lifeLost'; lives: number }
-  | { type: 'matchup'; x: number; y: number; text: string; good: boolean }
-  | { type: 'moltStart'; snake: number; species: string }
-  | { type: 'molt'; snake: number; species: string; x: number; y: number }
-  | { type: 'skill'; snake: number; species: string; x: number; y: number; angle: number }
-  | { type: 'skillHit'; x: number; y: number; kind: 'cut' | 'stun' | 'push' | 'slow' | 'root' }
-  | { type: 'aoe'; x: number; y: number; r: number; kind: 'cut' | 'stun' | 'push' }
-  | { type: 'cone'; x: number; y: number; angle: number; range: number; half: number; kind: 'cut' | 'stun' }
+  | { type: 'levelUp'; snake: number; level: number; x: number; y: number }
+  | { type: 'evolveStart'; snake: number }
+  | { type: 'evolve'; snake: number; stage: number; x: number; y: number }
+  | { type: 'skill'; snake: number; fam: FamilyId; name: string; icon: string; x: number; y: number; angle: number; slot: 'main' | 'sub' | 'ult' }
+  | { type: 'fx'; kind: FxKind; snake: number; fam: FamilyId | null; x: number; y: number; r?: number; angle?: number; len?: number; half?: number; x1?: number; y1?: number; awake?: boolean }
+  | { type: 'skillHit'; x: number; y: number; kind: 'cut' | 'stun' | 'push' | 'slow' | 'root' | 'blind' | 'mark' | 'fear' | 'silence' | 'grab' | 'poison' }
+  | { type: 'pop'; snake: number; x: number; y: number; text: string; color: number }
+  | { type: 'ultReady'; snake: number }
   | { type: 'enemyWarn'; kind: EnemyKind; x: number; y: number }
+  | { type: 'enemySoon'; kind: EnemyKind }
   | { type: 'enemyStart'; kind: EnemyKind; x: number; y: number }
   | { type: 'enemyEnd'; kind: EnemyKind; killed: boolean }
   | { type: 'birdDive'; x: number; y: number; r: number }
@@ -50,8 +68,9 @@ export interface SnakeView {
   id: number;
   name: string;
   species: string;
-  stage: number;
-  lineage: Lineage;
+  family: FamilyId | null;
+  stage: number; // 진화 단계 1~3
+  level: number;
   alive: boolean;
   isPlayer: boolean;
   isBoss: boolean;
@@ -70,42 +89,61 @@ export interface SnakeView {
   captured: boolean;
   invuln: boolean;
   poisoned: boolean;
-  molt: number; // 0~1 탈피 진행, 0이면 아님
+  evolving: number; // 0~1 진화 진행, 0이면 아님
   fly: boolean;
-  shield: boolean;
+  shield: boolean; // 피해 감소·막기
   stun: boolean;
   slow: boolean;
+  root: boolean;
+  mark: boolean;
+  blind: boolean;
+  fear: boolean;
+  silence: boolean;
+  hidden: number; // 0 보임 ~ 1 거의 안 보임
+  grabbed: boolean;
   dash: boolean;
-  magnet: boolean;
-  ringFast: boolean;
-  feast: boolean; // 좋아하는 먹이로 폭풍 성장 중
-  yuck: boolean; // 싫어하는 먹이로 느려짐
+  whirl: boolean; // 사마귀 천 개의 낫
+  feast: boolean;
+  yuck: boolean;
+  ultReady: boolean;
+  buff: boolean; // 다음 공격 강화
 }
 
-export interface Card {
-  lineage: Lineage;
-  species: string;
-  good: number; // 주변에서 이 갈래가 이기는 곤충 수
-  bad: number; // 주변에서 이 갈래를 이기는 곤충 수
-  upgrade?: boolean; // 5단계: 같은 종 강화(★)
+/** 레벨업 카드 한 장(화면용) */
+export interface CardView {
+  kind: 'new' | 'up' | 'main' | 'sub' | 'bonus' | 'pick'; // pick = 보조 기술 고르기
+  id: string;
+  lv: number; // 이 카드를 고르면 되는 레벨
+  exclusive?: boolean; // 계열 전용
 }
 
 export interface PlayerView {
-  gauge: number;
+  level: number;
+  nut: number;
   need: number;
-  cards: Card[] | null;
+  offer: { kind: 'level' | 'sub'; cards: CardView[] } | null;
+  pending: number; // 아직 못 고른 레벨업
+  rerolls: number;
   skillCd: number;
   skillCdMax: number;
-  mastery: number;
-  path: string[]; // 거쳐 온 종
-  molting: boolean;
+  subId: string | null;
+  subCd: number;
+  subCdMax: number;
+  ult: number; // 0~100
+  ultActive: boolean;
+  abilities: { id: string; lv: number }[];
+  mainLv: number;
+  subLv: number;
+  form: string;
+  traits: string[];
   lives: number;
-  respawnIn: number; // 0이면 살아 있음
-  rage: number; // 역습 게이지 0~1
-  captured: number; // 채집망에 갇혀 남은 시간(초), 0이면 아님
+  respawnIn: number;
+  captured: number;
   rank: number;
   total: number;
-  stats: number[]; // 보석 능력치 레벨: 체력·공격·속도·기술
+  ultUses: number;
+  marks: { x: number; y: number }[]; // 8자 춤·지도 읽기: 표시할 먹이 위치
+  reveal: boolean; // 겹눈
 }
 
 export interface MapView {
@@ -131,52 +169,90 @@ export interface RingView {
   total: number;
 }
 
+export type ZoneKind = 'gas' | 'web' | 'silk' | 'pit' | 'honey' | 'blade' | 'stingers' | 'nest' | 'bait' | 'lantern' | 'prison' | 'rain' | 'decoy' | 'heat';
+
 export interface ZoneView {
   x: number;
   y: number;
   r: number;
-  kind: 'poison' | 'slow' | 'root';
+  kind: ZoneKind;
   life: number;
   max: number;
+  owner: number;
 }
 
+export type ProjKind = 'sting' | 'bigsting' | 'silk' | 'orb' | 'spit';
 export interface ProjView {
   x: number;
   y: number;
   angle: number;
+  kind: ProjKind;
+  owner: number;
 }
 
+export interface MinionView {
+  x: number;
+  y: number;
+  angle: number;
+  owner: number;
+  kind: 'bee' | 'wasp';
+}
+
+/** 기술 예고(바닥 범위) */
+export interface TeleView {
+  shape: 'circle' | 'line' | 'cone';
+  x: number;
+  y: number;
+  r: number;
+  angle: number;
+  len: number;
+  w: number;
+  t: number;
+  total: number;
+  owner: number;
+}
 
 export interface Snapshot {
   tick: number;
-  time: number; // 시뮬레이션 시간(초)
+  time: number;
   snakes: SnakeView[];
-  foods: Float32Array; // x, y, r, kind(0 보통 1 큰것 2 잔해 3 보석 4 특별), sub(보석 능력치 / 특별 먹이 번호)
+  foods: Float32Array; // x, y, r, kind(0 보통 1 큰것 2 잔해 3 황금 꿀방울 4 특별), sub(특별 먹이 번호)
   rings: RingView[];
   zones: ZoneView[];
   projs: ProjView[];
+  minions: MinionView[];
+  teles: TeleView[];
   enemy: EnemyView | null;
   map: MapView;
   timeLeft: number;
   events: GameEvent[];
   playerId: number;
   player: PlayerView;
-  bossId: number; // 왕지네가 활동 중이면 그 id, 아니면 -1
+  bossId: number;
   state: 'playing' | 'ended';
-  lineageCount: Record<string, number>;
+}
+
+/** 들어가기 전에 고르는 것 */
+export interface Loadout {
+  species: string;
+  form: string;
+  traits: string[];
 }
 
 /** 판 설정 */
 export interface GameOpts {
-  power: number; // 내 곤충 세기 배율(아들 모드 5): 주는 피해 ×power, 받는 피해 ÷power
-  bots: number; // 봇 수
+  power: number; // 내 곤충 세기 배율(아들 모드 5)
+  bots: number;
   map: MapTheme | 'random';
+  loadout: Loadout;
+  startLevel?: number; // 시험용
 }
-export const defaultOpts = (): GameOpts => ({ power: 1, bots: 20, map: 'random' });
+export const defaultLoadout = (): Loadout => ({ species: 'kingmantis', form: 'sweep', traits: ['molt', 'sprint'] });
+export const defaultOpts = (): GameOpts => ({ power: 1, bots: 20, map: 'random', loadout: defaultLoadout() });
 
 /** 화면 → 시뮬레이션 메시지 */
 export type HostIn =
-  | { type: 'start'; seed: number; playerName: string; startStage?: number; opts?: GameOpts }
+  | { type: 'start'; seed: number; playerName: string; opts?: GameOpts }
   | { type: 'opts'; opts: GameOpts }
   | { type: 'cmd'; cmd: Command }
   | { type: 'pause'; paused: boolean }

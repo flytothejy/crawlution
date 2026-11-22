@@ -2,6 +2,7 @@
 // 텍스처 단위: 머리 반지름 R = 40px, 머리 중심 = (C, C), +x 방향을 본다.
 import { Graphics, Rectangle, Texture, type Renderer } from 'pixi.js';
 import { lookOf } from './look';
+import type { Look } from '../shared/species';
 
 export type PartKind = 'antenna' | 'mandible' | 'sickle' | 'fang' | 'forcipule';
 
@@ -27,18 +28,6 @@ export const HR = 40; // 텍스처 속 머리 반지름
 const C = 80; // 머리판 텍스처 속 머리 중심
 const INK = 0x1b2a12;
 
-type Shape = 'cute' | 'beetle' | 'dome' | 'bugeye' | 'fly' | 'mantis' | 'dragon' | 'ant' | 'bee' | 'wasp' | 'spider' | 'centipede';
-
-const SHAPE: Record<string, Shape> = {
-  caterpillar: 'cute',
-  ladybug: 'dome', longhorn: 'beetle', stag: 'beetle', rhino: 'beetle',
-  tiger: 'bugeye', robberfly: 'fly', mantis: 'mantis', dragonfly: 'dragon',
-  weaver: 'ant', bee: 'bee', soldier: 'ant', heatball: 'bee',
-  fireant: 'ant', bombardier: 'beetle', wasp: 'wasp', hornet: 'wasp',
-  jumper: 'spider', orbweaver: 'spider', garden: 'spider', widow: 'spider',
-  boss: 'centipede',
-};
-
 function darker(c: number, k = 0.55) {
   return (Math.round(((c >> 16) & 255) * k) << 16) | (Math.round(((c >> 8) & 255) * k) << 8) | Math.round((c & 255) * k);
 }
@@ -60,13 +49,12 @@ function facets(g: Graphics, x: number, y: number, r: number, color: number) {
 }
 
 /** 머리판 */
-function drawBase(g: Graphics, species: string) {
-  const look = lookOf(species);
-  const shape = SHAPE[species] ?? 'beetle';
+function drawBase(g: Graphics, look: Look) {
   const hc = look.head, edge = darker(hc, 0.5);
   const R = HR;
   const ol = { width: 4, color: INK };
-  switch (shape) {
+  const ec = look.eye;
+  switch (look.shape) {
     case 'cute': {
       g.circle(C, C, R).fill(hc).stroke(ol);
       g.ellipse(C - 8, C - 14, 14, 9).fill({ color: 0xffffff, alpha: 0.35 });
@@ -79,77 +67,65 @@ function drawBase(g: Graphics, species: string) {
       g.moveTo(C + 30, C - 7).quadraticCurveTo(C + 37, C, C + 30, C + 7).stroke({ width: 3, color: INK, cap: 'round' });
       break;
     }
-    case 'dome': {
-      // 무당벌레: 검은 앞가슴판에 흰 점, 작은 머리
-      g.ellipse(C, C, R * 0.95, R).fill(0x1c1c1c).stroke(ol);
-      g.ellipse(C - 2, C - 17, 10, 8).fill(0xf6f2e6);
-      g.ellipse(C - 2, C + 17, 10, 8).fill(0xf6f2e6);
-      g.ellipse(C + 26, C, 14, 18).fill(0x111111).stroke({ width: 3, color: INK });
-      eye(g, C + 30, C - 9, 5, 5, 0xf6f2e6);
-      eye(g, C + 30, C + 9, 5, 5, 0xf6f2e6);
-      g.ellipse(C - 12, C - 22, 10, 5).fill({ color: 0xffffff, alpha: 0.35 });
-      break;
-    }
     case 'beetle': {
       g.ellipse(C, C, R, R * 0.95).fill(hc).stroke(ol);
       g.ellipse(C - 10, C - 16, 14, 7).fill({ color: 0xffffff, alpha: 0.4 });
       g.moveTo(C - 30, C).lineTo(C + 18, C).stroke({ width: 2, color: edge, alpha: 0.7 });
       eye(g, C + 22, C - 24, 6, 7);
       eye(g, C + 22, C + 24, 6, 7);
-      if (species === 'rhino') {
-        // 큰 뿔(끝이 갈라짐)
-        g.poly([C + 8, C - 13, C + 60, C - 9, C + 78, C - 24, C + 82, C - 14, C + 72, C - 2, C + 82, C + 10, C + 76, C + 18, C + 60, C + 9, C + 8, C + 13]).fill(darker(hc, 0.8)).stroke(ol);
+      const hcol = darker(hc, 0.8);
+      if (look.horn === 'rhino') {
+        // 끝이 갈라진 큰 뿔
+        g.poly([C + 8, C - 13, C + 60, C - 9, C + 78, C - 24, C + 82, C - 14, C + 72, C - 2, C + 82, C + 10, C + 76, C + 18, C + 60, C + 9, C + 8, C + 13]).fill(hcol).stroke(ol);
         g.moveTo(C + 14, C - 4).lineTo(C + 60, C - 2).stroke({ width: 3, color: 0xffffff, alpha: 0.35 });
+      } else if (look.horn === 'herc') {
+        // 아주 긴 위 뿔 + 짧은 아래 뿔(집게)
+        g.poly([C + 4, C - 10, C + 70, C - 14, C + 104, C - 6, C + 108, C + 2, C + 96, C - 1, C + 70, C - 2, C + 4, C + 8]).fill(0x1a1612).stroke(ol);
+        for (let k = 0; k < 4; k++) g.circle(C + 40 + k * 14, C - 7 - k * 0.6, 2.2).fill(0xe8d070);
+        g.poly([C + 10, C + 6, C + 54, C + 10, C + 66, C + 3, C + 60, C + 16, C + 10, C + 16]).fill(0x1a1612).stroke({ width: 3, color: INK, join: 'round' });
+      } else if (look.horn === 'cauc') {
+        // 뿔 세 개
+        g.poly([C + 8, C - 6, C + 80, C - 3, C + 92, C + 2, C + 80, C + 6, C + 8, C + 6]).fill(hcol).stroke(ol);
+        for (const s of [-1, 1]) g.poly([C + 4, C + s * 16, C + 42, C + s * 26, C + 66, C + s * 14, C + 46, C + s * 18, C + 10, C + s * 6]).fill(hcol).stroke({ width: 3, color: INK, join: 'round' });
       }
-      if (species === 'bombardier') g.ellipse(C + 2, C, R * 0.5, R * 0.4).fill({ color: 0xffb04a, alpha: 0.6 });
-      break;
-    }
-    case 'bugeye': {
-      g.ellipse(C, C, R * 0.9, R * 0.85).fill(hc).stroke(ol);
-      g.ellipse(C - 10, C - 12, 12, 6).fill({ color: 0xffffff, alpha: 0.45 });
-      eye(g, C + 10, C - 22, 15, 13, 0x23345a);
-      eye(g, C + 10, C + 22, 15, 13, 0x23345a);
-      break;
-    }
-    case 'fly': {
-      g.circle(C, C, R * 0.88).fill(hc).stroke(ol);
-      for (const s of [-1, 1]) {
-        g.ellipse(C + 4, C + s * 20, 18, 21).fill(0x8a2a1a).stroke({ width: 3, color: INK });
-        facets(g, C + 4, C + s * 20, 18, 0x8a2a1a);
-        g.circle(C + 10, C + s * 20 - 8, 3).fill({ color: 0xffffff, alpha: 0.8 });
-      }
-      // 수염(입 털)
-      for (let k = -2; k <= 2; k++) g.moveTo(C + 28, C + k * 4).lineTo(C + 40, C + k * 6).stroke({ width: 2, color: 0xe8dcb0, cap: 'round' });
       break;
     }
     case 'mantis': {
-      // 역삼각형 머리, 모서리에 큰 눈
       g.poly([C - 26, C - 40, C + 6, C - 14, C + 36, C, C + 6, C + 14, C - 26, C + 40, C - 20, C]).fill(hc).stroke({ width: 4, color: INK, join: 'round' });
       for (const s of [-1, 1]) {
-        g.circle(C - 22, C + s * 34, 12).fill(lighter(hc, 0.35)).stroke({ width: 3, color: INK });
+        g.circle(C - 22, C + s * 34, 12).fill(ec ?? lighter(hc, 0.35)).stroke({ width: 3, color: INK });
         g.moveTo(C - 22, C + s * 26).lineTo(C - 22, C + s * 42).stroke({ width: 3, color: 0x1b1b1b });
       }
       g.circle(C + 26, C, 5).fill(darker(hc, 0.6));
       break;
     }
     case 'dragon': {
+      const e = ec ?? 0x2a8a9a;
       for (const s of [-1, 1]) {
-        g.circle(C + 4, C + s * 19, 25).fill(0x2a8a9a).stroke({ width: 4, color: INK });
-        facets(g, C + 4, C + s * 19, 25, 0x2a8a9a);
+        g.circle(C + 4, C + s * 19, 25).fill(e).stroke({ width: 4, color: INK });
+        facets(g, C + 4, C + s * 19, 25, e);
         g.ellipse(C + 12, C + s * 19 - 10, 8, 5).fill({ color: 0xffffff, alpha: 0.7 });
       }
       g.ellipse(C + 26, C, 10, 12).fill(hc).stroke({ width: 3, color: INK });
       break;
     }
-    case 'ant': {
-      const big = species === 'soldier' ? 1.15 : 1;
-      g.circle(C - 6, C - 16 * big, 24 * big).fill(hc).stroke(ol);
-      g.circle(C - 6, C + 16 * big, 24 * big).fill(hc).stroke(ol);
-      g.ellipse(C + 8, C, 26 * big, 30 * big).fill(hc);
-      g.moveTo(C - 26, C).lineTo(C + 10, C).stroke({ width: 2.5, color: edge });
-      g.ellipse(C - 12, C - 24, 10, 5).fill({ color: 0xffffff, alpha: 0.35 });
-      eye(g, C + 14, C - 26 * big, 5, 6);
-      eye(g, C + 14, C + 26 * big, 5, 6);
+    case 'naiad': {
+      // 잠자리 애벌레(수채): 큰 눈 + 접힌 아랫입술
+      g.ellipse(C, C, R * 0.9, R * 0.85).fill(hc).stroke(ol);
+      g.ellipse(C - 10, C - 12, 12, 6).fill({ color: 0xffffff, alpha: 0.3 });
+      eye(g, C + 8, C - 24, 13, 12, 0x2a3a2a);
+      eye(g, C + 8, C + 24, 13, 12, 0x2a3a2a);
+      g.roundRect(C + 22, C - 13, 18, 26, 6).fill(darker(hc, 0.75)).stroke({ width: 3, color: INK });
+      break;
+    }
+    case 'wasp': {
+      g.ellipse(C, C, R * 0.95, R * 0.9).fill(hc).stroke(ol);
+      g.ellipse(C + 20, C, 16, 20).fill(look.stripe === 0x2a2a2a ? 0xf6d24a : lighter(look.body, 0.2)).stroke({ width: 2.5, color: INK });
+      g.moveTo(C + 14, C).lineTo(C + 30, C).stroke({ width: 3, color: 0x1b1b1b });
+      for (const s of [-1, 1]) {
+        g.ellipse(C + 2, C + s * 23, 13, 18).fill(0x1a1a1a).stroke({ width: 3, color: INK });
+        g.ellipse(C + 6, C + s * 23 - 8, 4, 3).fill({ color: 0xffffff, alpha: 0.8 });
+      }
       break;
     }
     case 'bee': {
@@ -163,14 +139,32 @@ function drawBase(g: Graphics, species: string) {
       g.ellipse(C - 8, C - 10, 10, 5).fill({ color: 0xffffff, alpha: 0.35 });
       break;
     }
-    case 'wasp': {
-      g.ellipse(C, C, R * 0.95, R * 0.9).fill(hc).stroke(ol);
-      g.ellipse(C + 20, C, 16, 20).fill(0xf6d24a).stroke({ width: 2.5, color: INK });
-      g.moveTo(C + 14, C).lineTo(C + 30, C).stroke({ width: 3, color: 0x1b1b1b });
-      for (const s of [-1, 1]) {
-        g.ellipse(C + 2, C + s * 23, 13, 18).fill(0x1a1a1a).stroke({ width: 3, color: INK });
-        g.ellipse(C + 6, C + s * 23 - 8, 4, 3).fill({ color: 0xffffff, alpha: 0.8 });
-      }
+    case 'shield': {
+      // 노린재: 넓은 앞가슴판 + 작은 머리
+      g.poly([C - 30, C - 40, C + 10, C - 38, C + 22, C - 16, C + 22, C + 16, C + 10, C + 38, C - 30, C + 40, C - 36, C]).fill(look.body).stroke({ width: 4, color: INK, join: 'round' });
+      g.poly([C + 18, C - 14, C + 40, C - 8, C + 46, C, C + 40, C + 8, C + 18, C + 14]).fill(hc).stroke({ width: 3, color: INK, join: 'round' });
+      eye(g, C + 26, C - 14, 5, 5, 0x3a1a10);
+      eye(g, C + 26, C + 14, 5, 5, 0x3a1a10);
+      g.ellipse(C - 12, C - 20, 12, 6).fill({ color: 0xffffff, alpha: look.pattern === 'metal' ? 0.55 : 0.3 });
+      if (look.pattern === 'metal') for (let k = 0; k < 3; k++) g.circle(C - 20 + k * 12, C + 14 - k * 6, 4).fill({ color: look.stripe, alpha: 0.85 });
+      break;
+    }
+    case 'assassin': {
+      // 침노린재: 길쭉한 머리와 주둥이
+      g.ellipse(C - 4, C, R * 0.8, R * 0.55).fill(hc).stroke(ol);
+      g.ellipse(C + 26, C, 18, 12).fill(hc).stroke({ width: 3, color: INK });
+      g.poly([C + 40, C - 3, C + 66, C, C + 40, C + 3]).fill(darker(hc, 0.6)).stroke({ width: 2, color: INK });
+      eye(g, C + 24, C - 13, 6, 6, 0x8a1a10);
+      eye(g, C + 24, C + 13, 6, 6, 0x8a1a10);
+      g.moveTo(C - 30, C).lineTo(C + 10, C).stroke({ width: 3, color: look.stripe, alpha: 0.9 });
+      break;
+    }
+    case 'strider': {
+      g.ellipse(C, C, R * 0.95, R * 0.42).fill(hc).stroke(ol);
+      g.ellipse(C + 28, C, 12, 9).fill(hc).stroke({ width: 3, color: INK });
+      eye(g, C + 28, C - 10, 5, 5, 0x222222);
+      eye(g, C + 28, C + 10, 5, 5, 0x222222);
+      g.ellipse(C - 10, C - 6, 14, 4).fill({ color: 0xffffff, alpha: 0.3 });
       break;
     }
     case 'spider': {
@@ -180,11 +174,47 @@ function drawBase(g: Graphics, species: string) {
         g.moveTo(C - 4 + Math.cos(a) * 30, C + Math.sin(a) * 30).lineTo(C - 4 + Math.cos(a) * 40, C + Math.sin(a) * 40).stroke({ width: 2, color: lighter(hc, 0.3), alpha: 0.6 });
       }
       g.ellipse(C - 14, C - 14, 12, 6).fill({ color: 0xffffff, alpha: 0.25 });
-      const big = species === 'jumper' ? 11 : 8;
+      const big = ec ? 12 : 8;
       eye(g, C + 24, C - 10, big, big, 0x0e0e0e);
       eye(g, C + 24, C + 10, big, big, 0x0e0e0e);
       for (const [dx, dy, r] of [[12, -24, 5], [12, 24, 5], [2, -14, 4], [2, 14, 4], [-6, -26, 3.5], [-6, 26, 3.5]] as const) eye(g, C + dx, C + dy, r, r, 0x0e0e0e);
-      if (species === 'widow') g.poly([C - 20, C - 6, C - 12, C, C - 20, C + 6, C - 28, C]).fill(0xd8262f);
+      if (look.stripe === 0xd8262f) g.poly([C - 20, C - 6, C - 12, C, C - 20, C + 6, C - 28, C]).fill(0xd8262f);
+      break;
+    }
+    case 'antlion': {
+      // 개미귀신: 넓고 납작한 머리
+      g.ellipse(C, C, R * 0.85, R * 1.02).fill(hc).stroke(ol);
+      g.ellipse(C - 8, C - 16, 12, 6).fill({ color: 0xffffff, alpha: 0.25 });
+      for (let k = 0; k < 10; k++) g.circle(C - 20 + (k % 4) * 12, C - 24 + Math.floor(k / 4) * 22, 2.5).fill({ color: darker(hc, 0.6), alpha: 0.7 });
+      eye(g, C + 12, C - 30, 4.5, 4.5, 0x111111);
+      eye(g, C + 12, C + 30, 4.5, 4.5, 0x111111);
+      break;
+    }
+    case 'lace': {
+      // 명주잠자리·풀잠자리 성충: 작은 머리와 둥근 눈
+      g.ellipse(C + 2, C, R * 0.72, R * 0.62).fill(hc).stroke(ol);
+      for (const s of [-1, 1]) {
+        g.circle(C + 8, C + s * 24, 13).fill(ec ?? 0x3a3a3a).stroke({ width: 3, color: INK });
+        g.circle(C + 12, C + s * 24 - 5, 4).fill({ color: 0xffffff, alpha: 0.7 });
+      }
+      g.ellipse(C + 30, C, 8, 9).fill(darker(hc, 0.85)).stroke({ width: 2.5, color: INK });
+      break;
+    }
+    case 'firefly': {
+      // 반딧불이: 머리를 덮는 주황 앞가슴판
+      g.ellipse(C + 20, C, 16, 18).fill(0x1a1a1a).stroke({ width: 3, color: INK });
+      eye(g, C + 26, C - 11, 6, 6, 0x0e0e0e);
+      eye(g, C + 26, C + 11, 6, 6, 0x0e0e0e);
+      g.moveTo(C - 30, C - 40).quadraticCurveTo(C + 30, C - 44, C + 26, C).quadraticCurveTo(C + 30, C + 44, C - 30, C + 40).closePath().fill(hc).stroke(ol);
+      g.ellipse(C - 2, C, 12, 7).fill({ color: 0x1a1a1a, alpha: 0.75 });
+      g.ellipse(C - 8, C - 22, 12, 6).fill({ color: 0xffffff, alpha: 0.35 });
+      break;
+    }
+    case 'dome': {
+      g.ellipse(C, C, R * 0.95, R).fill(0x1c1c1c).stroke(ol);
+      g.ellipse(C + 26, C, 14, 18).fill(0x111111).stroke({ width: 3, color: INK });
+      eye(g, C + 30, C - 9, 5, 5, 0xf6f2e6);
+      eye(g, C + 30, C + 9, 5, 5, 0xf6f2e6);
       break;
     }
     case 'centipede': {
@@ -193,7 +223,6 @@ function drawBase(g: Graphics, species: string) {
       g.moveTo(C - 30, C).lineTo(C + 20, C).stroke({ width: 3, color: 0x5a120c });
       eye(g, C + 20, C - 22, 6, 6, 0x111111);
       eye(g, C + 20, C + 22, 6, 6, 0x111111);
-      // 왕관 표시
       g.poly([C - 22, C - 12, C - 30, C - 18, C - 26, C - 6, C - 34, C, C - 26, C + 6, C - 30, C + 18, C - 22, C + 12]).fill(0xffd23f).stroke({ width: 2.5, color: INK });
       break;
     }
@@ -271,41 +300,27 @@ function fangTex(r: Renderer, color: number, size: number) {
 
 const cache = new Map<string, HeadKit>();
 
-export function headKit(r: Renderer, species: string): HeadKit {
-  const hit = cache.get(species);
+/** 머리 한 벌(머리판 + 부품). key = 모습 열쇠('종@단계') */
+export function headKit(r: Renderer, key: string): HeadKit {
+  const hit = cache.get(key);
   if (hit) return hit;
-  const look = lookOf(species);
-  const shape = SHAPE[species] ?? 'beetle';
+  const look = lookOf(key);
   const g = new Graphics();
-  const FW = 180, FH = 160;
+  const FW = 220, FH = 160;
   g.rect(0, 0, FW, FH).fill({ color: 0, alpha: 0 });
-  drawBase(g, species);
+  drawBase(g, look);
   const base = r.generateTexture({ target: g, resolution: 2, frame: new Rectangle(0, 0, FW, FH) });
   const parts: HeadPart[] = [];
   const add = (t: { tex: Texture; ax: number; ay: number }, kind: PartKind, x: number, y: number, rot: number, front = false) =>
     parts.push({ tex: t.tex, ax: t.ax, ay: t.ay, x, y, rot, kind, front });
   const ink = 0x1e1a14;
-
-  // 더듬이
-  const ant: Record<Shape, 'short' | 'long' | 'elbow' | 'club' | 'feather' | null> = {
-    cute: 'club', beetle: look.feats?.includes('antennaLong') ? 'long' : 'club', dome: 'club', bugeye: 'short', fly: 'short', mantis: 'short',
-    dragon: null, ant: 'elbow', bee: 'elbow', wasp: 'elbow', spider: null, centipede: 'long',
-  };
-  if (species === 'longhorn') ant.beetle = 'long';
-  if (species === 'stag' || species === 'rhino') ant.beetle = 'feather';
-  const ak = ant[shape];
-  if (ak) add(antennaTex(r, ak, ak === 'long' && species !== 'boss' ? 0x2a2a30 : ink), 'antenna', 0.55, 0.32, ak === 'long' ? 0.05 : -0.15);
-
-  // 큰턱·낫·송곳니
-  if (species === 'stag') add(mandibleTex(r, 74, darker(look.head, 1.1), true, true), 'mandible', 0.72, 0.3, 0.35);
-  else if (species === 'boss') add(mandibleTex(r, 52, 0x2a0a06, false), 'forcipule', 0.75, 0.42, 0.45);
-  else if (shape === 'ant') add(mandibleTex(r, species === 'soldier' ? 40 : 26, darker(look.head, 0.75), true), 'mandible', 0.82, 0.22, 0.3);
-  else if (species === 'tiger') add(mandibleTex(r, 30, 0xe8e0c8, true), 'mandible', 0.78, 0.22, 0.25);
-  else if (species === 'hornet' || species === 'heatball' || species === 'bombardier' || species === 'longhorn') add(mandibleTex(r, 22, darker(look.head, 0.6), false), 'mandible', 0.85, 0.18, 0.25);
-  if (species === 'mantis') add(sickleTex(r, look.body), 'sickle', 0.15, 0.55, 0.35);
-  if (shape === 'spider') add(fangTex(r, 0x151515, species === 'widow' ? 22 : 16), 'fang', 0.95, 0.12, 0.15, true);
-
+  const ak = look.antenna;
+  if (ak) add(antennaTex(r, ak, ak === 'long' && look.shape !== 'centipede' ? 0x2a2a30 : ink), 'antenna', look.shape === 'shield' ? 0.95 : 0.55, look.shape === 'shield' ? 0.18 : 0.32, ak === 'long' ? 0.05 : -0.15);
+  const m = look.mandible;
+  if (m) add(mandibleTex(r, m.size, m.color ?? darker(look.head, 0.75), !!m.teeth, !!m.branch), look.shape === 'centipede' ? 'forcipule' : 'mandible', look.shape === 'antlion' ? 0.78 : 0.75, look.shape === 'antlion' ? 0.32 : 0.28, look.shape === 'antlion' ? 0.4 : 0.32);
+  if (look.sickle) add(sickleTex(r, look.body), 'sickle', 0.15, 0.55, 0.35);
+  if (look.fang) add(fangTex(r, 0x151515, look.fang), 'fang', 0.95, 0.12, 0.15, true);
   const kit: HeadKit = { base, ax: C / FW, ay: C / FH, parts };
-  cache.set(species, kit);
+  cache.set(key, kit);
   return kit;
 }

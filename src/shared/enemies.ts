@@ -66,7 +66,7 @@ export class Enemies {
   /** 몸이 긴 곤충일수록 잘 뽑힌다 */
   private pickWeighted(top = 5): Snake | null {
     const c = this.sim.snakes
-      .filter((s) => this.sim.onField(s) && !s.isBoss)
+      .filter((s) => this.sim.onField(s) && !s.isBoss && s.safeT <= 0)
       .map((s) => ({ s, v: s.segCount * (s.sneaking ? 0.4 : 1) }))
       .sort((a, b) => b.v - a.v)
       .slice(0, top);
@@ -168,7 +168,7 @@ export class Enemies {
       const target = this.pickWeighted(4);
       if (target) {
         const lead = CONFIG.birdShadowTime * 0.6;
-        const sp = CONFIG.stageSpeed[target.stage];
+        const sp = sim.speedOf(target);
         this.shadows.push({
           x: target.x + Math.cos(target.angle) * sp * lead,
           y: target.y + Math.sin(target.angle) * sp * lead,
@@ -237,12 +237,12 @@ export class Enemies {
     if (this.cd <= 0 && this.t > 0) {
       let best: Snake | null = null, bd: number = CONFIG.frogRange;
       for (const s of sim.snakes) {
-        if (!sim.onField(s) || s.isBoss) continue;
+        if (!sim.onField(s) || s.isBoss || s.safeT > 0) continue;
         const d = Math.hypot(s.x - this.x, s.y - this.y);
         if (d < bd) ((bd = d), (best = s));
       }
       if (best) {
-        const sp = CONFIG.stageSpeed[best.stage] * 0.45;
+        const sp = sim.speedOf(best) * 0.45;
         this.aim = { x: best.x + Math.cos(best.angle) * sp, y: best.y + Math.sin(best.angle) * sp, t: CONFIG.frogAim, total: CONFIG.frogAim };
         this.angle = Math.atan2(this.aim.y - this.y, this.aim.x - this.x);
       } else this.cd = 0.5;
@@ -351,7 +351,7 @@ export class Enemies {
       let best = -1;
       tgt = null;
       for (const s of sim.snakes) {
-        if (!sim.onField(s) || s.isBoss || s.invulnT > 0) continue;
+        if (!sim.onField(s) || s.isBoss || s.invulnT > 0 || s.safeT > 0) continue;
         const v = s.segCount / (300 + Math.hypot(s.x - this.x, s.y - this.y));
         if (v > best) ((best = v), (tgt = s));
       }
@@ -359,7 +359,7 @@ export class Enemies {
       this.retarget = 4;
     }
     if (tgt) {
-      const sp = CONFIG.stageSpeed[tgt.stage];
+      const sp = sim.speedOf(tgt);
       const tx = tgt.x + Math.cos(tgt.angle) * sp * 0.35, ty = tgt.y + Math.sin(tgt.angle) * sp * 0.35;
       const dx = tx - this.x, dy = ty - this.y;
       const d = Math.hypot(dx, dy);

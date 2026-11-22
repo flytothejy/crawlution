@@ -14,7 +14,6 @@ export interface Settings {
   labels: boolean;
   numbers: boolean;
   quality: 'auto' | 'high' | 'low';
-  dist: boolean;
 }
 
 export const SON_POWER = 5;
@@ -22,7 +21,7 @@ export const SON_POWER = 5;
 const KEY = 'crawlution.settings';
 
 export function defaultSettings(): Settings {
-  return { son: false, bots: 20, map: 'random', hand: 'right', btnSize: 'm', sound: true, volume: 0.8, vibe: true, shake: true, labels: true, numbers: true, quality: 'auto', dist: true };
+  return { son: false, bots: 20, map: 'random', hand: 'right', btnSize: 'm', sound: true, volume: 0.8, vibe: true, shake: true, labels: true, numbers: true, quality: 'auto' };
 }
 
 export function loadSettings(): Settings {
@@ -70,7 +69,7 @@ export const SECTIONS: { title: string; rows: Row[] }[] = [
   {
     title: '✋ 조작',
     rows: [
-      { key: 'hand', kind: 'seg', icon: '🤚', label: '버튼 위치', desc: '부스트·웅크리기·스킬 버튼을 놓을 쪽', options: [['right', '오른쪽'], ['left', '왼쪽']] },
+      { key: 'hand', kind: 'seg', icon: '🤚', label: '버튼 위치', desc: '질주·웅크리기·기술 버튼을 놓을 쪽', options: [['right', '오른쪽'], ['left', '왼쪽']] },
       { key: 'btnSize', kind: 'seg', icon: '🔘', label: '버튼 크기', options: [['s', '작게'], ['m', '보통'], ['l', '크게']] },
     ],
   },
@@ -88,7 +87,6 @@ export const SECTIONS: { title: string; rows: Row[] }[] = [
       { key: 'shake', kind: 'toggle', icon: '💥', label: '화면 흔들림' },
       { key: 'numbers', kind: 'toggle', icon: '🔢', label: '피해 숫자' },
       { key: 'labels', kind: 'toggle', icon: '🏷️', label: '곤충 이름표' },
-      { key: 'dist', kind: 'toggle', icon: '📊', label: '갈래 분포 표시' },
       { key: 'quality', kind: 'seg', icon: '✨', label: '화질', desc: '자동: 끊기면 알아서 해상도와 효과를 줄여요', options: [['auto', '자동'], ['high', '선명하게'], ['low', '가볍게']] },
     ],
   },
