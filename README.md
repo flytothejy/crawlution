@@ -26,6 +26,8 @@ npm test         # 게임 로직 자동 점검(화면 없이)
 npm run build    # dist/index.html 한 파일로 빌드
 npm run balance -- 20   # 8분 판 20개를 화면 없이 돌려 '수치를 맞추는 방법' 표의 목표(각성 시각·판 끝 레벨·싸움 시간·필살기 횟수 …)를 잰다
 npm run duel -- 12 8    # 같은 레벨(8) 1:1 대결, 계열 쌍마다 12판 → 계열·역할별 승률
+npx tsx scripts/mapsize.ts 6 3300,2700,2300,2000   # 맵 반지름별 붙는 횟수·싸우는 시간·몰매 비율(먹이 밀도는 같게)
+npx tsx scripts/traits.ts 16   # 특성마다 판 안 순위 차이(곤충 21마리에게 나눠 주고 비교)
 node scripts/shots.mjs  # 미리보기 서버(npx vite preview --port 4173)를 켠 뒤 휴대폰 크기 화면을 차례로 찍는다(FAM=spider 처럼 계열 지정)
 ```
 

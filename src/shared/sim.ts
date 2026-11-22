@@ -381,8 +381,9 @@ export class Simulation {
     const R = CONFIG.arenaRadius;
     const rocks: { x: number; y: number; r: number }[] = [];
     const puddles: { x: number; y: number; r: number }[] = [];
-    const nRock = theme === 'sand' ? 20 : theme === 'forest' ? 16 : 13;
-    const nPud = theme === 'sand' ? 5 : theme === 'forest' ? 11 : 9;
+    const area = (R / 3300) ** 2; // 바위·웅덩이 수는 맵 넓이에 맞춘다(3300 기준)
+    const nRock = Math.round((theme === 'sand' ? 20 : theme === 'forest' ? 16 : 13) * area);
+    const nPud = Math.round((theme === 'sand' ? 5 : theme === 'forest' ? 11 : 9) * area);
     const free = (x: number, y: number, r: number) =>
       Math.hypot(x, y) > 380 && Math.hypot(x, y) + r < R - 120 && rocks.every((o) => Math.hypot(o.x - x, o.y - y) > o.r + r + 160) && puddles.every((o) => Math.hypot(o.x - x, o.y - y) > o.r + r + 60);
     for (let k = 0, tries = 0; k < nRock && tries < 500; tries++) {

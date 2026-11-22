@@ -23,7 +23,7 @@ for (let g = 0; g < N; g++) {
   const born = new Map<number, number>();
   const lv10 = new Map<number, number>();
   const firstHit = new Map<number, number>();
-  let foodNut = 0, remNut = 0, deaths = 0, lowWins = 0, kills = 0, enemyDeaths = 0, ultKills = 0, ults = 0, skillDmg = 0, totalDmg = 0;
+  let pDeaths = 0, foodNut = 0, remNut = 0, deaths = 0, lowWins = 0, kills = 0, enemyDeaths = 0, ultKills = 0, ults = 0, skillDmg = 0, totalDmg = 0;
   for (const s of sim.snakes) born.set(s.id, 0);
   const origFeed = sim.feed.bind(sim);
   for (let t = 0; t < CONFIG.tickRate * CONFIG.roundTime; t++) {
@@ -47,6 +47,7 @@ for (let g = 0; g < N; g++) {
         const v = sim.snakes[e.snake];
         if (v.isBoss) continue;
         deaths++;
+        if (e.snake === p.id) pDeaths++;
         if (e.cause === 'enemy') enemyDeaths++;
         if (e.cause === 'ult') ultKills++;
         const fh = firstHit.get(e.snake);
@@ -70,6 +71,7 @@ for (let g = 0; g < N; g++) {
   add('endLv', avg(sim.snakes.filter((s) => !s.isBoss && s.alive).map((s) => s.level)));
   add('playerLv', p.level);
   add('deaths', deaths);
+  add('pDeaths', pDeaths);
   add('lowWin', kills ? lowWins / kills : 0);
   add('enemy', deaths ? enemyDeaths / deaths : 0);
   add('ults', ults / 21);
@@ -89,4 +91,4 @@ console.log(`낮은 레벨이 이긴 비율: ${pct(avg(R.lowWin))}   목표 10~1
 console.log(`필살기: 곤충당 판마다 ${avg(R.ults).toFixed(1)}번, 필살기로 끝난 처치 ${pct(avg(R.ultKill))}   목표 3~5번, 30% 이하`);
 console.log(`천적으로 쓰러진 비율: ${pct(avg(R.enemy))}   목표 8~15%`);
 console.log(`기술 피해 비중: ${pct(avg(R.skillShare))}`);
-console.log(`판당 쓰러짐: ${avg(R.deaths).toFixed(0)}`);
+console.log(`판당 쓰러짐: ${avg(R.deaths).toFixed(0)} · 플레이어 자리 ${avg(R.pDeaths).toFixed(1)}번(목숨 3개)`);

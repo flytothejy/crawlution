@@ -3,7 +3,7 @@
 
 export const CONFIG = {
   tickRate: 60, // 시뮬레이션 틱(초당). 멀티 서버에서는 20으로 낮춘다.
-  arenaRadius: 3300, // 1.5배
+  arenaRadius: 2300, // 2판: 3300에서 줄임(넓이 49%) → 붙는 횟수 1.5배. 먹이 수도 넓이에 맞춰 줄여 밀도는 같다
   roundTime: 480, // 한 판 8분, 끝나면 점수 순위
 
   // 이동(조작감: 빠릿하게). 속도 = (180 + 1.5 × (레벨−1) + 진화 보너스) × 계열 배율
@@ -67,26 +67,26 @@ export const CONFIG = {
 
   // 필살기
   ultMax: 100,
-  ultDealt: 12, // 준 피해 ÷ B × 12
-  ultTaken: 80 * 1.5, // 받은 피해 ÷ 최대 체력 × 80, 받는 쪽은 1.5배
-  ultKill: 15,
+  ultDealt: 7, // 준 피해 ÷ B × 7 (맵을 줄이며 12→7: 싸움이 잦아져 필살기가 판당 9.6번까지 늘었다)
+  ultTaken: 50, // 받은 피해 ÷ 최대 체력 × 50 (120→50)
+  ultKill: 8, // 15→8
   ultLike: 20,
-  ultPassive: 0.3,
+  ultPassive: 0.2, // 0.3→0.2
   ultCapFrac: 0.4, // 한 대상에게 최대 체력의 40%까지
   ultTele: 0.5, // 0.5초 전에 범위 예고
 
   // 먹이
-  foodCount: 1150,
+  foodCount: 560,
   foodEP: 1,
   foodRadius: 9,
-  bigFoodCount: 90,
+  bigFoodCount: 44,
   bigFoodEP: 4,
   bigFoodRadius: 15,
   remainsRadius: 11,
-  goldCount: 20,
+  goldCount: 10,
   goldEP: 12,
   goldRadius: 15,
-  specialCount: 30,
+  specialCount: 15,
   specialRadius: 17,
   specialEP: 6,
   likeEP: 30,

@@ -108,6 +108,8 @@ function hold(t: Snake) {
   for (const f of FAMILIES) {
     for (const form of f.forms) {
       const { sim, p, t } = arena(f.species[0], form.id);
+      // 뒤로 뿜기는 꼬리 뒤로 나간다 → 표적을 꼬리 뒤에 둔다
+      if (form.id === 'backjet') sim.spawnAt(t, p.segs[(p.segN - 1) * 2] - 90, p.segs[(p.segN - 1) * 2 + 1], Math.PI / 2, 30);
       p.cmd = { ...p.cmd, skillSeq: 1 };
       let effect = false, dealt = 0;
       for (let i = 0; i < 4 * CONFIG.tickRate; i++) {
