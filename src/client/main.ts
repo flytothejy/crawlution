@@ -45,6 +45,7 @@ const ENEMY: Record<EnemyKind, { name: string; icon: string; tip: string; c1: st
 };
 
 const renderer = new GameRenderer();
+if (location.search.includes("local")) (globalThis as { __renderer?: GameRenderer }).__renderer = renderer; // 시험용
 const sfx = new Sfx();
 let S: Settings = loadSettings();
 let settingsOpen = false;
