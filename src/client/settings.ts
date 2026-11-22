@@ -13,7 +13,7 @@ export interface Settings {
   shake: boolean;
   labels: boolean;
   numbers: boolean;
-  quality: 'high' | 'low';
+  quality: 'auto' | 'high' | 'low';
   dist: boolean;
 }
 
@@ -22,14 +22,19 @@ export const SON_POWER = 5;
 const KEY = 'crawlution.settings';
 
 export function defaultSettings(): Settings {
-  return { son: false, bots: 20, map: 'random', hand: 'right', btnSize: 'm', sound: true, volume: 0.8, vibe: true, shake: true, labels: true, numbers: true, quality: 'high', dist: true };
+  return { son: false, bots: 20, map: 'random', hand: 'right', btnSize: 'm', sound: true, volume: 0.8, vibe: true, shake: true, labels: true, numbers: true, quality: 'auto', dist: true };
 }
 
 export function loadSettings(): Settings {
   const d = defaultSettings();
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...d, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // 자동 화질이 생기기 전 기본값(선명하게)은 자동으로 옮긴다
+      if (!saved.v) saved.quality = saved.quality === 'low' ? 'low' : 'auto';
+      return { ...d, ...saved };
+    }
     // 예전 효과음·진동 저장값을 이어받는다
     if (localStorage.getItem('crawlution.sound') === '0') d.sound = false;
     if (localStorage.getItem('crawlution.vibe') === '0') d.vibe = false;
@@ -41,7 +46,7 @@ export function loadSettings(): Settings {
 
 export function saveSettings(s: Settings) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(s));
+    localStorage.setItem(KEY, JSON.stringify({ ...s, v: 2 }));
   } catch {
     /* 저장 불가 환경 */
   }
@@ -84,7 +89,7 @@ export const SECTIONS: { title: string; rows: Row[] }[] = [
       { key: 'numbers', kind: 'toggle', icon: '🔢', label: '피해 숫자' },
       { key: 'labels', kind: 'toggle', icon: '🏷️', label: '곤충 이름표' },
       { key: 'dist', kind: 'toggle', icon: '📊', label: '갈래 분포 표시' },
-      { key: 'quality', kind: 'seg', icon: '✨', label: '화질', desc: '끊기면 "가볍게"를 써 보세요', options: [['high', '선명하게'], ['low', '가볍게']] },
+      { key: 'quality', kind: 'seg', icon: '✨', label: '화질', desc: '자동: 끊기면 알아서 해상도와 효과를 줄여요', options: [['auto', '자동'], ['high', '선명하게'], ['low', '가볍게']] },
     ],
   },
 ];

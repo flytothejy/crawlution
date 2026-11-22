@@ -38,22 +38,53 @@ interface PartSprite {
 interface SnakeGfx {
   species: string;
   kit: HeadKit;
-  shadows: Container;
-  glows: Container;
-  legs: Container;
-  bodies: Container;
   head: Container;
-  shadowSprites: Sprite[];
-  glowSprites: Sprite[];
-  legSprites: Sprite[];
-  bodySprites: Sprite[];
-  shineSprites: Sprite[];
-  spotSprites: Sprite[];
   wings: Sprite[];
-  stinger: Sprite | null;
+  stinger: boolean;
   headBase: Sprite;
   parts: PartSprite[];
   label: Text;
+}
+
+/**
+ * 레이어 하나에 스프라이트를 모아 두고, 이번 프레임에 보이는 것만 빌려 쓴다.
+ * 곤충마다 마디 수만큼 스프라이트를 만들어 숨겨 두던 방식은 후반에 물체가 1만 개를 넘어
+ * 숨긴 것까지 매 프레임 처리되며 느려졌다. 빌린 순서가 곧 그리는 순서다.
+ */
+class SpritePool {
+  private sprites: Sprite[] = [];
+  private used = 0;
+  constructor(private layer: Container) {}
+  begin() {
+    this.used = 0;
+  }
+  take(tex: Texture, ax = 0.5, ay = 0.5): Sprite {
+    let sp = this.sprites[this.used];
+    if (!sp) {
+      sp = new Sprite(tex);
+      this.layer.addChild(sp);
+      this.sprites.push(sp);
+    }
+    this.used++;
+    if (sp.texture !== tex) sp.texture = tex;
+    sp.anchor.set(ax, ay);
+    sp.visible = true;
+    sp.rotation = 0;
+    sp.alpha = 1;
+    sp.tint = 0xffffff;
+    return sp;
+  }
+  end() {
+    const sp = this.sprites;
+    for (let i = this.used; i < sp.length; i++) sp[i].visible = false;
+    // 크게 늘었다가 줄어들면 남는 것은 정리
+    if (sp.length > this.used * 2 + 300) {
+      for (const x of sp.splice(this.used + 150)) x.destroy();
+    }
+  }
+  get size() {
+    return this.used;
+  }
 }
 
 interface Particle {
@@ -142,6 +173,10 @@ export class GameRenderer {
   private popupLayer = new Container();
   private tex: Record<string, Texture> = {};
   private snakes = new Map<number, SnakeGfx>();
+  private shadowPool = new SpritePool(this.shadowLayer);
+  private glowPool = new SpritePool(this.glowLayer);
+  private legPool = new SpritePool(this.legLayer);
+  private bodyPool = new SpritePool(this.bodyLayer);
   private portraits = new Map<string, string>();
   private foodSprites: Sprite[] = [];
   private foodBackLayer = new Container();
@@ -200,6 +235,7 @@ export class GameRenderer {
       .circle(0, 0, CONFIG.arenaRadius + 2)
       .stroke({ width: 4, color: 0xb8e08a, alpha: 0.6 });
     this.ghostLayer.blendMode = 'add';
+    this.glowLayer.blendMode = 'add';
 
     this.world.addChild(
       this.bg, mask, this.deco, border, this.mapLayer, this.decalLayer, this.zoneGfx, this.foodBackLayer, this.foodLayer, this.ringGfx, this.markGfx,
@@ -454,10 +490,6 @@ export class GameRenderer {
   }
 
   private dropGfx(g: SnakeGfx) {
-    g.shadows.destroy({ children: true });
-    g.glows.destroy({ children: true });
-    g.legs.destroy({ children: true });
-    g.bodies.destroy({ children: true });
     g.head.destroy({ children: true });
     for (const w of g.wings) w.destroy();
     g.label.destroy();
@@ -470,11 +502,6 @@ export class GameRenderer {
     const look = lookOf(s.species);
     const feats = new Set(look.feats ?? []);
     const kit = headKit(this.app.renderer, s.species);
-    const shadows = new Container();
-    const glows = new Container();
-    glows.blendMode = 'add';
-    const legs = new Container();
-    const bodies = new Container();
     const head = new Container();
     const spName = SPECIES_BY_ID.get(s.species)?.name ?? '';
     const label = new Text({
@@ -491,11 +518,7 @@ export class GameRenderer {
         wings.push(w);
       }
     }
-    let stinger: Sprite | null = null;
-    if (feats.has('stinger')) {
-      stinger = new Sprite(this.tex.sting);
-      stinger.anchor.set(1, 0.5);
-    }
+    const stinger = feats.has('stinger');
     // 머리: 뒤쪽 부품 → 머리판 → 앞쪽 부품
     const parts: PartSprite[] = [];
     const mk = (front: boolean) => {
@@ -514,18 +537,11 @@ export class GameRenderer {
     headBase.anchor.set(kit.ax, kit.ay);
     head.addChild(headBase);
     mk(true);
-    this.shadowLayer.addChild(shadows);
-    this.glowLayer.addChild(glows);
-    this.legLayer.addChild(legs);
-    this.bodyLayer.addChild(bodies);
-    if (stinger) bodies.addChildAt(stinger, 0);
     for (const w of wings) this.headLayer.addChild(w);
     this.headLayer.addChild(head);
     this.labelLayer.addChild(label);
     g = {
-      species: s.species, kit, shadows, glows, legs, bodies, head,
-      shadowSprites: [], glowSprites: [], legSprites: [], bodySprites: [], shineSprites: [], spotSprites: [],
-      wings, stinger, headBase, parts, label,
+      species: s.species, kit, head, wings, stinger, headBase, parts, label,
     };
     this.snakes.set(s.id, g);
     return g;
@@ -859,7 +875,7 @@ export class GameRenderer {
   }
 
   private spawnParticle(x: number, y: number, color: number, speed: number, life: number, size: number) {
-    if (this.particles.length > 1000) return;
+    if (this.particles.length > this.particleCap) return;
     const s = this.freeParticles.pop() ?? new Sprite(this.tex.dot);
     s.anchor.set(0.5);
     s.blendMode = 'add';
@@ -1080,13 +1096,15 @@ export class GameRenderer {
     this.statusGfx.clear();
     this.hpGfx.clear();
     const seen = new Set<number>();
+    for (const pool of [this.shadowPool, this.glowPool, this.legPool, this.bodyPool]) pool.begin();
     for (const s of frame.snakes) {
       seen.add(s.id);
       this.drawSnake(s, player);
     }
+    for (const pool of [this.shadowPool, this.glowPool, this.legPool, this.bodyPool]) pool.end();
     for (const [id, g] of this.snakes) {
       if (seen.has(id)) continue;
-      g.shadows.visible = g.glows.visible = g.legs.visible = g.bodies.visible = g.head.visible = g.label.visible = false;
+      g.head.visible = g.label.visible = false;
       for (const w of g.wings) w.visible = false;
     }
     this.drawProjs(frame.projs);
@@ -1398,7 +1416,7 @@ export class GameRenderer {
   private drawSnake(s: FrameSnake, player: FrameSnake | undefined) {
     const g = this.getSnakeGfx(s);
     const vis = s.alive && s.segs.length >= 2;
-    g.shadows.visible = g.glows.visible = g.legs.visible = g.bodies.visible = g.head.visible = vis;
+    g.head.visible = vis;
     g.label.visible = vis;
     for (const w of g.wings) w.visible = vis;
     if (!vis) return;
@@ -1433,99 +1451,78 @@ export class GameRenderer {
     const glowA = s.isBoss ? 0.3 : [0, 0, 0.08, 0.18, 0.28, 0.42][s.stage];
     const gems = !s.isBoss && s.stage >= 4;
 
-    while (g.bodySprites.length < n) {
-      const sh = new Sprite(this.tex.shadow);
-      sh.anchor.set(0.5);
-      const gl = new Sprite(this.tex.glow);
-      gl.anchor.set(0.5);
-      const b = new Sprite(this.tex.body);
-      b.anchor.set(0.5);
-      const shine = new Sprite(this.tex.shine);
-      shine.anchor.set(0.5);
-      const spot = new Sprite(this.tex.spot);
-      spot.anchor.set(0.5);
-      const leg = new Sprite(this.tex.legs);
-      leg.anchor.set(0.5);
-      g.shadows.addChildAt(sh, 0);
-      g.glows.addChildAt(gl, 0);
-      g.bodies.addChildAt(spot, g.stinger ? 1 : 0);
-      g.bodies.addChildAt(shine, g.stinger ? 1 : 0);
-      g.bodies.addChildAt(b, g.stinger ? 1 : 0);
-      g.legs.addChildAt(leg, 0);
-      g.shadowSprites.push(sh);
-      g.glowSprites.push(gl);
-      g.bodySprites.push(b);
-      g.shineSprites.push(shine);
-      g.spotSprites.push(spot);
-      g.legSprites.push(leg);
-    }
-    for (let i = 0; i < g.bodySprites.length; i++) {
-      const b = g.bodySprites[i], sh = g.shadowSprites[i], gl = g.glowSprites[i], shine = g.shineSprites[i], spot = g.spotSprites[i], leg = g.legSprites[i];
-      if (i >= n) {
-        b.visible = sh.visible = gl.visible = shine.visible = spot.visible = leg.visible = false;
-        continue;
-      }
+    const fade = s.sneaking ? 0.8 : 1;
+    const vw = this.view;
+    const inView = (i: number) => {
       const x = s.segs[i * 2], y = s.segs[i * 2 + 1];
-      // 화면 밖 마디는 그리지 않는다
-      const vw = this.view;
-      if (x < vw.x0 || x > vw.x1 || y < vw.y0 || y > vw.y1) {
-        if (b.visible || sh.visible) b.visible = sh.visible = gl.visible = shine.visible = spot.visible = leg.visible = false;
-        continue;
-      }
+      return x >= vw.x0 && x <= vw.x1 && y >= vw.y0 && y <= vw.y1;
+    };
+    // 독침(꼬리): 몸보다 아래에 깔리도록 먼저 빌린다
+    if (g.stinger && n >= 2 && inView(n - 1)) {
+      const ti = n - 1, tj = n - 2;
+      const st = this.bodyPool.take(this.tex.sting, 1, 0.5);
+      st.position.set(s.segs[ti * 2], s.segs[ti * 2 + 1]);
+      st.rotation = Math.atan2(s.segs[tj * 2 + 1] - s.segs[ti * 2 + 1], s.segs[tj * 2] - s.segs[ti * 2]);
+      st.scale.set(scale * 1.2);
+      st.alpha = fade;
+    }
+    // 꼬리부터 머리 쪽으로: 머리에 가까운 마디가 위에 그려진다. 화면 밖 마디는 빌리지 않는다
+    for (let i = n - 1; i >= 0; i--) {
+      if (!inView(i)) continue;
+      const x = s.segs[i * 2], y = s.segs[i * 2 + 1];
       const pj = Math.max(0, i - 1);
       const dirA = i === 0 ? s.angle : Math.atan2(s.segs[pj * 2 + 1] - y, s.segs[pj * 2] - x);
       const taper = i > n - 6 ? 0.7 + 0.3 * ((n - i) / 6) : 1;
       const wiggle = 1 + 0.05 * Math.sin(this.time * 10 - i * 0.7);
       const unit = swarm ? (i % 3 === 0 ? 0.8 : 0.93) : 1;
+      const sh = this.shadowPool.take(this.tex.shadow);
       sh.position.set(x + 3 + fly * 14, y + 6 + fly * 18);
       sh.scale.set(scale * taper * 1.05 * (1 - fly * 0.2));
       sh.alpha = 1 - fly * 0.4;
-      sh.visible = true;
-      gl.visible = glowA > 0;
-      if (gl.visible) {
+      if (glowA > 0) {
+        const gl = this.glowPool.take(this.tex.glow);
         gl.position.set(x, y);
         gl.scale.set(scale * taper * 1.15);
         gl.tint = lcol;
         gl.alpha = glowA * (0.6 + 0.4 * Math.sin(this.time * 5 - i * 0.35));
       }
       const legOn = allLegs ? i > 0 : spider ? i >= 1 && i <= 4 : s.species !== 'caterpillar' && i >= 1 && i <= 3;
-      leg.visible = legOn && !s.fly;
-      if (legOn) {
+      if (legOn && !s.fly) {
+        const leg = this.legPool.take(this.tex.legs);
         const swing = Math.sin(this.time * 16 + i * 1.3) * 0.35;
         leg.position.set(x, y);
         leg.rotation = dirA + swing;
         leg.scale.set(scale * (spider ? 1.6 : allLegs ? 1.15 : 1.1) * lift);
+        leg.alpha = fade;
       }
-      if (i === 0) {
-        b.visible = shine.visible = spot.visible = false;
-        continue;
-      }
-      b.visible = shine.visible = true;
+      if (i === 0) continue;
+      const b = this.bodyPool.take(this.tex.body);
       b.position.set(x, y);
       b.scale.set(scale * taper * wiggle * unit * lift);
       const stripeOn = swarm ? i % 3 === 0 : Math.floor(i / 2) % 2 === 1;
       b.tint = tint(stripeOn ? look.stripe : look.body);
-      b.alpha = blink ? 0.45 : 1;
+      b.alpha = (blink ? 0.45 : 1) * fade;
+      const shine = this.bodyPool.take(this.tex.shine);
       shine.position.set(x - s.r * 0.25 * taper, y - s.r * 0.35 * taper);
       shine.scale.set(scale * taper * 0.9 * lift);
-      shine.alpha = (metal ? 0.85 : fuzzy ? 0.2 : 0.45) + (s.boosting || s.dash ? 0.15 + 0.1 * Math.sin(this.time * 30) : 0);
+      shine.alpha = ((metal ? 0.85 : fuzzy ? 0.2 : 0.45) + (s.boosting || s.dash ? 0.15 + 0.1 * Math.sin(this.time * 30) : 0)) * fade;
       // 점무늬 / 보석 장식
       const showGem = gems && i % 3 === 1;
-      spot.visible = (spots && i % 2 === 1) || showGem;
-      if (spot.visible) {
+      if ((spots && i % 2 === 1) || showGem) {
         if (showGem) {
-          spot.texture = this.tex.gem;
+          const spot = this.bodyPool.take(this.tex.gem);
           spot.position.set(x, y);
           spot.rotation = dirA;
           spot.scale.set(scale * 0.62 * taper);
           spot.tint = mix(lcol, 0xffffff, 0.35 + 0.25 * Math.sin(this.time * 6 - i));
+          spot.alpha = fade;
         } else {
-          spot.texture = this.tex.spot;
-          spot.rotation = 0;
+          const spot = this.bodyPool.take(this.tex.spot);
           const side = i % 4 === 1 ? 1 : -1;
           spot.position.set(x + Math.cos(dirA + Math.PI / 2) * s.r * 0.35 * side, y + Math.sin(dirA + Math.PI / 2) * s.r * 0.35 * side);
           spot.scale.set(scale * 0.55 * taper);
           spot.tint = s.species === 'longhorn' ? 0xffffff : 0x1b1b1b;
+          spot.alpha = fade;
         }
       }
     }
@@ -1533,14 +1530,6 @@ export class GameRenderer {
     if (!s.isBoss && s.stage >= 5 && Math.random() < 0.5 && this.isNear(s.segs[0], s.segs[1])) {
       const i = Math.floor(Math.random() * n);
       this.spawnParticle(s.segs[i * 2], s.segs[i * 2 + 1], Math.random() < 0.5 ? 0xffe066 : 0xffffff, 25, 0.6, 0.35);
-    }
-    // 독침(꼬리)
-    if (g.stinger) {
-      const ti = n - 1, tj = Math.max(0, n - 2);
-      g.stinger.visible = true;
-      g.stinger.position.set(s.segs[ti * 2], s.segs[ti * 2 + 1]);
-      g.stinger.rotation = Math.atan2(s.segs[tj * 2 + 1] - s.segs[ti * 2 + 1], s.segs[tj * 2] - s.segs[ti * 2]);
-      g.stinger.scale.set(scale * 1.2);
     }
     // 날개(1~2번 마디 위, 퍼덕임)
     if (g.wings.length) {
@@ -1604,8 +1593,6 @@ export class GameRenderer {
       if (k > 0) hp.roundRect(hx - barW / 2, barY, barW * k, barH, 3 * iz).fill(col);
       if (k > 0) hp.rect(hx - barW / 2, barY, barW * k, barH * 0.35).fill({ color: 0xffffff, alpha: 0.35 });
     }
-    const a = s.sneaking ? 0.8 : 1;
-    g.bodies.alpha = g.legs.alpha = a;
 
     // 상태 표시
     const st = this.statusGfx;
@@ -1778,10 +1765,51 @@ export class GameRenderer {
   }
 
   /** 화질: 선명하게(기기 해상도, 최대 2배) / 가볍게(1배) */
-  setQuality(high: boolean) {
-    const r = high ? Math.min(window.devicePixelRatio || 1, 2) : 1;
-    if (this.app.renderer.resolution === r) return;
-    this.app.renderer.resize(window.innerWidth, window.innerHeight, r);
+  // ---------- 화질 ----------
+  // 단계 0: 기기 해상도(최대 2배), 1: 1.5배·파티클 줄임, 2: 1배·파티클 크게 줄임
+  private qLevel = 0;
+  private qAuto = true;
+  private qEma = 16;
+  private qSlow = 0;
+  private qFast = 0;
+  private qDrops = 0;
+  private particleCap = 1000;
+
+  setQuality(mode: 'auto' | 'high' | 'low') {
+    this.qAuto = mode === 'auto';
+    this.qDrops = 0;
+    this.applyQuality(mode === 'low' ? 2 : 0);
+  }
+
+  private applyQuality(level: number) {
+    this.qLevel = level;
+    const dpr = window.devicePixelRatio || 1;
+    const r = [Math.min(dpr, 2), Math.min(dpr, 1.5), 1][level];
+    this.particleCap = [1000, 600, 300][level];
+    if (this.app.renderer.resolution !== r) this.app.renderer.resize(window.innerWidth, window.innerHeight, r);
+  }
+
+  /** 자동 화질: 프레임이 2.5초 넘게 느리면 한 단계 낮추고, 15초 동안 넉넉하면 한 단계 올린다 */
+  tickQuality(ms: number) {
+    if (!this.qAuto || ms > 250) return; // 탭 전환 같은 긴 멈춤은 무시
+    this.qEma = this.qEma * 0.95 + ms * 0.05;
+    if (this.qEma > 22) ((this.qSlow += ms), (this.qFast = 0));
+    else if (this.qEma < 15) ((this.qFast += ms), (this.qSlow = 0));
+    else this.qSlow = this.qFast = 0;
+    if (this.qSlow > 2500 && this.qLevel < 2) {
+      this.applyQuality(this.qLevel + 1);
+      this.qDrops++;
+      this.qSlow = 0;
+      this.qEma = 16;
+    } else if (this.qFast > 15000 && this.qLevel > 0 && this.qDrops < 3) {
+      // 올렸다 내렸다를 반복하지 않게, 세 번 낮춘 뒤로는 올리지 않는다
+      this.applyQuality(this.qLevel - 1);
+      this.qFast = 0;
+    }
+  }
+
+  get qualityLabel() {
+    return `${this.qAuto ? '자동 ' : ''}${['선명', '보통', '가볍게'][this.qLevel]}`;
   }
 
   get camera() {

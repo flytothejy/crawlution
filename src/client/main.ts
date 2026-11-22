@@ -49,6 +49,7 @@ if (location.search.includes("local")) (globalThis as { __renderer?: GameRendere
 const sfx = new Sfx();
 let S: Settings = loadSettings();
 let settingsOpen = false;
+let tagTimer: ReturnType<typeof setInterval> | undefined;
 let prevStats = '';
 let host: SimHost | null = null;
 let input: Input;
@@ -704,7 +705,10 @@ function startGame() {
   else host.start(seed, '나', stage, gameOpts());
   applySettings();
   playing = true;
-  setTimeout(() => ($('hostTag').textContent = `sim: ${host?.kind}`), 1500);
+  const tag = () => ($('hostTag').textContent = `sim: ${host?.kind} · 화질 ${renderer.qualityLabel}`);
+  setTimeout(tag, 1500);
+  clearInterval(tagTimer);
+  tagTimer = setInterval(tag, 3000);
 }
 
 // ---------- 설정 ----------
@@ -723,7 +727,7 @@ function applySettings() {
   renderer.opts.shake = S.shake;
   renderer.opts.labels = S.labels;
   renderer.opts.numbers = S.numbers;
-  renderer.setQuality(S.quality === 'high');
+  renderer.setQuality(S.quality);
   if (playing) $('dist').classList.toggle('hidden', !S.dist);
   host?.setOpts(gameOpts());
   hudSpecies = ''; // 이름 옆 🦸 표시 갱신
@@ -841,6 +845,7 @@ async function boot() {
 
   renderer.app.ticker.add((tk) => {
     const dt = Math.min(0.05, tk.deltaMS / 1000);
+    if (playing) renderer.tickQuality(tk.deltaMS);
     const frame = buildFrame();
     if (!frame) return;
     renderer.render(frame, dt);
