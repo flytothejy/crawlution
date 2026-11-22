@@ -227,11 +227,14 @@ export class GameRenderer {
   private time = 0;
   private view = { x0: 0, x1: 0, y0: 0, y1: 0 };
   /** 화면 설정 */
-  opts = { shake: true, labels: true, numbers: true };
+  opts = { shake: true, labels: true, numbers: true, zoomMul: 1 };
+  private sizeHost: HTMLElement | Window = window;
 
-  async init(parent: HTMLElement) {
+  /** resizeTo: 화면 전체(기본) 또는 도감처럼 상자 하나 */
+  async init(parent: HTMLElement, resizeTo: HTMLElement | Window = window) {
+    this.sizeHost = resizeTo;
     await this.app.init({
-      resizeTo: window,
+      resizeTo,
       antialias: true,
       background: 0x1f3a1c,
       resolution: Math.min(window.devicePixelRatio || 1, 2),
@@ -1344,7 +1347,7 @@ export class GameRenderer {
       const base = Math.max(0.85, Math.min(1.6, Math.min(W, H) / 560));
       const lenZoom = Math.max(0.64, Math.min(1.12, 1.12 - player.length * 0.0022));
       const sizeZoom = Math.max(0.72, Math.min(1, Math.pow(10 / player.r, 0.4)));
-      this.zoom += (base * lenZoom * sizeZoom - this.zoom) * (1 - Math.exp(-dt * 2));
+      this.zoom += (base * lenZoom * sizeZoom * this.opts.zoomMul - this.zoom) * (1 - Math.exp(-dt * 2));
     }
     this.shake *= Math.exp(-dt * 7);
     this.punch *= Math.exp(-dt * 9);
@@ -2341,7 +2344,11 @@ export class GameRenderer {
     const dpr = window.devicePixelRatio || 1;
     const r = [Math.min(dpr, 2), Math.min(dpr, 1.5), 1][level];
     this.particleCap = [1000, 600, 300][level];
-    if (this.app.renderer.resolution !== r) this.app.renderer.resize(window.innerWidth, window.innerHeight, r);
+    if (this.app.renderer.resolution !== r) {
+      const h = this.sizeHost;
+      const [w, hh] = h instanceof Window ? [h.innerWidth, h.innerHeight] : [h.clientWidth, h.clientHeight];
+      this.app.renderer.resize(w, hh, r);
+    }
   }
 
   /** 자동 화질: 프레임이 2.5초 넘게 느리면 한 단계 낮추고, 15초 동안 넉넉하면 한 단계 올린다 */

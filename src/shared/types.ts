@@ -247,7 +247,7 @@ export interface GameOpts {
   loadout: Loadout;
   startLevel?: number; // 시험용
 }
-export const defaultLoadout = (): Loadout => ({ species: 'kingmantis', form: 'sweep', traits: ['molt', 'sprint'] });
+export const defaultLoadout = (): Loadout => ({ species: 'kingmantis', form: 'sweep', traits: ['sharp', 'onescythe'] });
 export const defaultOpts = (): GameOpts => ({ power: 1, bots: 20, map: 'random', loadout: defaultLoadout() });
 
 /** 화면 → 시뮬레이션 메시지 */

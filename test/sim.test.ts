@@ -3,7 +3,7 @@ import { Simulation, type Snake } from '../src/shared/sim';
 import { botThink } from '../src/shared/bot';
 import { CONFIG, nutNeed } from '../src/shared/config';
 import { COMMON_SUBS, FAMILIES, FAMILY, SPECIAL_FOODS, SPECIES } from '../src/shared/species';
-import { ABILITIES, TRAITS } from '../src/shared/cards';
+import { ABILITIES, TRAITS, COMMON_TRAITS, familyTraits } from '../src/shared/cards';
 import { emptyCommand, type GameOpts } from '../src/shared/types';
 
 let failed = 0;
@@ -12,7 +12,7 @@ function check(name: string, ok: boolean, info = '') {
   if (!ok) failed++;
 }
 
-const opts = (species: string, form: string, extra: Partial<GameOpts> = {}): GameOpts => ({ power: 1, bots: 1, map: 'grass', loadout: { species, form, traits: ['molt', 'reroll'] }, ...extra });
+const opts = (species: string, form: string, extra: Partial<GameOpts> = {}): GameOpts => ({ power: 1, bots: 1, map: 'grass', loadout: { species, form, traits: [] }, ...extra });
 
 // 0) 데이터
 {
@@ -22,7 +22,8 @@ const opts = (species: string, form: string, extra: Partial<GameOpts> = {}): Gam
   check('본능 40개 모두 다름', new Set(SPECIES.map((s) => s.instinct.id)).size === 40);
   check('특별 먹이 10종: 계열마다 좋아함·싫어함 하나씩', SPECIAL_FOODS.length === 10 && SPECIAL_FOODS.every((_, i) => FAMILIES.filter((f) => f.likes === i).length === 1 && FAMILIES.filter((f) => f.hates === i).length === 1) && FAMILIES.every((f) => f.likes !== f.hates));
   check('능력 카드 37장(공용 17 + 계열 전용 2×10)', ABILITIES.length === 37 && FAMILIES.every((f) => ABILITIES.filter((a) => a.family === f.id).length === 2));
-  check('특성 12개, 공용 보조 기술 10개', TRAITS.length === 12 && COMMON_SUBS.length === 10);
+  check('특성: 공용 10 + 계열마다 3, 모두 대가가 있음', COMMON_TRAITS.length === 10 && FAMILIES.every((f) => familyTraits(f.id).length === 3) && TRAITS.every((t) => t.up && t.down), `${TRAITS.length}개`);
+  check('공용 보조 기술 10개', COMMON_SUBS.length === 10);
   check("레벨 곡선: 1→2에 20, 한 레벨마다 7씩 더", nutNeed(1) === 20 && nutNeed(15) === 118);
 }
 
@@ -223,9 +224,19 @@ function hold(t: Snake) {
 
 // 7) 특성·본능
 {
-  const sim = new Simulation(5, '나', { power: 1, bots: 3, map: 'grass', loadout: { species: 'kingstag', form: 'grab', traits: ['preheat', 'sprint'] } });
+  const sim = new Simulation(5, '나', { power: 1, bots: 3, map: 'grass', loadout: { species: 'kingstag', form: 'grab', traits: ['thickshell', 'steeljaw'] } });
   const p = sim.snakes[0];
-  check('특성 필살기 예열: 게이지 30에서 시작', p.ult >= 30);
+  const plain = new Simulation(5, '나', { power: 1, bots: 3, map: 'grass', loadout: { species: 'kingstag', form: 'grab', traits: [] } }).snakes[0];
+  check('특성 두꺼운 껍질: 체력 +12%, 속도 −8%', Math.abs(p.maxHp / plain.maxHp - 1.12) < 0.02 && Math.abs(sim.speedOf(p) / sim.speedOf(plain) - 0.92) < 0.01, `${(p.maxHp / plain.maxHp).toFixed(2)}`);
+  check('특성 강철 큰턱: 주 기술 피해 +25%', Math.abs(sim.mainMul(p) / sim.mainMul(plain) - 1.25) < 0.01);
+  check('봇 특성: 공용 1 + 자기 계열 1', sim.snakes.slice(1).every((b) => { const [a, c] = [...b.traits]; return !TRAITS.find((t) => t.id === a)!.family && TRAITS.find((t) => t.id === c)!.family === b.fam.id; }));
+  {
+    const k = arena('kingmantis', 'sweep');
+    k.p.traits = new Set(['poise']);
+    k.p.cmd = { ...k.p.cmd, sneak: true };
+    run(k.sim, 1.7, hold(k.t));
+    check('매복 자세: 웅크리고 1.5초 뒤 다음 주 기술 +50%', k.p.poised && k.sim.mainMul(k.p) > 1.45);
+  }
   check('봇 수 설정', sim.snakes.length === 4);
   sim.enemies.next = 1e9;
   p.invulnT = 0;

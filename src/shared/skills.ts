@@ -252,7 +252,7 @@ export function castMain(sim: Simulation, s: Snake) {
     case 'bee': {
       const raw = (B / s.fam.atk) * (1 + sim.ab(s, 'busy'));
       if (form === 'workers') {
-        const n = aw ? 5 : 3;
+        const n = (aw ? 5 : 3) + sim.tm(s, 'minion');
         for (let k = 0; k < n; k++) sim.addMinion(s, 'bee', 5 + sim.ab(s, 'swarm'), raw * 0.25);
         sim.fx('summon', s, s.x, s.y, { r: 60 });
       } else if (form === 'honey') {
@@ -413,7 +413,7 @@ export function castSub(sim: Simulation, s: Snake) {
       sim.fx('compound', s, s.x, s.y, { r: 400 });
       return;
     case 'alarm':
-      for (let k = 0; k < 2; k++) sim.addMinion(s, 'wasp', 5 * D, B * 0.15);
+      for (let k = 0; k < 2 + sim.tm(s, 'minion'); k++) sim.addMinion(s, 'wasp', 5 * D, B * 0.15);
       sim.fx('alarm', s, s.x, s.y, { r: 60 });
       return;
     case 'backplate':
@@ -611,7 +611,7 @@ export function castUlt(sim: Simulation, s: Snake) {
     case 'bee':
       sim.telegraph(s, { shape: 'circle', x: s.x, y: s.y, r: 320, angle: 0, len: 0, w: 0 }, () => {
         const raw = (B / s.fam.atk) * (1 + sim.ab(s, 'busy'));
-        for (let k = 0; k < 10; k++) {
+        for (let k = 0; k < 10 + sim.tm(s, 'minion'); k++) {
           sim.addMinion(s, 'bee', 5 + sim.ab(s, 'swarm'), raw * 0.2, aw);
           sim.minions[sim.minions.length - 1].ult = cap;
         }
@@ -1058,7 +1058,7 @@ export function updateZones(sim: Simulation, dt: number) {
         break;
       }
       case 'honey':
-        if (owner.alive && dist(owner.x, owner.y, z.x, z.y) < z.r) owner.hp = Math.min(owner.maxHp, owner.hp + owner.maxHp * 0.04 * dt);
+        if (owner.alive && dist(owner.x, owner.y, z.x, z.y) < z.r) owner.hp = Math.min(owner.maxHp, owner.hp + owner.maxHp * 0.04 * dt * sim.tm(owner, 'heal'));
         if (z.awake) for (const o of sim.snakes) if (o.id !== z.owner && sim.hittable(o) && dist(o.x, o.y, z.x, z.y) < z.r) sim.slow(o, 0.3, z.mul);
         break;
       case 'stingers':

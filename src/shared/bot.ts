@@ -159,10 +159,11 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
   let guard = scared && hpK < 0.4;
   if (guard) boost = false;
   // 웅크리면 좋아지는 본능은 가끔 일부러 웅크린다
-  if (!target && !scared && (sim.inst(s, 'pray') || sim.inst(s, 'flower') || sim.inst(s, 'jaws') || sim.inst(s, 'nest') || sim.inst(s, 'leaf'))) {
+  if (!target && !scared && (sim.inst(s, 'pray') || sim.inst(s, 'flower') || sim.inst(s, 'jaws') || sim.inst(s, 'nest') || sim.inst(s, 'leaf') || sim.tsp(s, 'poise') || sim.tsp(s, 'dark'))) {
     if ((sim.time + s.id * 7) % 14 < 2.2) guard = true;
   }
 
+  if (target && !scared && sim.tsp(s, 'poise') && !s.poised && s.skillCd <= 0 && Math.hypot(target.x - s.x, target.y - s.y) > 260) guard = true;
   // 기술: 조건이 반응 지연만큼 이어지면 쓴다
   let skill = false, sub = false;
   if (!grace && sim.canAct(s)) {

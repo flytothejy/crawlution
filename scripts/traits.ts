@@ -1,20 +1,21 @@
-// 특성 가치: 한 판의 곤충 21마리에게 특성을 하나씩 나눠 주고(없음 포함), 판 안 점수 순위·쓰러짐을 비교한다.
-// 모든 곤충을 플레이어처럼(쓰러져도 레벨 유지, 목숨 넉넉히) 두고 봇 AI로 움직인다.
-// 비교용으로 '기술 형태(3가지)'와 '계열'에 따른 차이도 같은 판에서 함께 잰다.
-// 사용: npx tsx scripts/traits.ts [판 수=16]
+// 공용 특성 가치(판 전체): 한 판의 곤충 21마리에게 공용 특성을 하나씩 나눠 주고(없음 포함, 계열 칸은 무작위),
+// 판 안 점수 순위·쓰러짐을 비교한다. 모든 곤충을 플레이어처럼(쓰러져도 레벨 유지, 목숨 넉넉히) 두고 봇 AI로 움직인다.
+// 계열 전용 특성은 1:1 거울 대결(scripts/traitduel.ts)로 잰다.
+// 사용: npx tsx scripts/traits.ts [판 수=16] [시드=9000]
 import { Simulation } from '../src/shared/sim';
 import { botThink } from '../src/shared/bot';
 import { CONFIG } from '../src/shared/config';
 import { FAMILIES, SPECIES } from '../src/shared/species';
-import { TRAITS } from '../src/shared/cards';
+import { COMMON_TRAITS, familyTraits } from '../src/shared/cards';
 
 const G = Number(process.argv[2] ?? 16);
-const OPTS = ['none', ...TRAITS.map((t) => t.id)];
+const SEED = Number(process.argv[3] ?? 9000);
+const OPTS = ['none', ...COMMON_TRAITS.map((t) => t.id)];
 type Rec = { pct: number; deaths: number; lv: number };
 const byTrait = new Map<string, Rec[]>(), byForm = new Map<string, Rec[]>(), byFam = new Map<string, Rec[]>();
 const push = (m: Map<string, Rec[]>, k: string, r: Rec) => (m.get(k) ?? m.set(k, []).get(k)!).push(r);
 for (let g = 0; g < G; g++) {
-  const sim = new Simulation(9000 + g, '나', { power: 1, bots: 20, map: 'random', loadout: { species: SPECIES[0].id, form: FAMILIES[0].forms[0].id, traits: [] } });
+  const sim = new Simulation(SEED + g, '나', { power: 1, bots: 20, map: 'random', loadout: { species: SPECIES[0].id, form: FAMILIES[0].forms[0].id, traits: [] } });
   const deaths = new Map<number, number>();
   const tr = new Map<number, string>(), fm = new Map<number, string>();
   sim.snakes.forEach((s, i) => {
@@ -24,12 +25,8 @@ for (let g = 0; g < G; g++) {
     const form = fam.forms[(i + g) % 3];
     Object.assign(s, { sp: SPECIES.find((x) => x.id === sp) ?? s.sp, fam, form });
     const t = OPTS[(i + g * 5) % OPTS.length];
-    s.traits = new Set(t === 'none' ? [] : [t]);
-    s.autotomy = t === 'autotomy' ? 2 : 0;
-    s.rerolls = CONFIG.rerolls + (t === 'reroll' ? 1 : 0);
-    if (t === 'preheat') s.ult = 30;
-    if (t === 'sprint') s.sprintT = 5;
-    if (t === 'safe') s.safeT = 10;
+    const ft = familyTraits(fam.id);
+    s.traits = new Set([...(t === 'none' ? [] : [t]), ft[(i + g * 7) % ft.length].id]);
     s.isPlayer = true;
     s.lives = 99;
     tr.set(s.id, t), fm.set(s.id, `${fam.id}/${form.id}`);
@@ -61,7 +58,7 @@ for (const k of OPTS) {
   const a = byTrait.get(k) ?? [];
   if (!a.length) continue;
   const p = avg(a.map((r) => r.pct));
-  const name = k === 'none' ? '없음' : TRAITS.find((t) => t.id === k)!.name;
+  const name = k === 'none' ? '없음' : COMMON_TRAITS.find((t) => t.id === k)!.name;
   console.log(`${name}\t${a.length}\t${Math.round(p * 100)}\t${p >= baseP ? '+' : ''}${Math.round((p - baseP) * 100)}\t${avg(a.map((r) => r.deaths)).toFixed(2)}\t${avg(a.map((r) => r.lv)).toFixed(1)}`);
 }
 const se = sd(base.map((r) => r.pct)) / Math.sqrt(base.length);

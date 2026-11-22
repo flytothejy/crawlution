@@ -1,0 +1,622 @@
+{
+ "date": "2026-11-22",
+ "forms": {
+  "rhino": {
+   "charge": {
+    "lv5": {
+     "dmg": 40,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 109,
+     "fx": []
+    }
+   },
+   "lift": {
+    "lv5": {
+     "dmg": 61,
+     "fx": [
+      "기절"
+     ]
+    },
+    "lv10": {
+     "dmg": 151,
+     "fx": [
+      "기절"
+     ]
+    }
+   },
+   "push": {
+    "lv5": {
+     "dmg": 35,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 49,
+     "fx": []
+    }
+   }
+  },
+  "stag": {
+   "grab": {
+    "lv5": {
+     "dmg": 111,
+     "fx": [
+      "잡힘"
+     ]
+    },
+    "lv10": {
+     "dmg": 186,
+     "fx": [
+      "잡힘"
+     ]
+    }
+   },
+   "throw": {
+    "lv5": {
+     "dmg": 74,
+     "fx": [
+      "잡힘",
+      "기절"
+     ]
+    },
+    "lv10": {
+     "dmg": 103,
+     "fx": [
+      "잡힘",
+      "기절"
+     ]
+    }
+   },
+   "scissor": {
+    "lv5": {
+     "dmg": 85,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 255,
+     "fx": []
+    }
+   }
+  },
+  "mantis": {
+   "sweep": {
+    "lv5": {
+     "dmg": 92,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 198,
+     "fx": []
+    }
+   },
+   "stab": {
+    "lv5": {
+     "dmg": 156,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 225,
+     "fx": []
+    }
+   },
+   "combo": {
+    "lv5": {
+     "dmg": 87,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 140,
+     "fx": []
+    }
+   }
+  },
+  "dragonfly": {
+   "dive": {
+    "lv5": {
+     "dmg": 118,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 120,
+     "fx": []
+    }
+   },
+   "snatch": {
+    "lv5": {
+     "dmg": 38,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 90,
+     "fx": [
+      "잡힘"
+     ]
+    }
+   },
+   "circle": {
+    "lv5": {
+     "dmg": 83,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 76,
+     "fx": [
+      "느려짐"
+     ]
+    }
+   }
+  },
+  "wasp": {
+   "burst": {
+    "lv5": {
+     "dmg": 158,
+     "fx": [
+      "중독"
+     ]
+    },
+    "lv10": {
+     "dmg": 260,
+     "fx": [
+      "중독"
+     ]
+    }
+   },
+   "snipe": {
+    "lv5": {
+     "dmg": 183,
+     "fx": [
+      "중독"
+     ]
+    },
+    "lv10": {
+     "dmg": 198,
+     "fx": [
+      "중독"
+     ]
+    }
+   },
+   "spread": {
+    "lv5": {
+     "dmg": 166,
+     "fx": [
+      "중독"
+     ]
+    },
+    "lv10": {
+     "dmg": 208,
+     "fx": [
+      "중독"
+     ]
+    }
+   }
+  },
+  "stinkbug": {
+   "cloud": {
+    "lv5": {
+     "dmg": 30,
+     "fx": [
+      "느려짐"
+     ]
+    },
+    "lv10": {
+     "dmg": 50,
+     "fx": [
+      "느려짐"
+     ]
+    }
+   },
+   "jet": {
+    "lv5": {
+     "dmg": 96,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 137,
+     "fx": [
+      "기술 봉인"
+     ]
+    }
+   },
+   "backjet": {
+    "lv5": {
+     "dmg": 43,
+     "fx": [
+      "느려짐"
+     ]
+    },
+    "lv10": {
+     "dmg": 67,
+     "fx": [
+      "느려짐"
+     ]
+    }
+   }
+  },
+  "spider": {
+   "orb": {
+    "lv5": {
+     "dmg": 24,
+     "fx": [
+      "묶임"
+     ]
+    },
+    "lv10": {
+     "dmg": 75,
+     "fx": [
+      "묶임"
+     ]
+    }
+   },
+   "silk": {
+    "lv5": {
+     "dmg": 84,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 205,
+     "fx": []
+    }
+   },
+   "trail": {
+    "lv5": {
+     "dmg": 24,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 62,
+     "fx": []
+    }
+   }
+  },
+  "antlion": {
+   "pit": {
+    "lv5": {
+     "dmg": 24,
+     "fx": [
+      "느려짐"
+     ]
+    },
+    "lv10": {
+     "dmg": 62,
+     "fx": [
+      "느려짐"
+     ]
+    }
+   },
+   "sand": {
+    "lv5": {
+     "dmg": 99,
+     "fx": [
+      "느려짐"
+     ]
+    },
+    "lv10": {
+     "dmg": 112,
+     "fx": [
+      "느려짐"
+     ]
+    }
+   },
+   "ambush": {
+    "lv5": {
+     "dmg": 103,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 162,
+     "fx": [
+      "기절"
+     ]
+    }
+   }
+  },
+  "bee": {
+   "workers": {
+    "lv5": {
+     "dmg": 116,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 350,
+     "fx": []
+    }
+   },
+   "honey": {
+    "lv5": {
+     "dmg": 35,
+     "fx": []
+    },
+    "lv10": {
+     "dmg": 0,
+     "fx": [
+      "느려짐"
+     ]
+    }
+   },
+   "heatball": {
+    "lv5": {
+     "dmg": 95,
+     "fx": [
+      "느려짐"
+     ]
+    },
+    "lv10": {
+     "dmg": 90,
+     "fx": [
+      "묶임"
+     ]
+    }
+   }
+  },
+  "firefly": {
+   "flash": {
+    "lv5": {
+     "dmg": 29,
+     "fx": [
+      "눈부심"
+     ]
+    },
+    "lv10": {
+     "dmg": 156,
+     "fx": [
+      "눈부심"
+     ]
+    }
+   },
+   "signal": {
+    "lv5": {
+     "dmg": 75,
+     "fx": [
+      "표시"
+     ]
+    },
+    "lv10": {
+     "dmg": 115,
+     "fx": [
+      "표시"
+     ]
+    }
+   },
+   "lantern": {
+    "lv5": {
+     "dmg": 0,
+     "fx": [
+      "느려짐"
+     ]
+    },
+    "lv10": {
+     "dmg": 0,
+     "fx": [
+      "느려짐"
+     ]
+    }
+   }
+  }
+ },
+ "ults": {
+  "rhino": {
+   "dmg": 85,
+   "fx": [
+    "기절"
+   ]
+  },
+  "stag": {
+   "dmg": 116,
+   "fx": [
+    "기절",
+    "잡힘"
+   ]
+  },
+  "mantis": {
+   "dmg": 171,
+   "fx": []
+  },
+  "dragonfly": {
+   "dmg": 82,
+   "fx": []
+  },
+  "wasp": {
+   "dmg": 201,
+   "fx": [
+    "중독"
+   ]
+  },
+  "stinkbug": {
+   "dmg": 155,
+   "fx": [
+    "기술 봉인",
+    "느려짐"
+   ]
+  },
+  "spider": {
+   "dmg": 96,
+   "fx": [
+    "묶임",
+    "중독"
+   ]
+  },
+  "antlion": {
+   "dmg": 31,
+   "fx": [
+    "느려짐"
+   ]
+  },
+  "bee": {
+   "dmg": 100,
+   "fx": [
+    "느려짐"
+   ]
+  },
+  "firefly": {
+   "dmg": 195,
+   "fx": [
+    "눈부심",
+    "표시"
+   ]
+  }
+ },
+ "subs": {
+  "thud": {
+   "dmg": 37,
+   "fx": [
+    "기절"
+   ]
+  },
+  "camo": {
+   "dmg": 0,
+   "fx": []
+  },
+  "hop": {
+   "dmg": 0,
+   "fx": []
+  },
+  "escape": {
+   "dmg": 0,
+   "fx": []
+  },
+  "curl": {
+   "dmg": 0,
+   "fx": []
+  },
+  "reserve": {
+   "dmg": 0,
+   "fx": []
+  },
+  "spit": {
+   "dmg": 15,
+   "fx": [
+    "느려짐"
+   ]
+  },
+  "bait": {
+   "dmg": 15,
+   "fx": [
+    "묶임"
+   ]
+  },
+  "roll": {
+   "dmg": 0,
+   "fx": []
+  },
+  "chirp": {
+   "dmg": 0,
+   "fx": [
+    "기절"
+   ]
+  },
+  "molt": {
+   "dmg": 0,
+   "fx": []
+  },
+  "playdead": {
+   "dmg": 0,
+   "fx": []
+  },
+  "threat": {
+   "dmg": 0,
+   "fx": [
+    "겁먹음"
+   ]
+  },
+  "compound": {
+   "dmg": 36,
+   "fx": []
+  },
+  "alarm": {
+   "dmg": 116,
+   "fx": []
+  },
+  "backplate": {
+   "dmg": 0,
+   "fx": []
+  },
+  "venomfang": {
+   "dmg": 32,
+   "fx": [
+    "기절",
+    "묶임",
+    "기술 봉인"
+   ]
+  },
+  "backstep": {
+   "dmg": 0,
+   "fx": []
+  },
+  "waggle": {
+   "dmg": 0,
+   "fx": []
+  },
+  "bitter": {
+   "dmg": 39,
+   "fx": []
+  }
+ },
+ "famDuel": {
+  "rhino": 65,
+  "stag": 56,
+  "mantis": 51,
+  "dragonfly": 26,
+  "wasp": 64,
+  "stinkbug": 42,
+  "spider": 43,
+  "antlion": 31,
+  "bee": 39,
+  "firefly": 14
+ },
+ "duelGames": 360,
+ "traitDuel": {
+  "sharp": 52,
+  "thickshell": 68,
+  "feather": 44,
+  "hasty": 33,
+  "bigeater": 50,
+  "predator": 43,
+  "loner": 57,
+  "ultfan": 54,
+  "berserk": 65,
+  "stubborn": 63,
+  "heavyhorn": 57,
+  "armor": 63,
+  "flight": 48,
+  "steeljaw": 50,
+  "reach": 50,
+  "duelist": 63,
+  "onescythe": 46,
+  "poise": 57,
+  "hungry": 34,
+  "swift": 39,
+  "eagle": 63,
+  "chase": 63,
+  "toxic": 55,
+  "longsting": 47,
+  "pack": 48,
+  "reek": 39,
+  "plate": 64,
+  "rapid": 58,
+  "venomspider": 57,
+  "widenet": 45,
+  "sticky": 64,
+  "deeppit": 48,
+  "bigjaw": 67,
+  "sandbody": 67,
+  "queen": 46,
+  "honeystore": 48,
+  "resolve": 59,
+  "brightlight": 72,
+  "dark": 43,
+  "spark": 37
+ },
+ "traitField": {
+  "sharp": 10,
+  "thickshell": 0,
+  "feather": 14,
+  "hasty": 4,
+  "bigeater": 14,
+  "predator": 0,
+  "loner": 12,
+  "ultfan": 12,
+  "berserk": 4,
+  "stubborn": 2
+ }
+}

@@ -9,7 +9,7 @@ root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 src_dir = sys.argv[1]
 chars = set(chr(c) for c in range(0x20, 0x7F))
 chars |= set('·…→←↑↓★☆×—–“”‘’%')
-for path in glob.glob(os.path.join(root, 'src/**/*.ts'), recursive=True) + [os.path.join(root, 'index.html')]:
+for path in glob.glob(os.path.join(root, 'src/**/*.ts'), recursive=True) + [os.path.join(root, 'index.html'), os.path.join(root, 'codex.html')]:
     with open(path, encoding='utf-8') as f:
         chars |= set(f.read())
 text = ''.join(sorted(c for c in chars if c >= ' ' and not (0x1F000 <= ord(c) <= 0x1FFFF)))

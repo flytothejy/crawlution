@@ -6,7 +6,7 @@ import { Rng } from './rng';
 import { botThink, bossThink, botPickCard } from './bot';
 import { baseB, biteOf, maxHpOf } from './combat';
 import { Enemies } from './enemies';
-import { ABILITIES, ABILITY_BY_ID, BONUS_CARDS, type LevelCard } from './cards';
+import { ABILITIES, ABILITY_BY_ID, BONUS_CARDS, type LevelCard, traitMod, hasSpecial, COMMON_TRAITS, familyTraits } from './cards';
 import { COMMON_SUBS, FAMILIES, FAMILY, SPECIAL_FOODS, SPECIES, SPECIES_BY_ID, taste, type Family, type FormDef, type Species, type SubDef } from './species';
 import * as SK from './skills';
 import {
@@ -176,6 +176,10 @@ export interface Snake {
   autotomy: number;
   safeT: number; // 안전한 출발
   sprintT: number; // 질주 출발
+  poiseAcc: number; // 매복 자세·빛 끄기: 웅크린 시간
+  poised: boolean; // 매복 자세: 다음 주 기술 +50%
+  chaseT: number; // 끈질긴 추격: 빨라진 시간
+  crowd: number; // 가까운 다른 곤충 수(외톨이·싸움꾼 기질)
   // 봇
   persona: Personality;
   hunter: boolean;
@@ -349,7 +353,7 @@ export class Simulation {
       const fam = this.pickBotFamily(famCount);
       famCount.set(fam.id, (famCount.get(fam.id) ?? 0) + 1);
       const bsp = SPECIES_BY_ID.get(this.rng.pick(fam.species))!;
-      const b = this.makeSnake(i + 1, BOT_NAMES[i % BOT_NAMES.length], false, bsp, this.rng.pick(fam.forms).id, this.botTraits());
+      const b = this.makeSnake(i + 1, BOT_NAMES[i % BOT_NAMES.length], false, bsp, this.rng.pick(fam.forms).id, this.botTraits(fam));
       this.snakes.push(b);
       this.respawnBot(b, 1);
     }
@@ -368,12 +372,9 @@ export class Simulation {
     return this.rng.pick(pool.filter((f) => (count.get(f.id) ?? 0) === min));
   }
 
-  private botTraits(): string[] {
-    const all = ['molt', 'sense', 'reroll', 'sprint', 'four', 'subplus', 'fastrespawn', 'preheat', 'autotomy', 'keep', 'safe'];
-    const a = this.rng.pick(all);
-    let b = this.rng.pick(all);
-    while (b === a) b = this.rng.pick(all);
-    return [a, b];
+  /** 봇 특성: 공용 1 + 계열 전용 1 */
+  botTraits(fam: Family): string[] {
+    return [this.rng.pick(COMMON_TRAITS).id, this.rng.pick(familyTraits(fam.id)).id];
   }
 
   /** 지형: 바위(부딪히면 튕김)와 웅덩이(느려짐) */
@@ -443,7 +444,7 @@ export class Simulation {
       decoyT: 0, decoyX: 0, decoyY: 0,
       crouchT: 0, notBoostT: 0, prayArmed: false, braceCd: 0, fierceCd: 0, thinCd: 0, sapCd: 0, buzzCd: 0, longLifeUsed: false, store: 0, pack: 0,
       patrolX: 0, patrolY: 0, patrolT: 0, nestCd: 0, crisisCd: 0, crisisT: 0, alertT: 0, acroT: 0, senseT: 0, sapT: 0,
-      autotomy: traits.includes('autotomy') ? 2 : 0, safeT: 0, sprintT: 0,
+      autotomy: 0, safeT: 0, sprintT: 0, poiseAcc: 0, poised: false, chaseT: 0, crowd: 0,
       persona, hunter: persona === 'hunter', side: this.rng.next() < 0.5 ? -1 : 1, modeT: 0, hunting: false, wanderX: 0, wanderY: 0, cardDelay: 0,
       react: 0.4, thinkAcc: 0, lastAct: '', lastActT: 0,
     };
@@ -461,6 +462,14 @@ export class Simulation {
     return !s.isBoss && s.sp.instinct.id === id;
   }
 
+  /** 특성 배율(곱하는 값, minion·respawn은 더하는 값) */
+  tm(s: Snake, k: Parameters<typeof traitMod>[1]) {
+    return s.isBoss ? (k === 'minion' || k === 'respawn' ? 0 : 1) : traitMod(s.traits, k);
+  }
+  tsp(s: Snake, sp: Parameters<typeof hasSpecial>[1]) {
+    return !s.isBoss && hasSpecial(s.traits, sp);
+  }
+
   fighter(s: Snake) {
     return { level: s.level, stage: s.evo, family: s.isBoss ? null : s.fam.id, isBoss: s.isBoss };
   }
@@ -474,6 +483,8 @@ export class Simulation {
     if (s.isBoss) return CONFIG.bossSpeed;
     let v = (CONFIG.baseSpeed + CONFIG.speedPerLevel * (s.level - 1) + CONFIG.evoSpeed[s.evo]) * s.fam.spd * (1 + this.ab(s, 'light'));
     if (this.inst(s, 'slim')) v *= 1.06;
+    v *= this.tm(s, 'spd');
+    if (s.chaseT > 0) v *= 1.2;
     return v;
   }
 
@@ -484,14 +495,14 @@ export class Simulation {
     cd *= 1 - this.ab(s, 'focus');
     if (s.mainLv >= 2) cd *= 0.85;
     if (s.fam.id === 'firefly') cd *= 1 - this.ab(s, 'blink');
-    return cd;
+    return cd * this.tm(s, 'cd');
   }
 
   subCdMax(s: Snake) {
     if (!s.sub) return 0;
     let cd = s.sub.cd;
     if (s.fam.id === 'firefly' && s.sub.id === s.fam.sub.id) cd *= 1 - this.ab(s, 'blink');
-    return cd;
+    return cd * this.tm(s, 'subCd');
   }
 
   /** 잠자리 수채 단계: 주 기술이 '아랫입술 발사' */
@@ -504,6 +515,8 @@ export class Simulation {
     let m = 1;
     if (s.mainLv >= 1) m *= 1.15;
     m *= 1 + this.ab(s, 'hone');
+    m *= this.tm(s, 'main');
+    if (s.poised) m *= 1.5;
     return m;
   }
 
@@ -511,6 +524,7 @@ export class Simulation {
   rangeMul(s: Snake, sub = false) {
     let m = 1 + this.ab(s, 'wide');
     if (sub && s.subLv >= 1) m *= 1.3;
+    if (!sub) m *= this.tm(s, 'range');
     return m;
   }
 
@@ -526,7 +540,7 @@ export class Simulation {
       return;
     }
     s.r = radiusFor(s.evo, s.segCount, this.inst(s, 'slim') ? 0.82 : 1);
-    s.maxHp = maxHpOf(this.fighter(s), s.segCount, this.inst(s, 'slim') ? 0.9 : 1);
+    s.maxHp = maxHpOf(this.fighter(s), s.segCount, (this.inst(s, 'slim') ? 0.9 : 1) * this.tm(s, 'hp'));
     if (s.hp > s.maxHp) s.hp = s.maxHp;
   }
 
@@ -598,9 +612,9 @@ export class Simulation {
 
   /** 판 시작·부활 때 특성 효과 */
   private startBonus(s: Snake) {
-    if (s.traits.has('preheat')) s.ult = Math.max(s.ult, 30);
-    if (s.traits.has('sprint')) s.sprintT = 5;
-    if (s.traits.has('safe')) s.safeT = 10;
+    s.poiseAcc = 0;
+    s.poised = false;
+    s.chaseT = 0;
   }
 
   /** 봇 등장: 판 진행에 맞는 레벨로(중간에 들어오면 판 평균 레벨 − 2) */
@@ -619,11 +633,10 @@ export class Simulation {
     b.pending = 0;
     b.subPending = false;
     b.newGiven = 0;
-    b.rerolls = CONFIG.rerolls + (b.traits.has('reroll') ? 1 : 0);
+    b.rerolls = CONFIG.rerolls;
     b.ult = 0;
     b.store = b.pack = 0;
     b.longLifeUsed = false;
-    b.autotomy = b.traits.has('autotomy') ? 2 : 0;
     // 난이도: 반응 지연 0.2 / 0.4 / 0.6초
     b.react = this.rng.pick([0.2, 0.4, 0.4, 0.6]);
     this.clearStatus(b);
@@ -753,6 +766,14 @@ export class Simulation {
       this.tick++;
       return;
     }
+    // 0) 외톨이·싸움꾼 기질: 가까운(450) 다른 곤충 수를 0.25초마다 센다
+    if (this.tick % 15 === 0)
+      for (const s of this.snakes) {
+        if (!this.onField(s) || !(this.tsp(s, 'loner') || this.tsp(s, 'duelist'))) continue;
+        let n = 0;
+        for (const o of this.snakes) if (o !== s && !o.isBoss && this.onField(o) && Math.hypot(o.x - s.x, o.y - s.y) < 450) n++;
+        s.crowd = n;
+      }
     // 1) 봇·왕지네 생각 → 명령(봇은 3틱마다, 서로 엇갈려)
     for (const s of this.snakes) {
       if (!this.onField(s) || s.isPlayer) continue;
@@ -823,10 +844,6 @@ export class Simulation {
     const e0 = this.enemies;
     if (e0.phase === 'warn' && this.lastPhase !== 'warn') for (const s of this.snakes) if (s.alive && !s.isBoss && this.ab(s, 'alert') > 0) s.alertT = this.ab(s, 'alert');
     this.lastPhase = e0.phase;
-    const p = this.snakes[this.playerId];
-    if (!p.traits.has('sense')) return;
-    const e = this.enemies;
-    if (e.phase === 'idle' && e.next - this.time <= 2 && e.next - this.time > 2 - this.dt * 1.5) this.events.push({ type: 'enemySoon', kind: 'bird' });
   }
 
   private endRound(timeUp: boolean) {
@@ -841,7 +858,7 @@ export class Simulation {
   /** 먹이: 영양 + 성장(길수록 느림) + 체력 회복 */
   feed(s: Snake, ep: number, heal = true) {
     if (s.isBoss) return;
-    const nut = ep * CONFIG.nutMul * (1 + this.ab(s, 'glutton'));
+    const nut = ep * CONFIG.nutMul * (1 + this.ab(s, 'glutton')) * this.tm(s, 'nut') * (this.tsp(s, 'loner') && s.crowd === 0 ? 1.12 : 1);
     s.totalNut += nut;
     s.growth += (ep * CONFIG.evoGrowth[s.evo]) / (1 + s.segCount / CONFIG.growthSlowLen);
     while (s.growth >= 1) {
@@ -849,7 +866,7 @@ export class Simulation {
       s.segCount++;
     }
     this.updateSize(s);
-    if (heal) s.hp = Math.min(s.maxHp, s.hp + ep * CONFIG.foodHeal);
+    if (heal) s.hp = Math.min(s.maxHp, s.hp + ep * CONFIG.foodHeal * this.tm(s, 'heal') * (this.tsp(s, 'berserk') ? 0.5 : 1));
     // 양봉꿀벌: 먹이의 일부를 꿀로 저장(최대 체력의 30%까지)
     if (this.inst(s, 'store')) s.store = Math.min(s.maxHp * 0.3, s.store + ep * 0.6);
     if (this.inst(s, 'trash')) s.pack = Math.min(1, s.pack + ep / 60);
@@ -880,7 +897,6 @@ export class Simulation {
     if (s.evo >= 2 && !s.sub) s.subPending = true;
     this.fullHeal(s);
     this.rebuildSegs(s);
-    if (s.traits.has('molt')) s.invulnT = Math.max(s.invulnT, 2);
     s.offer = null; // 보조 기술 고르기가 먼저
     this.events.push({ type: 'evolve', snake: s.id, stage: s.evo, x: s.x, y: s.y });
   }
@@ -888,7 +904,7 @@ export class Simulation {
   /** 카드 3장(특성 '첫 카드 4장': 레벨 2·3에서 4장) */
   makeOffer(s: Snake, reroll = false) {
     if (s.subPending && s.evo >= 2) {
-      const n = s.traits.has('subplus') ? 4 : 3;
+      const n = 3;
       const roleOk = COMMON_SUBS.filter((c) => c.roles?.includes(s.fam.role));
       const other = COMMON_SUBS.filter((c) => !c.roles?.includes(s.fam.role));
       const picked: string[] = [s.fam.sub.id];
@@ -910,7 +926,7 @@ export class Simulation {
       return;
     }
     const cardLv = s.level - s.pending + 1; // 이 카드가 몇 레벨의 카드인지
-    const four = s.traits.has('four') && cardLv >= 2 && cardLv <= 3;
+    const four = false;
     const n = four ? 4 : 3;
     // 후보 모으기: 가중치(계열 전용 2배, 역할 추천 1.5배)
     const cands: { c: LevelCard; w: number }[] = [];
@@ -1050,6 +1066,7 @@ export class Simulation {
 
   addUlt(s: Snake, v: number) {
     if (s.isBoss || v <= 0) return;
+    v *= this.tm(s, 'gauge');
     const was = s.ult;
     s.ult = Math.min(CONFIG.ultMax, s.ult + v);
     if (was < CONFIG.ultMax && s.ult >= CONFIG.ultMax) this.events.push({ type: 'ultReady', snake: s.id });
@@ -1063,6 +1080,8 @@ export class Simulation {
     this.mark(s, 'main');
     SK.castMain(this, s);
     s.prayArmed = false;
+    s.poised = false;
+    s.poiseAcc = 0;
   }
 
   private castSub(s: Snake) {
@@ -1134,6 +1153,7 @@ export class Simulation {
   }
 
   addMinion(owner: Snake, kind: 'bee' | 'wasp', life: number, dps: number, heat = false) {
+    dps *= this.tm(owner, 'minionDmg');
     const a = this.rng.range(0, Math.PI * 2);
     this.minions.push({ x: owner.x + Math.cos(a) * 30, y: owner.y + Math.sin(a) * 30, angle: a, owner: owner.id, life, hp: owner.maxHp * 0.08, dps, speed: 330, target: -1, kind, acc: 0, heat, ult: null });
   }
@@ -1194,11 +1214,6 @@ export class Simulation {
   }
   root(o: Snake, t: number, by?: Snake) {
     if (o.isBoss || o.invulnT > 0) return;
-    if (o.traits.has('autotomy') && o.autotomy > 0) {
-      o.autotomy--;
-      this.events.push({ type: 'pop', snake: o.id, x: o.x, y: o.y - 30, text: '다리 자르기!', color: 0xffe066 });
-      return;
-    }
     if (this.inst(o, 'thin') && o.thinCd <= 0) {
       o.thinCd = 20;
       this.events.push({ type: 'pop', snake: o.id, x: o.x, y: o.y - 30, text: '빠져나감!', color: 0x9adfff });
@@ -1225,7 +1240,7 @@ export class Simulation {
   /** 밀치기·끌어당기기: 0.3초쯤에 걸쳐 dist만큼 미끄러진다 */
   knock(o: Snake, angle: number, dist: number) {
     if (o.invulnT > 0 && dist > 0) return;
-    const k = o.isBoss ? 0.25 : o.fam.knockTaken;
+    const k = o.isBoss ? 0.25 : o.fam.knockTaken * this.tm(o, 'knock');
     const v = dist * k * 8;
     o.kvx += Math.cos(angle) * v;
     o.kvy += Math.sin(angle) * v;
@@ -1238,11 +1253,6 @@ export class Simulation {
   /** 잡기(사슴벌레) */
   grab(a: Snake, o: Snake, t: number, kind: string) {
     if (o.isBoss || o.invulnT > 0 || a.grabTarget >= 0) return false;
-    if (o.traits.has('autotomy') && o.autotomy > 0) {
-      o.autotomy--;
-      this.events.push({ type: 'pop', snake: o.id, x: o.x, y: o.y - 30, text: '다리 자르기!', color: 0xffe066 });
-      return false;
-    }
     if (this.inst(o, 'thin') && o.thinCd <= 0) {
       o.thinCd = 20;
       this.events.push({ type: 'pop', snake: o.id, x: o.x, y: o.y - 30, text: '빠져나감!', color: 0x9adfff });
@@ -1299,6 +1309,10 @@ export class Simulation {
         this.events.push({ type: 'pop', snake: a.id, x, y: y - 30, text: '치명타!', color: 0xff7a1a });
       }
       if (a.compoundT > 0) d *= 1.15;
+      d *= this.tm(a, 'dmg');
+      if (this.tsp(a, 'berserk') && a.hp < a.maxHp * 0.4) d *= 1.3;
+      if (this.tsp(a, 'duelist')) d *= a.crowd === 1 ? 1.18 : a.crowd >= 2 ? 0.9 : 1;
+      if (this.tsp(a, 'sticky') && (t.rootT > 0 || t.slowT > 0)) d *= 1.25;
       if (a.crisisT > 0) d *= 1 + this.ab(a, 'crisis');
       if (t.hp < t.maxHp * 0.3) d *= 1 + this.ab(a, 'eye');
       if (this.inst(a, 'patrol') && Math.hypot(a.x - a.patrolX, a.y - a.patrolY) < 320 && a.patrolT > 2) d *= 1.2;
@@ -1316,6 +1330,7 @@ export class Simulation {
     }
     const dealt = this.damage(t, d, a.id, kind, x, y, cause);
     if (ult) ult.set(t.id, (ult.get(t.id) ?? 0) + dealt);
+    if (dealt > 0 && (kind === 'skill' || kind === 'ult') && this.tsp(a, 'chase')) a.chaseT = 2;
     if (dealt > 0 && !a.isBoss && kind !== 'ult' && !ult) this.addUlt(a, (dealt / this.B(a)) * CONFIG.ultDealt);
     return dealt;
   }
@@ -1340,6 +1355,9 @@ export class Simulation {
     let d = amount;
     if (!t.isBoss) {
       d *= 1 - this.ab(t, 'shell');
+      d *= this.tm(t, 'taken');
+      if (this.tsp(t, 'loner') && t.crowd >= 2) d *= 1.2;
+      if (this.tsp(t, 'sandbody') && t.sneaking) d *= 0.7;
       if (t.reduceT > 0) d *= t.reduceMul;
       if (t.curlT > 0) d *= 0.4;
       if (t.acroT > 0) d *= 1 - this.ab(t, 'acro');
@@ -1470,6 +1488,18 @@ export class Simulation {
     s.markT = dec(s.markT);
     s.fearT = dec(s.fearT);
     s.hiddenT = dec(s.hiddenT);
+    s.chaseT = dec(s.chaseT);
+    // 매복 자세·빛 끄기: 웅크린 채 1.5초
+    if (s.sneaking && (this.tsp(s, 'poise') || this.tsp(s, 'dark'))) {
+      s.poiseAcc += dt;
+      if (s.poiseAcc >= 1.5) {
+        if (this.tsp(s, 'poise') && !s.poised) {
+          s.poised = true;
+          this.events.push({ type: 'pop', snake: s.id, x: s.x, y: s.y - 30, text: '매복!', color: 0x9be36a });
+        }
+        if (this.tsp(s, 'dark')) s.hiddenT = Math.max(s.hiddenT, 0.2);
+      }
+    } else s.poiseAcc = 0;
     s.ghostT = dec(s.ghostT);
     s.reduceT = dec(s.reduceT);
     if (s.reduceT <= 0) s.reduceMul = 1;
@@ -1562,7 +1592,7 @@ export class Simulation {
   /** 중독(진한 독 카드 반영) */
   poison(by: Snake, o: Snake, t: number, dps: number) {
     if (o.invulnT > 0) return;
-    const mul = 1 + (by.fam.id === 'wasp' ? this.ab(by, 'toxin') : 0);
+    const mul = (1 + (by.fam.id === 'wasp' ? this.ab(by, 'toxin') : 0)) * this.tm(by, 'poison');
     o.poisonT = Math.max(o.poisonT, t);
     o.poisonDps = Math.max(o.poisonT > 0 && o.poisonBy === by.id ? o.poisonDps : 0, dps * mul);
     o.poisonBy = by.id;
@@ -1591,7 +1621,7 @@ export class Simulation {
     let speed = this.speedOf(s);
     if (!s.isBoss) {
       if (s.yuckT > 0) speed *= CONFIG.yuckMul;
-      if (s.boosting) speed *= CONFIG.boostMul;
+      if (s.boosting) speed *= CONFIG.boostMul * this.tm(s, 'boost');
       else if (s.sneaking) speed *= CONFIG.sneakMul;
       if (s.dashT > 0) speed *= s.dashMul;
       if (s.evolveT > 0) speed *= 0.5;
@@ -1613,8 +1643,9 @@ export class Simulation {
       if (this.inst(s, 'bigwing')) drain *= 0.5;
       if (s.sprintT > 0) drain = 0;
       s.boostAcc += dt * drain;
-      if (s.boostAcc >= CONFIG.boostDropInterval) {
-        s.boostAcc -= CONFIG.boostDropInterval;
+      const dropI = CONFIG.boostDropInterval / this.tm(s, 'boostDrop');
+      if (s.boostAcc >= dropI) {
+        s.boostAcc -= dropI;
         const tx = s.segs[(s.segN - 1) * 2], ty = s.segs[(s.segN - 1) * 2 + 1];
         s.segCount--;
         this.updateSize(s);
@@ -1884,6 +1915,8 @@ export class Simulation {
     let dmg = biteOf(this.fighter(a));
     if (!a.isBoss) {
       dmg *= 1 + this.ab(a, 'jaw');
+      dmg *= this.tm(a, 'bite');
+      if (a.hiddenT > 0 && this.tsp(a, 'dark')) dmg *= 1.4;
       dmg *= a.nextBite;
       a.nextBite = 1;
     }
@@ -1895,6 +1928,9 @@ export class Simulation {
     const bitterB = b.bitterT > 0;
     const dealt = this.deal(a, b, dmg, crit ? 'crit' : 'bite', x, y, 'bite');
     if (!a.isBoss && dealt > 0) {
+      if (this.tsp(a, 'hungry')) a.hp = Math.min(a.maxHp, a.hp + dealt * 0.25);
+      if (this.tsp(a, 'venombite') && b.alive) this.poison(a, b, 2, this.B(a) * 0.12);
+      if (this.tsp(a, 'spark') && b.alive) this.markOn(b, 2);
       const vamp = this.ab(a, 'vamp');
       if (vamp > 0) a.hp = Math.min(a.maxHp, a.hp + dealt * vamp);
       const ven = this.ab(a, 'venom');
@@ -2072,6 +2108,7 @@ export class Simulation {
     const killer = by >= 0 && by !== s.id ? this.snakes[by] : null;
     if (killer) {
       killer.kills++;
+      if (this.tsp(killer, 'hunter')) ((killer.hp = Math.min(killer.maxHp, killer.hp + killer.maxHp * 0.4)), this.addUlt(killer, 20));
       this.addUlt(killer, CONFIG.ultKill);
       if (killer.fam.id === 'mantis' && this.ab(killer, 'hunter') > 0) killer.skillCd *= 1 - this.ab(killer, 'hunter');
     }
@@ -2085,16 +2122,16 @@ export class Simulation {
       return;
     }
     // 잃는 것: 모으던 영양(영양 보관: 절반 지킴), 필살기 게이지
-    s.nut = s.traits.has('keep') ? s.nut / 2 : 0;
+    s.nut = this.tsp(s, 'keepnut') ? s.nut : 0;
     s.ult = 0;
     if (s.isPlayer) {
       s.lives--;
-      s.respawnT = CONFIG.respawnDelay - (s.traits.has('fastrespawn') ? 1 : 0);
+      s.respawnT = CONFIG.respawnDelay + this.tm(s, 'respawn');
       if (s.lives > 0) this.events.push({ type: 'lifeLost', lives: s.lives });
       else this.endRound(false);
       return;
     }
-    s.respawnT = CONFIG.botRespawnDelay;
+    s.respawnT = CONFIG.botRespawnDelay + this.tm(s, 'respawn');
   }
 
   // ---------- 상태 보내기 ----------
@@ -2130,7 +2167,7 @@ export class Simulation {
     this.events = [];
     const offer = p.offer ? { kind: p.offer.kind, cards: p.offer.cards.map((c) => this.cardView(p, c)) } : null;
     const marks: { x: number; y: number }[] = [];
-    if (p.traits.has('map') || p.lastAct === 'sub' && p.sub?.id === 'waggle' && this.time - p.lastActT < 6) {
+    if (p.lastAct === 'sub' && p.sub?.id === 'waggle' && this.time - p.lastActT < 6) {
       for (const f of this.foods) if (f.kind === 3 || (f.kind === 4 && taste(p.fam.id, f.sub) > 0)) marks.push({ x: f.x, y: f.y });
     }
     const minions: MinionView[] = this.minions.map((m) => ({ x: m.x, y: m.y, angle: m.angle, owner: m.owner, kind: m.kind }));

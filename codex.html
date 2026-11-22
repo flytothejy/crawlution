@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>크롤루션 도감 · 2판 시험판</title>
+    <style>
+      :root {
+        --ink: #1b2a12;
+        --gold: #ffd23f;
+        --paper: #fff8dc;
+        --ui: 'Jua', system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+        --title: 'BlackHan', 'Jua', system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { margin: 0; background: #1f3a1c; font-family: var(--ui); color: #fff; }
+      body { background: radial-gradient(ellipse at top, #2f5a26, #1a3016 70%); min-height: 100vh; padding-bottom: 40px; }
+      button, select { font-family: inherit; }
+      .hidden { display: none !important; }
+      header { padding: calc(10px + env(safe-area-inset-top)) 12px 4px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      header h1 { margin: 0; font-family: var(--title); font-weight: normal; font-size: 26px; color: var(--gold); text-shadow: 0 2px 0 var(--ink), 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 -2px 0 var(--ink), 0 4px 0 rgba(0, 0, 0, 0.35); }
+      header small { color: #cfe3b8; font-size: 12px; }
+      nav { position: sticky; top: 0; z-index: 5; display: flex; gap: 4px; padding: 6px 8px; overflow-x: auto; background: rgba(20, 36, 16, 0.92); backdrop-filter: blur(4px); border-bottom: 2px solid rgba(255, 255, 255, 0.1); scrollbar-width: none; }
+      nav button { flex: none; border: 2.5px solid var(--ink); border-radius: 12px; background: #3d6a2e; color: #fff; padding: 6px 11px; font-size: 14px; box-shadow: 0 3px 0 var(--ink); }
+      nav button.on { background: var(--gold); color: var(--ink); }
+      main { max-width: 760px; margin: 0 auto; padding: 8px; }
+      .row { display: flex; gap: 6px; overflow-x: auto; padding: 4px 2px 8px; scrollbar-width: none; }
+      .chip { flex: none; border: 2px solid var(--ink); border-radius: 999px; background: var(--paper); color: var(--ink); padding: 4px 10px; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; }
+      .chip.on { background: var(--gold); box-shadow: 0 0 0 2px #fff; }
+      .chip.sp img { width: 24px; height: 24px; margin: -3px 0 -3px -6px; }
+      .chip.tog { background: #d8e8c8; }
+      .fc { flex: none; width: 76px; border: 2.5px solid var(--ink); border-radius: 14px; background: color-mix(in srgb, var(--c) 35%, #fff8dc); color: var(--ink); padding: 3px 2px 5px; display: flex; flex-direction: column; align-items: center; box-shadow: 0 3px 0 var(--ink); }
+      .fc img { width: 60px; height: 60px; }
+      .fc b { font-weight: normal; font-size: 13px; }
+      .fc small { font-size: 10.5px; opacity: 0.8; }
+      .fc.on { background: var(--gold); box-shadow: 0 0 0 2.5px #fff, 0 3px 0 var(--ink); }
+      #hero { display: flex; gap: 10px; align-items: center; background: rgba(0, 0, 0, 0.25); border-radius: 16px; padding: 8px; border: 2px solid rgba(255, 255, 255, 0.12); }
+      #hero .pic { flex: none; width: 86px; height: 86px; border-radius: 18px; border: 3px solid var(--ink); background: radial-gradient(circle, #fff8dc, color-mix(in srgb, var(--c) 60%, #fff)); }
+      #hero .pic img { width: 100%; height: 100%; }
+      #hero .nm { font-family: var(--title); font-size: 22px; color: var(--gold); }
+      #hero .nm small { font-family: var(--ui); font-size: 13px; color: #cfe3b8; }
+      #hero .rl { font-size: 13px; color: #dfeccf; }
+      #hero .inst { font-size: 13px; margin-top: 3px; }
+      #hero .inst b { color: #b9f58f; font-weight: normal; }
+      #hero .fact { font-size: 11.5px; color: #b8c9a6; margin-top: 3px; }
+      #stageWrap { margin-top: 8px; scroll-margin-top: 48px; }
+      #stage { position: relative; width: 100%; height: min(52vh, 340px); border-radius: 16px; overflow: hidden; border: 3px solid var(--ink); box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35); }
+      #stage canvas { display: block; }
+      #now { position: absolute; left: 8px; right: 8px; top: 8px; pointer-events: none; z-index: 2; }
+      #now b { display: inline-block; font-size: 17px; background: rgba(27, 42, 18, 0.8); padding: 2px 9px; border-radius: 10px; }
+      #now small { display: block; margin-top: 3px; font-size: 12px; color: #eef6e2; text-shadow: 0 1px 2px #000; max-width: 92%; }
+      #acts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 6px; }
+      .act { border: 2.5px solid var(--ink); border-radius: 12px; background: var(--paper); color: var(--ink); font-size: 20px; padding: 4px 2px 5px; display: flex; flex-direction: column; align-items: center; box-shadow: 0 3px 0 var(--ink); }
+      .act small { font-size: 11.5px; line-height: 1.1; }
+      .act.sub { background: #d9ecff; }
+      .act.ult { background: #ffd9a8; }
+      .act.on { background: var(--gold); box-shadow: 0 0 0 2px #fff, 0 3px 0 var(--ink); }
+      #commonSub { grid-column: span 2; border: 2.5px solid var(--ink); border-radius: 12px; background: #e8f3dc; color: var(--ink); font-size: 13px; padding: 4px; }
+      section { margin-top: 10px; background: rgba(0, 0, 0, 0.22); border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 8px 10px; }
+      h3 { margin: 0 0 6px; font-weight: normal; font-size: 17px; color: var(--gold); }
+      h3 small { font-size: 11.5px; color: #c4d6b0; margin-left: 4px; }
+      .mults > div { display: grid; grid-template-columns: 62px 1fr 42px; align-items: center; gap: 6px; font-size: 13px; margin: 2px 0; }
+      .mults em { font-style: normal; color: #dfeccf; }
+      .mults span { text-align: right; }
+      .bar { display: block; height: 10px; border-radius: 6px; background: rgba(0, 0, 0, 0.4); overflow: hidden; border: 1.5px solid var(--ink); }
+      .bar b { display: block; height: 100%; background: linear-gradient(90deg, #8ee05a, #ffd23f); }
+      table { border-collapse: collapse; width: 100%; font-size: 13px; }
+      table.lv { margin-top: 6px; }
+      th, td { padding: 4px 5px; text-align: center; border-bottom: 1px solid rgba(255, 255, 255, 0.1); white-space: nowrap; }
+      th { color: #cfe3b8; font-weight: normal; font-size: 12px; }
+      .note { font-size: 11.5px; color: #b8c9a6; margin: 6px 0 0; line-height: 1.4; }
+      .sk, .ab, .tr { background: var(--paper); color: var(--ink); border: 2.5px solid var(--ink); border-radius: 14px; padding: 6px 9px; margin: 6px 0; box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3); }
+      .sk { border-left: 8px solid var(--c); }
+      .sk.ult { background: #fff0d6; }
+      .sk p, .ab p { margin: 3px 0; font-size: 13px; line-height: 1.35; }
+      .sk .aw { color: #8a5a00; font-size: 12px; }
+      .hd { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+      .hd b { font-weight: normal; font-size: 15.5px; margin-right: auto; }
+      .pl { border: 2px solid var(--ink); border-radius: 10px; background: #8ee05a; color: var(--ink); font-size: 13px; padding: 2px 9px; box-shadow: 0 2px 0 var(--ink); }
+      .kv { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+      .kv span { font-size: 11.5px; background: rgba(27, 42, 18, 0.1); border-radius: 8px; padding: 1px 7px; }
+      section > .kv span { background: rgba(255, 255, 255, 0.12); font-size: 13px; }
+      .kv .lk { color: #b9f58f; }
+      .kv .ht { color: #ffb0a0; }
+      .tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+      .tag { font-size: 11px; background: #e3d4ff; border-radius: 8px; padding: 0 6px; }
+      .badge { font-size: 11px; background: #5a8ad8; color: #fff; border-radius: 8px; padding: 1px 6px; }
+      .badge.g { background: #6b8f4a; }
+      .spgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .spc { display: flex; gap: 6px; align-items: center; background: var(--paper); color: var(--ink); border: 2px solid var(--ink); border-radius: 12px; padding: 4px 6px; }
+      .spc.on { background: var(--gold); }
+      .spc img { width: 46px; height: 46px; flex: none; }
+      .spc b { font-weight: normal; font-size: 13.5px; display: block; }
+      .spc small { font-size: 11px; line-height: 1.25; display: block; }
+      .spc em { font-style: normal; color: #2f7a1f; }
+      .trgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .tr { margin: 0; position: relative; }
+      .tr b { font-weight: normal; font-size: 14px; display: block; padding-right: 40px; }
+      .tr small { display: block; font-size: 11.5px; line-height: 1.3; }
+      .tr .up { color: #2f7a1f; }
+      .tr .dn { color: #b0392b; }
+      .tr .ms { color: #6a5a2a; }
+      .wr { position: absolute; right: 6px; top: 5px; font-size: 12px; background: #e9e2c6; color: var(--ink); border-radius: 8px; padding: 0 6px; }
+      h3 .wr { position: static; }
+      .wr.hi { background: #ffcf8a; }
+      .wr.lo { background: #c9dbff; }
+      .abgrid { display: grid; grid-template-columns: 1fr; gap: 0; }
+      .ab ol { margin: 3px 0 0; padding-left: 20px; font-size: 12.5px; }
+      .scroll { overflow-x: auto; }
+      table.cmp td.nm { text-align: left; display: flex; align-items: center; gap: 4px; }
+      table.cmp td.nm img { width: 28px; height: 28px; }
+      table.cmp td.nm small { opacity: 0.7; }
+      table.cmp th[data-k] { cursor: pointer; text-decoration: underline dotted; }
+      table.cmp th.on { color: var(--gold); }
+      table.cmp td.mx { color: #ffcf6a; }
+      table.cmp td.mn { color: #9ac0ff; }
+      table.cmp tr[data-f] { cursor: pointer; }
+      table.cmp td.fm { font-size: 11.5px; white-space: normal; min-width: 76px; }
+      table.cmp td.fm b { display: block; font-weight: normal; font-size: 15px; color: var(--gold); }
+      @media (min-width: 640px) {
+        .abgrid { grid-template-columns: 1fr 1fr; gap: 0 8px; }
+        .trgrid { grid-template-columns: 1fr 1fr 1fr; }
+        #acts { grid-template-columns: repeat(6, 1fr); }
+      }
+    </style>
+  </head>
+  <body>
+    <header><h1>크롤루션 도감</h1><small>2판 시험판 · 10계열 40종 · <span id="date"></span></small></header>
+    <nav>
+      <button data-t="crawler" class="on">🐞 크롤러</button>
+      <button data-t="compare">📊 한눈에 비교</button>
+      <button data-t="traits">🎒 특성</button>
+      <button data-t="cards">🃏 능력 카드</button>
+      <button data-t="subs">🧩 공용 보조 기술</button>
+    </nav>
+    <main>
+      <div id="t-crawler" class="tab">
+        <div class="row" id="roles"></div>
+        <div class="row" id="fams"></div>
+        <div id="hero"></div>
+        <div id="stageWrap">
+          <div id="stage"><div id="now"></div></div>
+          <div class="row" id="stages"></div>
+          <div class="row" id="sps"></div>
+          <div id="acts"></div>
+        </div>
+        <div id="info"></div>
+      </div>
+      <div id="t-compare" class="tab hidden">
+        <section><h3>계열 능력치 <small>제목을 누르면 정렬 · 줄을 누르면 그 계열로</small></h3><div class="scroll" id="cmp"></div>
+          <p class="note">체력·물기·B는 몸 길이 20마디, 카드 없이. 1:1 승률은 같은 레벨 8 봇끼리(기술 형태 섞어서).</p></section>
+        <section><h3>기술 실측 피해</h3><div class="scroll" id="cmpForms"></div>
+          <p class="note">피해가 0인 형태는 묶기·회복·표시처럼 피해 말고 효과를 주는 기술이다. 필살기는 한 대상에 최대 체력 40%까지.</p></section>
+      </div>
+      <div id="t-traits" class="tab hidden"><div id="traitsBox"></div></div>
+      <div id="t-cards" class="tab hidden"><div id="cardsBox"></div></div>
+      <div id="t-subs" class="tab hidden"><div id="subsBox"></div></div>
+    </main>
+    <script type="module" src="/src/codex/main.ts"></script>
+  </body>
+</html>

@@ -9,7 +9,8 @@
     "test": "tsx test/sim.test.ts",
     "typecheck": "tsc --noEmit",
     "balance": "tsx scripts/balance.ts",
-    "duel": "tsx scripts/duel.ts"
+    "duel": "tsx scripts/duel.ts",
+    "codex": "vite build --config vite.codex.config.ts"
   },
   "dependencies": {
     "pixi.js": "^8.23.0"

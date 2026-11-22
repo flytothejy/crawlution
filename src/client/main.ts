@@ -2,7 +2,7 @@
 import './fonts.css';
 import { CONFIG } from '../shared/config';
 import { FAMILIES, FAMILY, ROLE_LIST, ROLES, SPECIAL_FOODS, SPECIES_BY_ID, SUBS_BY_ID, type Family, type FamilyId } from '../shared/species';
-import { ABILITY_BY_ID, BONUS_CARDS, MAIN_UPS, SUB_UP, TRAITS, TRAIT_BY_ID } from '../shared/cards';
+import { ABILITY_BY_ID, BONUS_CARDS, MAIN_UPS, SUB_UP, COMMON_TRAITS, TRAIT_BY_ID, familyTraits, type TraitDef } from '../shared/cards';
 import { relation } from '../shared/combat';
 import type { CardView, EnemyKind, EnemyView, GameOpts, Loadout, Snapshot, SnakeView } from '../shared/types';
 import { createHost, type SimHost } from './host';
@@ -45,7 +45,14 @@ function loadLoadout(): Loadout {
   } catch {
     /* 저장 불가 환경 */
   }
-  return { species: 'kingmantis', form: 'sweep', traits: ['molt', 'sprint'] };
+  return { species: 'kingmantis', form: 'sweep', traits: ['sharp', 'onescythe'] };
+}
+/** 특성 2칸 = 공용 1 + 지금 계열 전용 1 (예전 특성·다른 계열 특성은 바꿔 끼운다) */
+function normTraits() {
+  const F = famOf(LO.species);
+  const common = LO.traits.find((t) => TRAIT_BY_ID.get(t) && !TRAIT_BY_ID.get(t)!.family) ?? COMMON_TRAITS[0].id;
+  const own = LO.traits.find((t) => TRAIT_BY_ID.get(t)?.family === F.id) ?? familyTraits(F.id)[0].id;
+  LO.traits = [common, own];
 }
 function saveLoadout() {
   try {
@@ -738,9 +745,10 @@ function buildSelect() {
   $('forms').innerHTML = `<div class="lbl">🎯 ${F.skill} · 기술 형태</div>` + F.forms
     .map((f, i) => `<button class="form${f.id === LO.form ? ' on' : ''}" data-m="${f.id}" style="--c:${hex(F.color)}"><span class="ic">${f.icon}</span><span class="nm">${f.name}${i === 0 ? ' <em>추천</em>' : ''}</span><span class="ds">${f.desc}</span><span class="aw">각성: ${f.awake}</span></button>`)
     .join('') + `<div class="ultline">⚡ 필살기 <b>${F.ult.icon} ${F.ult.name}</b> — ${F.ult.desc}<br><small>각성: ${F.ult.awake} · 전용 보조 기술 ${F.sub.icon} ${F.sub.name}</small></div>`;
-  $('traits').innerHTML = `<div class="lbl">🎒 특성 2칸 <small>(고른 것: ${LO.traits.map((t) => TRAIT_BY_ID.get(t)?.name).join(', ')})</small></div><div class="tgrid">` + TRAITS
-    .map((t) => `<button class="trait${LO.traits.includes(t.id) ? ' on' : ''}" data-t="${t.id}"><b>${t.icon} ${t.name}</b><small>${t.desc}</small></button>`)
-    .join('') + '</div>';
+  normTraits();
+  const tBtn = (t: TraitDef) => `<button class="trait${LO.traits.includes(t.id) ? ' on' : ''}" data-t="${t.id}"><b>${t.icon} ${t.name}</b><small class="up">▲ ${t.up}</small><small class="dn">▼ ${t.down}</small></button>`;
+  $('traits').innerHTML = `<div class="lbl">🎒 특성 · 공용 1개</div><div class="tgrid">${COMMON_TRAITS.map(tBtn).join('')}</div>`
+    + `<div class="lbl">🧬 특성 · ${F.name} 전용 1개</div><div class="tgrid">${familyTraits(F.id).map(tBtn).join('')}</div>`;
   // 이벤트
   $('roleChips').querySelectorAll<HTMLButtonElement>('.chip').forEach((el) => (el.onclick = () => ((roleFilter = el.dataset.r!), sfx.play('click'), buildSelect())));
   $('famRow').querySelectorAll<HTMLButtonElement>('.fcard').forEach((el) =>
@@ -757,9 +765,8 @@ function buildSelect() {
   $('forms').querySelectorAll<HTMLButtonElement>('.form').forEach((el) => (el.onclick = () => ((LO.form = el.dataset.m!), sfx.play('click'), saveLoadout(), buildSelect())));
   $('traits').querySelectorAll<HTMLButtonElement>('.trait').forEach((el) =>
     (el.onclick = () => {
-      const id = el.dataset.t!;
-      if (LO.traits.includes(id)) LO.traits = LO.traits.filter((t) => t !== id);
-      else LO.traits = [...LO.traits, id].slice(-2);
+      const t = TRAIT_BY_ID.get(el.dataset.t!)!;
+      LO.traits = t.family ? [LO.traits[0], t.id] : [t.id, LO.traits[1]];
       sfx.play('click');
       saveLoadout();
       buildSelect();
@@ -779,10 +786,7 @@ function openSelect() {
 }
 
 function startGame() {
-  if (LO.traits.length < 2) {
-    const fill = TRAITS.map((t) => t.id).filter((t) => !LO.traits.includes(t));
-    LO.traits = [...LO.traits, ...fill].slice(0, 2);
-  }
+  normTraits();
   saveLoadout();
   $('start').classList.add('hidden');
   $('select').classList.add('hidden');
