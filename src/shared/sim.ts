@@ -1143,7 +1143,7 @@ export class Simulation {
   // ---------- 효과 부품(skills.ts가 쓴다) ----------
 
   fx(kind: FxKind, s: Snake | null, x: number, y: number, extra: Partial<Extract<GameEvent, { type: 'fx' }>> = {}) {
-    this.events.push({ type: 'fx', kind, snake: s ? s.id : -1, fam: s && !s.isBoss ? s.fam.id : null, x, y, ...extra });
+    this.events.push({ type: 'fx', kind, snake: s ? s.id : -1, fam: s && !s.isBoss ? s.fam.id : null, sp: s && !s.isBoss ? s.sp.id : undefined, x, y, ...extra });
   }
 
   later(t: number, fn: () => void) {

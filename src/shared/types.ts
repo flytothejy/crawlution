@@ -47,7 +47,7 @@ export type GameEvent =
   | { type: 'evolveStart'; snake: number }
   | { type: 'evolve'; snake: number; stage: number; x: number; y: number }
   | { type: 'skill'; snake: number; fam: FamilyId; name: string; icon: string; x: number; y: number; angle: number; slot: 'main' | 'sub' | 'ult' }
-  | { type: 'fx'; kind: FxKind; snake: number; fam: FamilyId | null; x: number; y: number; r?: number; angle?: number; len?: number; half?: number; x1?: number; y1?: number; awake?: boolean }
+  | { type: 'fx'; kind: FxKind; snake: number; fam: FamilyId | null; sp?: string; x: number; y: number; r?: number; angle?: number; len?: number; half?: number; x1?: number; y1?: number; awake?: boolean }
   | { type: 'skillHit'; x: number; y: number; kind: 'cut' | 'stun' | 'push' | 'slow' | 'root' | 'blind' | 'mark' | 'fear' | 'silence' | 'grab' | 'poison' }
   | { type: 'pop'; snake: number; x: number; y: number; text: string; color: number }
   | { type: 'ultReady'; snake: number }

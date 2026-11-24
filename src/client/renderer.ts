@@ -2,6 +2,7 @@
 import { Application, BitmapFont, BitmapText, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
 import { CONFIG } from '../shared/config';
 import { relation } from '../shared/combat';
+import { themeOf, type FxBit, type FxTheme } from './fxtheme';
 import { FAMILY, likerOf, SPECIAL_FOODS, SPECIES_BY_ID, taste, type FamilyId } from '../shared/species';
 import type { EnemyView, FxKind, GameEvent, MapTheme, MapView, MinionView, ProjView, RingView, SnakeView, TeleView, ZoneView } from '../shared/types';
 import { headKit, HR, type HeadKit, type HeadPart } from './heads';
@@ -112,6 +113,11 @@ interface Particle {
   max: number;
   grow: number;
   drag: number;
+  /** 종별 입자: 회전 속도, 중력(+아래), 흔들림 */
+  vr?: number;
+  g?: number;
+  sway?: number;
+  fade?: number;
 }
 
 interface Popup {
@@ -209,6 +215,8 @@ export class GameRenderer {
   private popups: Popup[] = [];
   private shapes: Shape[] = [];
   private ghosts: Ghost[] = [];
+  /** 종별 모션: 기술을 쓴 곤충 몸에 잠깐 붙는 연출 */
+  private flair = new Map<number, { th: FxTheme; t: number; max: number }>();
   private fxs: Fx[] = [];
   private decalLayer = new Container();
   private fxSpriteLayer = new Container();
@@ -389,6 +397,26 @@ export class GameRenderer {
     for (let i = 5; i >= 1; i--) dot.circle(16, 16, 3 + i * 2.4).fill({ color: 0xffffff, alpha: 0.12 });
     dot.circle(16, 16, 4).fill(0xffffff);
     this.tex.dot = r.generateTexture({ target: dot, resolution: 2 });
+    // 종별 입자 모양(흰색, tint로 물들임)
+    const mk = (name: string, draw: (g: Graphics) => void) => {
+      const g = new Graphics();
+      draw(g);
+      this.tex['bit_' + name] = r.generateTexture({ target: g, resolution: 2 });
+    };
+    mk('petal', (g) => g.ellipse(16, 10, 7, 11).fill(0xffffff).ellipse(16, 10, 3, 7).fill({ color: 0xffffff, alpha: 0.6 }));
+    mk('leaf', (g) => g.moveTo(16, 0).quadraticCurveTo(30, 12, 16, 28).quadraticCurveTo(2, 12, 16, 0).fill(0xffffff).moveTo(16, 2).lineTo(16, 26).stroke({ width: 1.5, color: 0xd0d0d0 }));
+    mk('shard', (g) => g.poly([16, 0, 24, 14, 16, 30, 9, 14]).fill(0xffffff));
+    mk('drop', (g) => g.moveTo(12, 0).quadraticCurveTo(24, 16, 12, 24).quadraticCurveTo(0, 16, 12, 0).fill(0xffffff).circle(9, 15, 3).fill({ color: 0xffffff, alpha: 0.5 }));
+    mk('mote', (g) => {
+      for (let i = 6; i >= 1; i--) g.circle(16, 16, 2 + i * 2.2).fill({ color: 0xffffff, alpha: 0.1 });
+      g.circle(16, 16, 3).fill(0xffffff);
+    });
+    mk('ember', (g) => g.circle(8, 8, 8).fill({ color: 0xffffff, alpha: 0.35 }).circle(8, 8, 4).fill(0xffffff));
+    mk('sand', (g) => g.rect(0, 0, 6, 6).fill(0xffffff));
+    mk('silk', (g) => g.moveTo(0, 2).bezierCurveTo(12, -2, 24, 6, 40, 2).stroke({ width: 2, color: 0xffffff }));
+    mk('star', (g) => g.poly([16, 0, 19, 13, 32, 16, 19, 19, 16, 32, 13, 19, 0, 16, 13, 13]).fill(0xffffff));
+    mk('bubble', (g) => g.circle(14, 14, 12).stroke({ width: 2.5, color: 0xffffff }).circle(10, 9, 3).fill({ color: 0xffffff, alpha: 0.8 }));
+    mk('paper', (g) => g.poly([0, 2, 14, 0, 16, 12, 3, 14]).fill(0xffffff));
 
     for (const theme of ['grass', 'sand', 'forest'] as MapTheme[]) this.tex['ground_' + theme] = this.makeGround(theme);
   }
@@ -836,7 +864,10 @@ export class GameRenderer {
   }
 
   private skillFx(e: Extract<GameEvent, { type: 'fx' }>, playerId: number) {
-    const c = famColor(e.fam), c2 = famColor(e.fam, 2);
+    const th = themeOf(e.sp);
+    /** 종 테마 색: 대표 종(base)은 원래 색, 다른 종은 테마 색 [0 주색, 1 보조, 2 강조] */
+    const C = (def: number, k: 0 | 1 | 2) => (th && !th.base ? th.pal[k] : def);
+    const c = C(famColor(e.fam), 0), c2 = C(famColor(e.fam, 2), 1);
     const near = this.isNear(e.x, e.y);
     const mine = e.snake === playerId;
     const r = e.r ?? 100, a = e.angle ?? 0, len = e.len ?? 200, half = e.half ?? 0.6;
@@ -845,27 +876,28 @@ export class GameRenderer {
       this.shake = Math.max(this.shake, mine ? shake : shake * 0.4);
       if (mine) this.punch = Math.max(this.punch, punch);
     };
+    this.flourish(e, th, near, mine);
     switch (e.kind as FxKind) {
       case 'charge':
-        this.lineFx(e.x, e.y, a, len, e.awake ? 90 : 50, c, 0xffe0a0);
-        for (let i = 0; i < 30; i++) this.spawnParticle(e.x + Math.cos(a) * Math.random() * len, e.y + Math.sin(a) * Math.random() * len, i % 2 ? 0x9a7a4a : 0xd8b88a, 60 + Math.random() * 120, 0.8, 0.6);
+        this.lineFx(e.x, e.y, a, len, e.awake ? 90 : 50, c, C(0xffe0a0, 2));
+        for (let i = 0; i < 30; i++) this.spawnParticle(e.x + Math.cos(a) * Math.random() * len, e.y + Math.sin(a) * Math.random() * len, i % 2 ? C(0x9a7a4a, 0) : C(0xd8b88a, 1), 60 + Math.random() * 120, 0.8, 0.6);
         hit(10, 0.05);
         break;
       case 'shock':
       case 'thud':
       case 'slam':
-        this.aoeFx(e.x, e.y, r, e.kind === 'slam' ? 0xffb03a : 0xd89a4a, true);
+        this.aoeFx(e.x, e.y, r, e.kind === 'slam' ? C(0xffb03a, 2) : C(0xd89a4a, 0), true);
         hit(e.kind === 'slam' ? 20 : 14, 0.06);
         break;
       case 'lift':
       case 'grab':
       case 'scissor':
-        this.coneFx(e.x, e.y, a, r, e.kind === 'scissor' ? half : 0.7, e.kind === 'scissor' ? 0xffe8a0 : c, e.kind === 'scissor');
+        this.coneFx(e.x, e.y, a, r, e.kind === 'scissor' ? half : 0.7, e.kind === 'scissor' ? C(0xffe8a0, 0) : c, e.kind === 'scissor');
         if (e.kind === 'scissor') {
           const hx = e.x + Math.cos(a) * r * 0.6, hy = e.y + Math.sin(a) * r * 0.6;
-          this.fx('slash', hx, hy, 0xfff0b0, 60, 120, 0.3, a + 0.8, 0);
+          this.fx('slash', hx, hy, C(0xfff0b0, 1), 60, 120, 0.3, a + 0.8, 0);
           this.fx('slash', hx, hy, 0xffffff, 60, 120, 0.3, a - 0.8, 0);
-          for (let i = 0; i < 20; i++) this.spawnParticle(hx, hy, i % 2 ? 0xffd23f : 0xffffff, 120 + Math.random() * 200, 0.4, 0.4);
+          for (let i = 0; i < 20; i++) this.spawnParticle(hx, hy, i % 2 ? C(0xffd23f, 1) : 0xffffff, 120 + Math.random() * 200, 0.4, 0.4);
         }
         hit(8, 0.04);
         break;
@@ -878,15 +910,15 @@ export class GameRenderer {
         for (let k = 1; k <= 3; k++) setTimeout(() => this.coneFx(e.x, e.y, a, r, 0.7, c, false), k * 450);
         break;
       case 'sweep':
-        this.coneFx(e.x, e.y, a, r, half, 0xd8ff9a, true);
+        this.coneFx(e.x, e.y, a, r, half, C(0xd8ff9a, 0), true);
         hit(12, 0.05);
         break;
       case 'combo':
-        this.coneFx(e.x, e.y, a, r, half, e.awake ? 0xffffff : 0xc8ff8a, true);
+        this.coneFx(e.x, e.y, a, r, half, e.awake ? 0xffffff : C(0xc8ff8a, 0), true);
         hit(e.awake ? 12 : 6, 0.03);
         break;
       case 'stab':
-        this.lineFx(e.x, e.y, a, len, 26, 0xe8fff0, 0xb8ff7a);
+        this.lineFx(e.x, e.y, a, len, 26, C(0xe8fff0, 1), C(0xb8ff7a, 0));
         hit(10, 0.05);
         break;
       case 'threat':
@@ -900,7 +932,7 @@ export class GameRenderer {
         hit(6, 0.03);
         break;
       case 'whirl':
-        this.addAura(e.snake, 'whirl', 2, r, 0xd8ff9a);
+        this.addAura(e.snake, 'whirl', 2, r, C(0xd8ff9a, 0));
         hit(10, 0.06);
         break;
       case 'dive':
@@ -922,98 +954,98 @@ export class GameRenderer {
         this.addAura(e.snake, 'compound', 3, 60, c);
         break;
       case 'sting':
-        this.fx('flare', e.x + Math.cos(a) * 20, e.y + Math.sin(a) * 20, 0xb8ff5a, 20, 90, 0.25);
+        this.fx('flare', e.x + Math.cos(a) * 20, e.y + Math.sin(a) * 20, C(0xb8ff5a, 0), 20, 90, 0.25);
         break;
       case 'rain':
-        this.ringFx(e.x, e.y, r, 0xf2c230);
+        this.ringFx(e.x, e.y, r, C(0xf2c230, 0));
         hit(6, 0.03);
         break;
       case 'cloud':
-        for (let i = 0; i < 26; i++) this.spawnParticle(e.x + (Math.random() - 0.5) * r, e.y + (Math.random() - 0.5) * r, i % 2 ? 0xa8b850 : 0x7a8a3a, 30 + Math.random() * 50, 1.1, 0.9);
+        for (let i = 0; i < 26; i++) this.spawnParticle(e.x + (Math.random() - 0.5) * r, e.y + (Math.random() - 0.5) * r, i % 2 ? C(0xa8b850, 0) : C(0x7a8a3a, 1), 30 + Math.random() * 50, 1.1, 0.9);
         break;
       case 'jet':
-        this.lineFx(e.x, e.y, a, len, 40, 0xb8c860, 0xe8f0a0);
+        this.lineFx(e.x, e.y, a, len, 40, C(0xb8c860, 0), C(0xe8f0a0, 1));
         break;
       case 'backjet':
-        this.coneFx(e.x, e.y, a, len, half, 0xa8b850, false);
+        this.coneFx(e.x, e.y, a, len, half, C(0xa8b850, 0), false);
         for (let i = 0; i < 24; i++) {
           const aa = a + (Math.random() - 0.5) * half * 2;
-          this.spawnParticle(e.x + Math.cos(aa) * len * Math.random(), e.y + Math.sin(aa) * len * Math.random(), i % 2 ? 0xa8b850 : 0x7a8a3a, 30 + Math.random() * 60, 0.9, 0.8);
+          this.spawnParticle(e.x + Math.cos(aa) * len * Math.random(), e.y + Math.sin(aa) * len * Math.random(), i % 2 ? C(0xa8b850, 0) : C(0x7a8a3a, 1), 30 + Math.random() * 60, 0.9, 0.8);
         }
         break;
       case 'gasburst':
-        this.aoeFx(e.x, e.y, r, 0x9aa83a, false);
-        for (let i = 0; i < 60; i++) this.spawnParticle(e.x, e.y, i % 3 ? 0x8a9a3a : 0xd8e870, 120 + Math.random() * 300, 1.2, 1);
+        this.aoeFx(e.x, e.y, r, C(0x9aa83a, 0), false);
+        for (let i = 0; i < 60; i++) this.spawnParticle(e.x, e.y, i % 3 ? C(0x8a9a3a, 0) : C(0xd8e870, 1), 120 + Math.random() * 300, 1.2, 1);
         hit(16, 0.07);
         break;
       case 'web':
       case 'prison':
-        this.ringFx(e.x, e.y, r, 0xf0f0ff);
+        this.ringFx(e.x, e.y, r, C(0xf0f0ff, 0));
         if (e.kind === 'prison') hit(10, 0.06);
         break;
       case 'silk':
         break;
       case 'pit':
       case 'hell':
-        this.ringFx(e.x, e.y, r, 0xd8b878);
-        for (let i = 0; i < 30; i++) this.spawnParticle(e.x + (Math.random() - 0.5) * r * 1.6, e.y + (Math.random() - 0.5) * r * 1.6, 0xe8d0a0, 40 + Math.random() * 80, 0.8, 0.5);
+        this.ringFx(e.x, e.y, r, C(0xd8b878, 0));
+        for (let i = 0; i < 30; i++) this.spawnParticle(e.x + (Math.random() - 0.5) * r * 1.6, e.y + (Math.random() - 0.5) * r * 1.6, C(0xe8d0a0, 1), 40 + Math.random() * 80, 0.8, 0.5);
         if (e.kind === 'hell') hit(14, 0.06);
         break;
       case 'sand':
-        this.coneFx(e.x, e.y, a, len, half, 0xe8d0a0, false);
+        this.coneFx(e.x, e.y, a, len, half, C(0xe8d0a0, 0), false);
         for (let i = 0; i < 30; i++) {
           const aa = a + (Math.random() - 0.5) * half * 2;
           const d = Math.random() * len;
-          this.spawnParticle(e.x + Math.cos(aa) * d, e.y + Math.sin(aa) * d, i % 2 ? 0xe8d0a0 : 0xc8a870, 40 + Math.random() * 80, 0.6, 0.45);
+          this.spawnParticle(e.x + Math.cos(aa) * d, e.y + Math.sin(aa) * d, i % 2 ? C(0xe8d0a0, 0) : C(0xc8a870, 1), 40 + Math.random() * 80, 0.6, 0.45);
         }
         break;
       case 'ambush':
         if (e.awake) {
-          this.aoeFx(e.x, e.y, r, 0xd8b878, true);
+          this.aoeFx(e.x, e.y, r, C(0xd8b878, 0), true);
           hit(14, 0.06);
-        } else for (let i = 0; i < 20; i++) this.spawnParticle(e.x, e.y, 0xd8b878, 60 + Math.random() * 100, 0.6, 0.6);
+        } else for (let i = 0; i < 20; i++) this.spawnParticle(e.x, e.y, C(0xd8b878, 0), 60 + Math.random() * 100, 0.6, 0.6);
         break;
       case 'summon':
       case 'alarm':
-        for (let i = 0; i < (e.awake ? 50 : 20); i++) this.spawnParticle(e.x, e.y, i % 2 ? 0xffd23f : 0x3a2a10, 80 + Math.random() * 200, 0.6, 0.5);
-        if (e.awake) this.ringFx(e.x, e.y, 200, 0xffd23f);
+        for (let i = 0; i < (e.awake ? 50 : 20); i++) this.spawnParticle(e.x, e.y, i % 2 ? C(0xffd23f, 0) : C(0x3a2a10, 1), 80 + Math.random() * 200, 0.6, 0.5);
+        if (e.awake) this.ringFx(e.x, e.y, 200, C(0xffd23f, 0));
         break;
       case 'honey':
-        this.ringFx(e.x, e.y, r, 0xffc21a);
+        this.ringFx(e.x, e.y, r, C(0xffc21a, 0));
         break;
       case 'heat':
-        this.fx('flare', e.x, e.y, 0xff8a1c, 40, 140, 0.5);
+        this.fx('flare', e.x, e.y, C(0xff8a1c, 0), 40, 140, 0.5);
         break;
       case 'waggle':
         this.ringFx(e.x, e.y, r, 0xffd23f);
         this.ringFx(e.x, e.y, r * 0.6, 0xffffff);
         break;
       case 'flash':
-        this.fx('flare', e.x, e.y, 0xf6ff8a, r * 0.6, r * 2.6, 0.5, 0, 2);
-        this.ringFx(e.x, e.y, r, 0xf6ff8a);
+        this.fx('flare', e.x, e.y, C(0xf6ff8a, 0), r * 0.6, r * 2.6, 0.5, 0, 2);
+        this.ringFx(e.x, e.y, r, C(0xf6ff8a, 1));
         hit(6, 0.04);
         if (near) this.screenFlash = Math.max(this.screenFlash, mine ? 0.25 : 0.45);
         break;
       case 'signal':
-        this.fx('flare', e.x, e.y, 0xd8ff5a, 20, 90, 0.3);
+        this.fx('flare', e.x, e.y, C(0xd8ff5a, 0), 20, 90, 0.3);
         break;
       case 'lantern':
-        this.addAura(e.snake, 'lantern', 4, r, 0xd8ff5a);
+        this.addAura(e.snake, 'lantern', 4, r, C(0xd8ff5a, 0));
         break;
       case 'aurora':
-        this.fx('flare', e.x, e.y, 0x7affc8, r * 0.5, r * 3, 0.9, 0, 1);
-        for (let k = 0; k < 3; k++) setTimeout(() => this.ringFx(e.x, e.y, r * (0.6 + k * 0.25), [0x7affc8, 0xd8ff5a, 0x9ac8ff][k]), k * 120);
+        this.fx('flare', e.x, e.y, C(0x7affc8, 0), r * 0.5, r * 3, 0.9, 0, 1);
+        for (let k = 0; k < 3; k++) setTimeout(() => this.ringFx(e.x, e.y, r * (0.6 + k * 0.25), [C(0x7affc8, 0), C(0xd8ff5a, 1), C(0x9ac8ff, 2)][k]), k * 120);
         if (near) this.screenFlash = Math.max(this.screenFlash, 0.5);
         hit(12, 0.07);
         break;
       case 'camo':
-        for (let i = 0; i < 18; i++) this.spawnParticle(e.x, e.y, i % 2 ? 0x7ac84a : 0x3a6a2a, 50 + Math.random() * 90, 0.6, 0.5);
+        for (let i = 0; i < 18; i++) this.spawnParticle(e.x, e.y, i % 2 ? C(0x7ac84a, 0) : C(0x3a6a2a, 1), 50 + Math.random() * 90, 0.6, 0.5);
         break;
       case 'hop':
       case 'roll':
       case 'backstep':
       case 'escape':
-        for (let i = 0; i < 12; i++) this.spawnParticle(e.x, e.y, 0xffffff, 60 + Math.random() * 120, 0.4, 0.4);
+        for (let i = 0; i < 12; i++) this.spawnParticle(e.x, e.y, C(0xffffff, 1), 60 + Math.random() * 120, 0.4, 0.4);
         break;
       case 'curl':
       case 'backplate':
@@ -1145,6 +1177,8 @@ export class GameRenderer {
   private spawnParticle(x: number, y: number, color: number, speed: number, life: number, size: number) {
     if (this.particles.length > this.particleCap) return;
     const s = this.freeParticles.pop() ?? new Sprite(this.tex.dot);
+    s.texture = this.tex.dot;
+    s.rotation = 0;
     s.anchor.set(0.5);
     s.blendMode = 'add';
     s.tint = color;
@@ -1155,6 +1189,152 @@ export class GameRenderer {
     if (!s.parent) this.fxLayer.addChild(s);
     const a = Math.random() * Math.PI * 2;
     this.particles.push({ s, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life, max: life, grow: -size * 0.6, drag: 3.2 });
+  }
+
+  /** 종별 입자 하나: 모양마다 움직임이 다르다(꽃잎은 흔들리며 떠다니고, 불씨는 오르고, 방울은 떨어진다) */
+  private spawnBit(bit: FxBit, x: number, y: number, color: number, speed: number, life: number, size: number, dir?: number, spread = Math.PI) {
+    if (this.particles.length > this.particleCap) return;
+    if (bit === 'dot') return this.spawnParticle(x, y, color, speed, life, size);
+    const s = this.freeParticles.pop() ?? new Sprite(this.tex.dot);
+    s.texture = this.tex['bit_' + bit];
+    s.anchor.set(0.5);
+    const glow = bit === 'mote' || bit === 'ember' || bit === 'star' || bit === 'shard';
+    s.blendMode = glow ? 'add' : 'normal';
+    s.tint = color;
+    s.alpha = 1;
+    s.position.set(x, y);
+    s.rotation = Math.random() * Math.PI * 2;
+    s.scale.set(size);
+    s.visible = true;
+    if (!s.parent) this.fxLayer.addChild(s);
+    const a = dir === undefined ? Math.random() * Math.PI * 2 : dir + (Math.random() - 0.5) * spread;
+    const p: Particle = { s, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life, max: life, grow: -size * 0.3, drag: 2.4 };
+    switch (bit) {
+      case 'petal':
+      case 'leaf':
+      case 'paper':
+        p.vr = (Math.random() - 0.5) * 8;
+        p.sway = 0.6 + Math.random();
+        p.g = 40;
+        p.drag = 3;
+        p.grow = 0;
+        p.fade = 0.95;
+        break;
+      case 'ember':
+        p.g = -120;
+        p.grow = -size * 0.8;
+        break;
+      case 'drop':
+        p.g = 420;
+        p.s.rotation = 0;
+        p.drag = 1.2;
+        break;
+      case 'bubble':
+        p.g = -60;
+        p.grow = size * 0.9;
+        p.drag = 2;
+        p.fade = 0.8;
+        break;
+      case 'shard':
+        p.vr = (Math.random() - 0.5) * 22;
+        p.drag = 3.5;
+        break;
+      case 'star':
+        p.vr = (Math.random() - 0.5) * 6;
+        p.grow = -size * 0.9;
+        break;
+      case 'silk':
+        p.vr = (Math.random() - 0.5) * 3;
+        p.drag = 4;
+        p.grow = 0;
+        p.fade = 0.8;
+        break;
+      case 'sand':
+        p.g = 160;
+        p.vr = (Math.random() - 0.5) * 10;
+        break;
+      case 'mote':
+        p.drag = 3;
+        p.sway = 0.3;
+        break;
+    }
+    this.particles.push(p);
+  }
+
+  /** 종별 연출: 기술 모양을 따라 종의 입자를 뿌리고, 몸에 모션(잔상·빛무리·회오리 …)을 붙인다 */
+  private flourish(e: Extract<GameEvent, { type: 'fx' }>, th: FxTheme | null, near: boolean, mine: boolean) {
+    if (!th || !near) return;
+    const [p0, p1, p2] = th.pal;
+    const col = (i: number) => (i % 3 === 0 ? p0 : i % 3 === 1 ? p1 : p2);
+    const a = e.angle ?? 0, r = e.r ?? 90, len = e.len ?? 0, half = e.half ?? 0.6;
+    const n = th.base ? 12 : 30;
+    const sz = th.bit === 'sand' ? 1.1 : th.bit === 'silk' ? 1.3 : 1;
+    for (let i = 0; i < n; i++) {
+      let x = e.x, y = e.y, dir: number | undefined, spd = 80 + Math.random() * 160;
+      if (len > 0) {
+        // 직선: 길을 따라 뿌리고 옆으로 흩어진다
+        const t = Math.random();
+        x += Math.cos(a) * len * t;
+        y += Math.sin(a) * len * t;
+        dir = a + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
+        spd *= 0.6;
+      } else if (e.half !== undefined) {
+        const aa = a + (Math.random() - 0.5) * half * 2;
+        const d = r * (0.4 + Math.random() * 0.7);
+        x += Math.cos(aa) * d;
+        y += Math.sin(aa) * d;
+        dir = aa;
+      } else {
+        const aa = Math.random() * Math.PI * 2;
+        const d = r * Math.random() * 0.8;
+        x += Math.cos(aa) * d;
+        y += Math.sin(aa) * d;
+        dir = aa;
+      }
+      this.spawnBit(th.bit, x, y, col(i), spd, 0.6 + Math.random() * 0.6, sz * (0.8 + Math.random() * 0.6), dir, 1.2);
+    }
+    // 모션: 시전한 곤충 몸에 잠깐 붙는다
+    this.flair.set(e.snake, { th, t: th.motion === 'phantom' ? 0.9 : 0.6, max: th.motion === 'phantom' ? 0.9 : 0.6 });
+    if (th.base) return;
+    switch (th.motion) {
+      case 'heavy':
+        this.decal(e.x, e.y, r * 0.8, 0x1a1008);
+        this.fx('ring', e.x, e.y, p0, r * 0.3, r * 1.8, 0.45);
+        if (mine) this.shake = Math.max(this.shake, 8);
+        break;
+      case 'glow':
+        this.fx('flare', e.x, e.y, p1, r * 0.4, r * 1.8, 0.6, 0, 0.5, 0.8);
+        break;
+      case 'zigzag': {
+        const pts: number[][] = [];
+        for (let j = 0; j < 4; j++) {
+          const aa = (len > 0 ? a : Math.random() * Math.PI * 2) + (Math.random() - 0.5) * 1.6;
+          const line = [e.x, e.y];
+          let x = e.x, y = e.y;
+          for (let s2 = 0; s2 < 5; s2++) {
+            x += Math.cos(aa + (Math.random() - 0.5) * 1.4) * r * 0.25;
+            y += Math.sin(aa + (Math.random() - 0.5) * 1.4) * r * 0.25;
+            line.push(x, y);
+          }
+          pts.push(line);
+        }
+        this.addShape((g, k) => {
+          for (const l of pts) {
+            g.poly(l, false).stroke({ width: 7 * k, color: p0, alpha: 0.5 * k });
+            g.poly(l, false).stroke({ width: 2.5 * k, color: 0xffffff, alpha: k });
+          }
+        }, 0.3);
+        break;
+      }
+      case 'drip':
+        for (let i = 0; i < 6; i++) this.decal(e.x + (Math.random() - 0.5) * r, e.y + (Math.random() - 0.5) * r, 10 + Math.random() * 14, p0);
+        break;
+      case 'spin':
+        for (let k = 0; k < 2; k++) setTimeout(() => this.ringFx(e.x, e.y, r * (0.5 + k * 0.3), k ? p1 : p0), k * 110);
+        break;
+      default:
+        break;
+    }
   }
 
   private popup(x: number, y: number, text: string, color: number, size: number, life?: number, title = false) {
@@ -1333,7 +1513,9 @@ export class GameRenderer {
     return url;
   }
 
+  private lastDt = 0.016;
   render(frame: Frame, dt: number) {
+    this.lastDt = dt;
     this.time += dt;
     this.shapeGfx.clear();
     this.setMap(frame.map);
@@ -2197,6 +2379,43 @@ export class GameRenderer {
     }
     if (s.isBoss) st.circle(hx, hy, headR + 8).stroke({ width: 3, color: 0xff6a4a, alpha: 0.4 + 0.3 * Math.sin(this.time * 5) });
     if (!s.isBoss && s.stage >= 3 && s.hidden <= 0) st.circle(hx, hy, headR + 5).stroke({ width: 2.5, color: lcol, alpha: 0.35 + 0.25 * Math.sin(this.time * 4) });
+    // 종별 모션(기술 쓴 직후)
+    const fl = this.flair.get(s.id);
+    if (fl && this.isNear(hx, hy)) {
+      fl.t -= this.lastDt;
+      if (fl.t <= 0) this.flair.delete(s.id);
+      else {
+        const k = fl.t / fl.max;
+        const [p0, p1] = fl.th.pal;
+        const m = fl.th.motion;
+        if ((m === 'swift' || m === 'phantom') && Math.random() < (m === 'phantom' ? 0.6 : 0.8)) {
+          const gh = new Sprite(g.kit.base);
+          gh.anchor.set(g.kit.ax, g.kit.ay);
+          gh.position.set(hx, hy);
+          gh.rotation = s.angle;
+          gh.scale.set(hk);
+          gh.tint = m === 'phantom' ? p1 : p0;
+          gh.alpha = m === 'phantom' ? 0.4 : 0.55;
+          this.ghostLayer.addChild(gh);
+          this.ghosts.push({ s: gh, life: m === 'phantom' ? 0.6 : 0.22, max: m === 'phantom' ? 0.6 : 0.22 });
+        }
+        if (m === 'spin') {
+          const sp = this.time * 12;
+          for (let j = 0; j < 3; j++) {
+            const aa = sp + (j / 3) * Math.PI * 2;
+            this.spawnBit(fl.th.bit, hx + Math.cos(aa) * headR * 2.2, hy + Math.sin(aa) * headR * 2.2, j % 2 ? p0 : p1, 20, 0.3, 0.6);
+          }
+        }
+        if (m === 'glow') st.circle(hx, hy, headR * (1.6 + 0.6 * (1 - k))).fill({ color: p1, alpha: 0.18 * k });
+        if (m === 'heavy' && Math.random() < 0.5) this.spawnBit('sand', hx + (Math.random() - 0.5) * headR * 2, hy + (Math.random() - 0.5) * headR * 2, p0, 60, 0.4, 0.9);
+        if (m === 'zigzag' && Math.random() < 0.5) {
+          const aa = Math.random() * Math.PI * 2, L = headR * 2.5;
+          const x1 = hx + Math.cos(aa) * L * 0.5, y1 = hy + Math.sin(aa) * L * 0.5, x2 = hx + Math.cos(aa + 0.4) * L, y2 = hy + Math.sin(aa + 0.4) * L;
+          this.addShape((gg, kk) => gg.moveTo(hx, hy).lineTo(x1, y1).lineTo(x2, y2).stroke({ width: 2.5 * kk, color: p0, alpha: kk }), 0.12);
+        }
+        if (m === 'drip' && Math.random() < 0.4) this.spawnBit('drop', hx, hy, p0, 30, 0.6, 0.6, -Math.PI / 2, 1);
+      }
+    }
     // 돌진: 머리 잔상 + 속도선
     if (s.dash && this.isNear(hx, hy)) {
       const gh = new Sprite(g.kit.base);
@@ -2268,9 +2487,11 @@ export class GameRenderer {
       const damp = Math.exp(-p.drag * dt);
       p.vx *= damp;
       p.vy *= damp;
-      p.s.x += p.vx * dt;
+      if (p.g) p.vy += p.g * dt;
+      p.s.x += p.vx * dt + (p.sway ? Math.sin((p.max - p.life) * 6 + p.sway) * p.sway * 40 * dt : 0);
       p.s.y += p.vy * dt;
-      p.s.alpha = p.life / p.max;
+      if (p.vr) p.s.rotation += p.vr * dt;
+      p.s.alpha = (p.fade ?? 1) * (p.life / p.max);
       p.s.scale.set(Math.max(0.05, p.s.scale.x + p.grow * dt));
     }
     for (let i = this.ghosts.length - 1; i >= 0; i--) {

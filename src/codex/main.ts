@@ -9,6 +9,7 @@ import { Simulation, type Snake } from '../shared/sim';
 import type { Snapshot, SnakeView } from '../shared/types';
 import { GameRenderer, type Frame, type FrameSnake } from '../client/renderer';
 import measured from './measured.json';
+import { themeOf } from '../client/fxtheme';
 
 type Meas = { dmg: number; fx: string[] };
 const M = measured as unknown as {
@@ -98,6 +99,7 @@ function setupScene() {
   dummies.forEach((d, i) => {
     d.isPlayer = true; // 봇 생각 끄기(그릴 때는 남으로 보이게 되돌린다)
     d.name = '허수아비';
+    d.sp = { ...d.sp, instinct: { ...d.sp.instinct, id: 'none' as never } }; // 허수아비는 본능 없음(글씨가 화면을 가리지 않게)
     d.lives = 99;
     d.traits = new Set();
     d.abilities = [];
@@ -134,7 +136,7 @@ function stepScene() {
   const ta = Math.atan2(tgt.y - me.y, tgt.x - me.x);
   const d0 = Math.hypot(tgt.x - me.x, tgt.y - me.y);
   const back = action.kind === 'main' && action.form === 'backjet';
-  const cmd = { ...me.cmd, angle: back && sceneT > 0.15 ? ta + Math.PI : ta, sneak: action.kind !== 'bite' && d0 < 140, boost: false };
+  const cmd = { ...me.cmd, angle: back && sceneT > 0.15 ? ta + Math.PI : ta, sneak: false, boost: false };
   if (!cast && sceneT > 0.35) {
     cast = true;
     if (action.kind === 'main') ((me.skillCd = 0), (me.ult = 0), (cmd.skillSeq = me.lastSkillSeq + 1));
@@ -156,7 +158,7 @@ function stepScene() {
 async function initStage() {
   const box = $('stage');
   await renderer.init(box, box);
-  renderer.opts.numbers = true;
+  renderer.opts.numbers = false; // 도감은 모션을 보려는 곳이라 피해 숫자는 끔(반복 칩 옆 '숫자'로 켬)
   renderer.opts.zoomMul = 0.72; // 기술 범위가 다 보이게 조금 멀리서
   renderer.app.ticker.add((tk) => {
     if (tab !== 'crawler') return;
@@ -211,9 +213,10 @@ function drawControls() {
   $('now').innerHTML = `<b>${an.icon} ${an.name}</b><small>${an.desc}</small>`;
   $('stages').innerHTML = fam.stages
     .map((n, i) => `<button class="chip${stage === i + 1 ? ' on' : ''}" data-st="${i + 1}">Lv${LV[i]} ${n}</button>`)
-    .join('') + `<button class="chip tog${loop ? ' on' : ''}" id="loopBtn">🔁 반복</button>`;
+    .join('') + `<button class="chip tog${loop ? ' on' : ''}" id="loopBtn">🔁 반복</button><button class="chip tog${renderer.opts.numbers ? ' on' : ''}" id="numBtn">🔢 숫자</button>`;
   $('stages').querySelectorAll<HTMLButtonElement>('[data-st]').forEach((b) => (b.onclick = () => ((stage = Number(b.dataset.st) as 1 | 2 | 3), setupScene(), drawControls(), drawInfo())));
   $('loopBtn').onclick = () => ((loop = !loop), drawControls(), loop || setupScene());
+  $('numBtn').onclick = () => ((renderer.opts.numbers = !renderer.opts.numbers), drawControls());
   $('sps').innerHTML = fam.species
     .map((id) => `<button class="chip sp${id === species ? ' on' : ''}" data-s="${id}"><img src="${renderer.portrait(id + '@' + stage)}" alt="">${SPECIES_BY_ID.get(id)!.name}</button>`)
     .join('');
@@ -257,6 +260,7 @@ function drawInfo() {
     <div><div class="nm">${sp.name} <small>${F.name}</small></div>
     <div class="rl">${ROLES[F.role].icon} ${ROLES[F.role].name} · ${F.stages.join(' → ')}</div>
     <div class="inst">🧬 <b>${sp.instinct.name}</b> ${sp.instinct.desc}</div>
+    <div class="fxt">✨ 연출: ${themeOf(species)?.tag ?? ''}</div>
     <div class="fact">${sp.fact}</div></div>`;
   const rows = [1, 5, 10, 16].map((l) => [l, statsAt(F, l)] as const);
   const fd = M.forms[F.id] ?? {};
@@ -294,7 +298,7 @@ function drawInfo() {
   <section><h3>🧬 종 4가지 · 본능</h3>
     <div class="spgrid">${F.species.map((id) => {
       const s = SPECIES_BY_ID.get(id)!;
-      return `<div class="spc${id === species ? ' on' : ''}" data-s="${id}"><img src="${renderer.portrait(id + '@3')}" alt=""><div><b>${s.name}</b><small><em>${s.instinct.name}</em> ${s.instinct.desc}</small></div></div>`;
+      return `<div class="spc${id === species ? ' on' : ''}" data-s="${id}"><img src="${renderer.portrait(id + '@3')}" alt=""><div><b>${s.name}</b><small><em>${s.instinct.name}</em> ${s.instinct.desc}</small><small class="fxs">✨ ${themeOf(id)?.tag ?? ''}</small></div></div>`;
     }).join('')}</div>
   </section>
   <section><h3>🎒 ${F.name} 전용 특성 <small>%는 1:1 거울 대결에서 특성 단 쪽 승률</small></h3><div class="trgrid">${familyTraits(F.id).map(traitCard).join('')}</div></section>
