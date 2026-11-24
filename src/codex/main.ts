@@ -2,7 +2,7 @@
 // 실제 시뮬레이션 + 게임 렌더러로 물기·기술·보조 기술·필살기 모션을 재생한다.
 import '../client/fonts.css';
 import { CONFIG, evoOf, radiusFor } from '../shared/config';
-import { COMMON_SUBS, FAMILIES, FAMILY, ROLE_LIST, ROLES, SPECIAL_FOODS, SPECIES_BY_ID, type Family, type FamilyId, type SubDef } from '../shared/species';
+import { COMMON_SUBS, FAMILIES, FAMILY, ROLE_LIST, ROLES, SPECIAL_FOODS, SPECIES_BY_ID, formsOf, type Family, type FamilyId, type SubDef } from '../shared/species';
 import { ABILITIES, COMMON_TRAITS, familyTraits, type TraitDef } from '../shared/cards';
 import { baseB, biteOf, maxHpOf } from '../shared/combat';
 import { Simulation, type Snake } from '../shared/sim';
@@ -80,6 +80,7 @@ function actionName(a: Action) {
 }
 
 function setupScene() {
+  if (action.kind === 'main' && !formsOf(species).some((f) => f.id === (action as { form: string }).form)) action = { kind: 'main', form: formsOf(species)[0].id };
   const form = action.kind === 'main' ? action.form : fam.forms[0].id;
   const level = LV[stage - 1];
   sim = new Simulation(11, '나', { power: 1, bots: 3, map: 'grass', loadout: { species, form, traits: [] }, startLevel: level });
@@ -221,10 +222,10 @@ function drawControls() {
   const btn = (a: Action, icon: string, name: string, cls = '') => `<button class="act ${cls}${on(a) ? ' on' : ''}" data-a='${JSON.stringify(a.kind === 'sub' ? { kind: 'sub', id: a.sub.id } : a)}'>${icon}<small>${name}</small></button>`;
   $('acts').innerHTML =
     btn({ kind: 'bite' }, '🦷', '물기') +
-    fam.forms.map((fo) => btn({ kind: 'main', form: fo.id }, fo.icon, fo.name)).join('') +
+    formsOf(species).map((fo) => btn({ kind: 'main', form: fo.id }, fo.icon, fo.name)).join('') +
     btn({ kind: 'sub', sub: fam.sub }, fam.sub.icon, fam.sub.name, 'sub') +
     btn({ kind: 'ult' }, fam.ult.icon, '필살기', 'ult') +
-    `<select id="commonSub"><option value="">공용 보조 기술 ▾</option>${COMMON_SUBS.map((s) => `<option value="${s.id}"${action.kind === 'sub' && action.sub.id === s.id ? ' selected' : ''}>${s.icon} ${s.name}</option>`).join('')}</select>`;
+    `<select id="commonSub"><option value="">공용 보조 기술 ▾</option>${COMMON_SUBS.filter((c) => c.families?.includes(fam.id)).map((s) => `<option value="${s.id}"${action.kind === 'sub' && action.sub.id === s.id ? ' selected' : ''}>${s.icon} ${s.name}</option>`).join('')}</select>`;
   $('acts').querySelectorAll<HTMLButtonElement>('.act').forEach((b) => {
     b.onclick = () => {
       const a = JSON.parse(b.dataset.a!);
@@ -275,7 +276,8 @@ function drawInfo() {
   <section><h3>🎯 주 기술 · ${F.skill}</h3>
     ${F.forms.map((fo) => {
       const m = fd[fo.id];
-      return `<div class="sk" style="--c:${hex(F.color)}"><div class="hd"><b>${fo.icon} ${fo.name}</b><button class="pl" data-play='${JSON.stringify({ kind: 'main', form: fo.id })}'>▶ 보기</button></div>
+      const cant = F.species.filter((id) => !formsOf(id).some((x) => x.id === fo.id)).map((id) => SPECIES_BY_ID.get(id)!.name);
+      return `<div class="sk${formsOf(species).some((x) => x.id === fo.id) ? '' : ' off'}" style="--c:${hex(F.color)}"><div class="hd"><b>${fo.icon} ${fo.name}</b>${cant.length ? `<span class="badge g">${cant.join('·')} 못 씀</span>` : ''}<button class="pl" data-play='${JSON.stringify({ kind: 'main', form: fo.id })}'>▶ 보기</button></div>
       <p>${fo.desc}</p><p class="aw">각성: ${fo.awake}</p>
       <div class="kv"><span>재사용 ${fo.cd}초</span><span>거리 ${fo.range}</span>${m ? `<span>실측 피해 Lv5 ${m.lv5.dmg} · Lv10 ${m.lv10.dmg}</span>` : ''}</div><div class="tags">${fxTags(m?.lv10)}</div></div>`;
     }).join('')}
@@ -353,7 +355,7 @@ function drawCards() {
   $('cardsBox').innerHTML = `<p class="note">레벨업마다 3장 중 1장. 능력 칸 4개 × 3레벨. 계열 전용 카드는 2배, 역할에 맞는 카드는 1.5배 잘 나온다.</p><section><h3>공용 카드</h3><div class="abgrid">${ABILITIES.filter((a) => !a.family).map(one).join('')}</div></section><section><h3>계열 전용 카드</h3><div class="abgrid">${ABILITIES.filter((a) => a.family).map(one).join('')}</div></section>`;
 }
 function drawSubs() {
-  $('subsBox').innerHTML = `<p class="note">Lv5 성충이 될 때 계열 전용 1개 + 공용 2개 중에서 고른다. ▶를 누르면 지금 고른 계열로 모션을 본다.</p><div class="abgrid">${COMMON_SUBS.map((s) => `<div class="ab"><div class="hd"><b>${s.icon} ${s.name}</b>${(s.roles ?? []).map((r) => `<span class="badge g">${ROLES[r].icon} ${ROLES[r].name}</span>`).join('')}<button class="pl" data-sub="${s.id}">▶</button></div><p>${s.desc}</p><div class="kv"><span>재사용 ${s.cd}초</span>${M.subs[s.id]?.dmg ? `<span>실측 피해 ${M.subs[s.id].dmg}</span>` : ''}</div><div class="tags">${fxTags(M.subs[s.id])}</div></div>`).join('')}</div>`;
+  $('subsBox').innerHTML = `<p class="note">Lv5 성충이 될 때 계열 전용 1개 + 공용 2개 중에서 고른다. 공용은 아래 표시된 계열(생태에 맞는 계열)에게만 나온다. ▶를 누르면 지금 고른 계열로 모션을 본다.</p><div class="abgrid">${COMMON_SUBS.map((s) => `<div class="ab"><div class="hd"><b>${s.icon} ${s.name}</b><button class="pl" data-sub="${s.id}">▶</button></div><p>${s.desc}</p><p class="fams">${(s.families ?? []).map((f) => `<span class="badge" style="background:${hex(FAMILY[f].color)}">${FAMILY[f].name}</span>`).join(' ')}</p><div class="kv"><span>재사용 ${s.cd}초</span>${M.subs[s.id]?.dmg ? `<span>실측 피해 ${M.subs[s.id].dmg}</span>` : ''}</div><div class="tags">${fxTags(M.subs[s.id])}</div></div>`).join('')}</div>`;
   $('subsBox').querySelectorAll<HTMLButtonElement>('.pl').forEach((b) => (b.onclick = () => (showTab('crawler'), play({ kind: 'sub', sub: COMMON_SUBS.find((s) => s.id === b.dataset.sub)! }))));
 }
 

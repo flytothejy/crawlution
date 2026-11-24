@@ -208,7 +208,7 @@ export function botPickCard(sim: Simulation, s: Snake): number {
     let v = 1;
     if (off.kind === 'sub') {
       const d = SUBS_BY_ID.get(c.id);
-      v = c.id === s.fam.sub.id ? 2 : d?.roles?.includes(s.fam.role) ? 1.5 : 1;
+      v = c.id === s.fam.sub.id ? 2 : 1.3;
     } else if (c.kind === 'new') {
       const a = ABILITY_BY_ID.get(c.id)!;
       v = a.family ? 2 : a.roles?.includes(s.fam.role) ? 1.5 : 1;

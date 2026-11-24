@@ -249,8 +249,9 @@
       #captured b { display: block; font-family: var(--title); font-size: 64px; color: #ffb84a; }
       /* 순위표 */
       #board { width: 170px !important; }
-      #board .hd span { float: right; font-size: 10px; color: #ddd; margin-top: 2px; }
+      #board .hd span { float: right; font-size: 9px; color: #ddd; margin-top: 3px; }
       #board .row .k { width: 18px; text-align: right; font-size: 11px; color: #ffb0a0; }
+      #board .row .kd { width: 30px; text-align: center; font-size: 10.5px; color: #cfe8ff; white-space: nowrap; }
       #board .row .v { width: 40px; text-align: right; }
       #board .sep { text-align: center; line-height: 8px; opacity: 0.6; }
       #over.mid .rtitle { --bc: #8ad0ff; --bc2: #3a7ad8; }
@@ -288,7 +289,7 @@
       #stats .gm.z { opacity: 0.45; }
       #stats .gm.max { box-shadow: 0 0 6px var(--c); }
       /* 소리 버튼 */
-      #setBtnG { position: fixed; left: 8px; bottom: calc(22px + env(safe-area-inset-bottom)); width: 38px; height: 38px; border-radius: 50%; border: 2.5px solid var(--ink); background: rgba(20, 34, 14, 0.6); color: #fff; font-size: 18px; display: grid; place-items: center; cursor: pointer; z-index: 7; touch-action: none; padding: 0; }
+      #setBtnG { position: fixed; right: 188px; top: calc(10px + env(safe-area-inset-top)); width: 36px; height: 36px; border-radius: 50%; border: 2.5px solid var(--ink); background: rgba(20, 34, 14, 0.6); color: #fff; font-size: 18px; display: grid; place-items: center; cursor: pointer; z-index: 7; touch-action: none; padding: 0; }
       .opts { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
       .opts button { font-size: 13.5px; padding: 5px 12px; border-radius: 12px; border: 2.5px solid var(--ink); background: #fff8dc; color: var(--ink); cursor: pointer; box-shadow: 0 3px 0 var(--ink); }
       .opts button.off { background: #ddd; color: #777; text-decoration: line-through; }
@@ -320,7 +321,6 @@
       body.lefty #boostBtn { right: auto; left: calc(16px + env(safe-area-inset-left)); }
       body.lefty #sneakBtn { right: auto; left: calc(112px + env(safe-area-inset-left)); }
       body.lefty #skillBtn { right: auto; left: calc(16px + env(safe-area-inset-left)); }
-      body.lefty #setBtnG { left: auto; right: 8px; }
       body.lefty #hostTag { left: auto; right: 8px; }
       @media (max-width: 600px) {
         #timer { font-size: 15px; top: calc(156px + env(safe-area-inset-top)); left: auto; right: 10px; transform: none; padding: 1px 8px; width: 136px; text-align: center; }
@@ -329,9 +329,15 @@
         #gauge { top: calc(116px + env(safe-area-inset-top)) !important; }
         #rage { top: calc(90px + env(safe-area-inset-top)); width: 46vw; }
         #feed { top: calc(160px + env(safe-area-inset-top)) !important; }
-        #board { width: 136px !important; font-size: 11px !important; }
-        #board .row .v { width: 34px; }
+        #board { width: 152px !important; font-size: 11px !important; padding: 4px 6px 6px !important; }
+        #board .row { gap: 3px; }
+        #board .row .v { width: 28px; font-size: 11px; }
+        #board .row .k { width: 13px; }
+        #board .row .kd { width: 26px; font-size: 10px; }
         #board .row .li { display: none; }
+        #hpbar { width: 40vw !important; }
+        #lives { left: calc(18px + 40vw) !important; }
+        #setBtnG { top: calc(158px + env(safe-area-inset-top)); right: 152px; width: 32px; height: 32px; font-size: 16px; }
       }
 
       /* ---------- 2판: 능력 칸 ---------- */
@@ -487,6 +493,55 @@
         #dist { top: calc(236px + env(safe-area-inset-top)); width: 128px; }
         #feed { top: calc(150px + env(safe-area-inset-top)); font-size: 11px; }
       }
+
+      /* 첫 화면: 모험 · 아레나 */
+      .modes { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 14px; }
+      .mode { position: relative; display: flex; align-items: center; gap: 10px; text-align: left; border: 3.5px solid var(--ink); border-radius: 18px; padding: 10px 12px; cursor: pointer; box-shadow: 0 5px 0 var(--ink); color: #fff; }
+      .mode.adv { background: linear-gradient(180deg, #7fb8e8, #3c7ab8); }
+      .mode.arena { background: linear-gradient(180deg, #ffb14a, #e8622a); }
+      .mode .mi { font-size: 34px; }
+      .mode .mt { display: flex; flex-direction: column; }
+      .mode .mt b { font-family: var(--title); font-weight: normal; font-size: 26px; line-height: 1.1; }
+      .mode .mt small { font-size: 12.5px; color: #fffbe8; }
+      .mode em { position: absolute; right: 10px; top: 8px; font-style: normal; font-size: 11px; background: #fff8dc; color: var(--ink); border: 2px solid var(--ink); border-radius: 8px; padding: 0 6px; }
+      #advNote { margin-top: 6px; font-size: 13px; color: var(--ink); background: #e8f3ff; border: 2px solid var(--ink); border-radius: 12px; padding: 6px 8px; }
+      /* 단계별 고르기 */
+      .stepdots { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+      .stepdots::-webkit-scrollbar { display: none; }
+      .stepdots .sd { flex: none; font-size: 11.5px; padding: 3px 8px; border-radius: 10px; border: 2px solid var(--ink); background: rgba(255, 248, 220, 0.5); color: var(--ink); }
+      .stepdots .sd.done { background: #d6f0b8; }
+      .stepdots .sd.on { background: var(--gold); box-shadow: 0 0 0 2px #fff; }
+      .selcur { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #fff3c0; min-height: 0; }
+      .selcur img { width: 30px; height: 30px; }
+      .stepbody { display: flex; flex-direction: column; gap: 6px; }
+      .stepbody .list { display: flex; flex-direction: column; gap: 6px; }
+      .opt { display: flex; align-items: center; gap: 10px; text-align: left; border-radius: 16px; border: 3px solid var(--ink); background: linear-gradient(180deg, #fffdf3, #efe7c8); color: var(--ink); padding: 8px 10px; cursor: pointer; box-shadow: 0 4px 0 var(--ink); }
+      .opt.on { background: linear-gradient(90deg, color-mix(in srgb, var(--c, #ffd23f) 45%, #fff), #fff8dc); box-shadow: 0 0 0 3px var(--gold), 0 4px 0 var(--ink); }
+      .opt .oi { font-size: 30px; flex: none; width: 40px; text-align: center; }
+      .opt .ot { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+      .opt .ot b { font-family: var(--title); font-weight: normal; font-size: 18px; }
+      .opt .ot b em { font-style: normal; font-family: var(--ui); font-size: 10px; padding: 0 5px; border-radius: 6px; background: var(--gold); border: 1.5px solid var(--ink); vertical-align: 3px; }
+      .opt .ot small { font-size: 12px; line-height: 1.3; }
+      .opt .ot .inst em { font-style: normal; color: #6a3ab8; }
+      .opt .ot .fact { color: #6b5a2a; font-size: 11px; }
+      .opt .ot .mt { color: #7a6a4a; font-size: 11px; }
+      .opt .ot .aw { color: #8a5a1a; font-size: 11px; }
+      .opt .op { display: flex; flex: none; }
+      .opt .op img { width: 40px; height: 40px; }
+      .opt .pic { flex: none; width: 84px; height: 84px; border-radius: 14px; display: grid; place-items: center; background: radial-gradient(circle, #fff, color-mix(in srgb, var(--c) 40%, #fff)); border: 2.5px solid var(--ink); }
+      .opt .pic img { width: 92px; }
+      .stepbody .hint { margin: 0; font-size: 12.5px; color: #fff3c0; }
+      .sum { display: flex; flex-direction: column; gap: 4px; }
+      .sumrow { display: flex; align-items: center; gap: 8px; text-align: left; border-radius: 12px; border: 2.5px solid var(--ink); background: #fff8dc; color: var(--ink); padding: 6px 10px; cursor: pointer; }
+      .sumrow em { font-style: normal; width: 64px; font-size: 12px; color: #6b5a2a; }
+      .sumrow span { flex: 1; font-size: 14px; }
+      .sumrow i { font-style: normal; font-size: 11.5px; color: #3c7ab8; }
+      #oRank { margin-top: 6px; font-size: 12px; }
+      #oRank table { width: 100%; border-collapse: collapse; }
+      #oRank td, #oRank th { padding: 2px 4px; text-align: center; }
+      #oRank th { font-weight: normal; color: #6b5a2a; font-size: 11px; }
+      #oRank td.n { text-align: left; }
+      #oRank tr.me td { background: #fff1a8; }
     </style>
   </head>
   <body>
@@ -525,10 +580,14 @@
       <div class="tag">곤충 진화 스네이크 · 2판 시험판</div>
       <div class="lineup" id="lineup"></div>
       <div class="box">
-        <div class="goal"><b>10계열 40종</b> 중 하나를 골라<br /><b>8분</b> 동안 키우고 <b>1등</b>을 노리세요!</div>
+        <div class="goal"><b>10계열 40종</b> 곤충 중 하나로<br />키우고 싸워 <b>1등</b>을 노리세요!</div>
+        <div class="modes">
+          <button class="mode adv" id="advBtn"><span class="mi">🗺️</span><span class="mt"><b class="ol">모험</b><small>혼자 지역을 넘으며 보스를 잡고 크롤러를 모아요</small></span><em>준비 중</em></button>
+          <button class="mode arena pulse" id="arenaBtn"><span class="mi">⚔️</span><span class="mt"><b class="ol">아레나</b><small>5분 동안 곤충 20마리와 겨뤄요</small></span></button>
+        </div>
+        <div id="advNote" class="hidden"></div>
         <div class="legend"><span><i style="border-color:#7dff5a"></i>나보다 약함</span><span><i style="border-color:#bbb"></i>비슷</span><span><i style="border-color:#ff4a3a"></i>나보다 셈</span></div>
         <div class="how" id="howto"></div>
-        <button class="gbtn pulse ol" id="startBtn">크롤러 고르기</button>
         <div class="opts"><button id="setBtn">⚙️ 설정</button></div>
         <div class="best" id="startBest"></div>
       </div>
@@ -545,9 +604,10 @@
           <div>레벨<b id="oStage">1</b></div>
           <div>시간<b id="oTime">0:00</b></div>
           <div>처치<b id="oKills">0</b></div>
+          <div>쓰러짐<b id="oDeaths">0</b></div>
           <div>압착<b id="oCrush">0</b></div>
-          <div>최대 길이<b id="oLen">0</b></div>
         </div>
+        <div id="oRank"></div>
         <div id="oFact"></div>
         <div id="oBest"></div>
         <button class="gbtn ol" id="againBtn">다시 하기</button>
@@ -556,14 +616,11 @@
     </div>
     <div id="select" class="overlay hidden">
       <div class="selbox">
-        <div class="selhd"><button id="selBack" class="back">◀</button><div class="stitle ol">크롤러 고르기</div></div>
-        <div class="chips" id="roleChips"></div>
-        <div class="famrow" id="famRow"></div>
-        <div class="selinfo" id="selInfo"></div>
-        <div class="chips sp" id="spChips"></div>
-        <div class="forms" id="forms"></div>
-        <div class="traits" id="traits"></div>
-        <button class="gbtn pulse ol go" id="goBtn">시작!</button>
+        <div class="selhd"><button id="selBack" class="back">◀</button><div class="stitle ol" id="selTitle">크롤러 고르기</div></div>
+        <div class="stepdots" id="stepDots"></div>
+        <div class="selcur" id="selCur"></div>
+        <div class="stepbody" id="stepBody"></div>
+        <button class="gbtn ol go" id="goBtn">다음 ▶</button>
       </div>
     </div>
     <div id="settings" class="overlay hidden">

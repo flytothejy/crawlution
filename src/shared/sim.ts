@@ -7,7 +7,7 @@ import { botThink, bossThink, botPickCard } from './bot';
 import { baseB, biteOf, maxHpOf } from './combat';
 import { Enemies } from './enemies';
 import { ABILITIES, ABILITY_BY_ID, BONUS_CARDS, type LevelCard, traitMod, hasSpecial, COMMON_TRAITS, familyTraits } from './cards';
-import { COMMON_SUBS, FAMILIES, FAMILY, SPECIAL_FOODS, SPECIES, SPECIES_BY_ID, taste, type Family, type FormDef, type Species, type SubDef } from './species';
+import { COMMON_SUBS, FAMILIES, FAMILY, SPECIAL_FOODS, SPECIES, SPECIES_BY_ID, formsOf, taste, type Family, type FormDef, type Species, type SubDef } from './species';
 import * as SK from './skills';
 import {
   defaultOpts, emptyCommand,
@@ -60,6 +60,9 @@ export interface Snake {
   evolveT: number;
   // 기록
   kills: number;
+  /** 판 전체 처치·쓰러짐(봇이 새로 태어나도 이어 셈, 순위표 K/D) */
+  killsAll: number;
+  deaths: number;
   crushes: number;
   score: number;
   ultUses: number;
@@ -353,7 +356,7 @@ export class Simulation {
       const fam = this.pickBotFamily(famCount);
       famCount.set(fam.id, (famCount.get(fam.id) ?? 0) + 1);
       const bsp = SPECIES_BY_ID.get(this.rng.pick(fam.species))!;
-      const b = this.makeSnake(i + 1, BOT_NAMES[i % BOT_NAMES.length], false, bsp, this.rng.pick(fam.forms).id, this.botTraits(fam));
+      const b = this.makeSnake(i + 1, BOT_NAMES[i % BOT_NAMES.length], false, bsp, this.rng.pick(formsOf(bsp.id)).id, this.botTraits(fam));
       this.snakes.push(b);
       this.respawnBot(b, 1);
     }
@@ -416,7 +419,8 @@ export class Simulation {
 
   private makeSnake(id: number, name: string, isPlayer: boolean, sp: Species, formId: string, traits: string[]): Snake {
     const fam = FAMILY[sp.family];
-    const form = fam.forms.find((f) => f.id === formId) ?? fam.forms[0];
+    const okForms = formsOf(sp.id);
+    const form = okForms.find((f) => f.id === formId) ?? okForms[0];
     let acc = this.rng.next(), persona: Personality = 'gatherer';
     for (const [p, w] of PERSONAS) {
       if (acc < w) {
@@ -432,7 +436,7 @@ export class Simulation {
       cmd: emptyCommand(), boosting: false, sneaking: false, boostAcc: 0,
       sp, fam, form, sub: null, traits: new Set(traits.slice(0, 2)),
       level: 1, evo: 1, nut: 0, totalNut: 0, abilities: [], mainLv: 0, subLv: 0, offer: null, pending: 0, subPending: false, newGiven: 0, rerolls: CONFIG.rerolls, evolveT: 0,
-      kills: 0, crushes: 0, score: 0, ultUses: 0, respawnT: 0, loopCd: 0,
+      kills: 0, killsAll: 0, deaths: 0, crushes: 0, score: 0, ultUses: 0, respawnT: 0, loopCd: 0,
       hp: 1, maxHp: 1, hurtT: 99, biteCd: 0, invulnT: 0, wallCd: 0, dropAcc: 0, poisonT: 0, poisonDps: 0, poisonBy: -1, poisonAcc: 0, lives: 1, ult: 0, netT: 0, feastT: 0, yuckT: 0,
       lastSkillSeq: 0, lastSubSeq: 0, lastCardSeq: 0, lastRerollSeq: 0, skillCd: 0, subCd: 0,
       stunT: 0, slowT: 0, slowMul: 1, rootT: 0, silenceT: 0, blindT: 0, markT: 0, fearT: 0, hiddenT: 0, ghostT: 0, flyT: 0,
@@ -905,13 +909,12 @@ export class Simulation {
   makeOffer(s: Snake, reroll = false) {
     if (s.subPending && s.evo >= 2) {
       const n = 3;
-      const roleOk = COMMON_SUBS.filter((c) => c.roles?.includes(s.fam.role));
-      const other = COMMON_SUBS.filter((c) => !c.roles?.includes(s.fam.role));
+      // 공용 보조 기술은 그 계열 생태에 맞는 것만 나온다
+      const ok = COMMON_SUBS.filter((c) => c.families?.includes(s.fam.id));
       const picked: string[] = [s.fam.sub.id];
       let guard = 0;
       while (picked.length < n && guard++ < 50) {
-        const pool = this.rng.next() < 0.75 && roleOk.length ? roleOk : other;
-        const c = this.rng.pick(pool);
+        const c = this.rng.pick(ok);
         if (!picked.includes(c.id)) picked.push(c.id);
       }
       // 계열 전용을 가운데 자리에 섞어 둔다
@@ -2105,9 +2108,11 @@ export class Simulation {
       for (let k = 0; k < Math.min(2, s.rerolls - (s.isPlayer ? 0 : 1)); k++) this.dropGold(s.x, s.y);
       if (this.inst(s, 'babies')) SK.babies(this, s);
     }
+    s.deaths++;
     const killer = by >= 0 && by !== s.id ? this.snakes[by] : null;
     if (killer) {
       killer.kills++;
+      killer.killsAll++;
       if (this.tsp(killer, 'hunter')) ((killer.hp = Math.min(killer.maxHp, killer.hp + killer.maxHp * 0.4)), this.addUlt(killer, 20));
       this.addUlt(killer, CONFIG.ultKill);
       if (killer.fam.id === 'mantis' && this.ab(killer, 'hunter') > 0) killer.skillCd *= 1 - this.ab(killer, 'hunter');
@@ -2142,7 +2147,7 @@ export class Simulation {
       alive: s.alive, isPlayer: s.isPlayer, isBoss: s.isBoss, r: s.r, angle: s.angle,
       boosting: s.boosting, sneaking: s.sneaking,
       segs: s.alive ? s.segs.slice(0, s.segN * 2) : new Float32Array(0),
-      score: s.score, kills: s.kills, crushes: s.crushes, length: s.segCount,
+      score: s.score, kills: s.kills, killsAll: s.killsAll, deaths: s.deaths, crushes: s.crushes, length: s.segCount,
       hp: Math.max(0, Math.ceil(s.hp)), maxHp: s.maxHp,
       captured: s.netT > 0, invuln: s.invulnT > 0 || s.deadT > 0, poisoned: s.poisonT > 0,
       evolving: s.evolveT > 0 ? 1 - s.evolveT / CONFIG.evolveTime : 0,

@@ -1,4 +1,4 @@
-// 2판 판 단위 측정: 플레이어 자리도 봇 AI로 8분 판을 돌려 '수치를 맞추는 방법' 표의 목표를 잰다.
+// 2판 판 단위 측정: 플레이어 자리도 봇 AI로 한 판(5분)을 돌려 '수치를 맞추는 방법' 표의 목표를 잰다.
 // 사용: npx tsx scripts/balance.ts [판 수=20]
 import { Simulation } from '../src/shared/sim';
 import { botThink } from '../src/shared/bot';
@@ -83,12 +83,12 @@ console.log();
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const mmss = (v: number) => `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, '0')}`;
 console.log(`판 ${N}개(계열을 돌아가며 플레이어 자리에 둠)`);
-console.log(`성충(Lv5) 도달: 평균 ${mmss(avg(R.lv5))}   목표 1:20`);
-console.log(`각성(Lv10) 도달: 평균 ${mmss(avg(R.lv10))}(${R.lv10?.length ?? 0}마리) · 플레이어 ${mmss(avg(R.pLv10))}   목표 3:30~4:00`);
+console.log(`성충(Lv5) 도달: 평균 ${mmss(avg(R.lv5))}   목표 0:45~0:55`);
+console.log(`각성(Lv10) 도달: 평균 ${mmss(avg(R.lv10))}(${R.lv10?.length ?? 0}마리) · 플레이어 ${mmss(avg(R.pLv10))}   목표 2:20~2:40`);
 console.log(`판 끝 평균 레벨(살아 있는 곤충): ${avg(R.endLv).toFixed(1)}  플레이어 ${avg(R.playerLv).toFixed(1)}   목표 14~15`);
 console.log(`싸움 시간(맞기 시작~쓰러짐) 중간값: ${med(R.fight).toFixed(1)}초   목표 5~8초`);
 console.log(`낮은 레벨이 이긴 비율: ${pct(avg(R.lowWin))}   목표 10~15%`);
-console.log(`필살기: 곤충당 판마다 ${avg(R.ults).toFixed(1)}번, 필살기로 끝난 처치 ${pct(avg(R.ultKill))}   목표 3~5번, 30% 이하`);
+console.log(`필살기: 곤충당 판마다 ${avg(R.ults).toFixed(1)}번, 필살기로 끝난 처치 ${pct(avg(R.ultKill))}   목표 3~4번, 30% 이하`);
 console.log(`천적으로 쓰러진 비율: ${pct(avg(R.enemy))}   목표 8~15%`);
 console.log(`기술 피해 비중: ${pct(avg(R.skillShare))}`);
 console.log(`판당 쓰러짐: ${avg(R.deaths).toFixed(0)} · 플레이어 자리 ${avg(R.pDeaths).toFixed(1)}번(목숨 3개)`);

@@ -81,6 +81,8 @@ export interface SnakeView {
   segs: Float32Array; // x0,y0(머리), x1,y1, ...
   score: number;
   kills: number;
+  killsAll: number;
+  deaths: number;
   crushes: number;
   length: number;
   hp: number;

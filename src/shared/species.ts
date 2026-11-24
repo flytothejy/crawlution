@@ -35,7 +35,8 @@ export interface SubDef {
   cd: number;
   ai: AiKind;
   range: number;
-  roles?: Role[]; // 공용 보조 기술이 잘 맞는 역할
+  /** 공용 보조 기술: 생태에 맞는 계열에게만 나온다 */
+  families?: FamilyId[];
 }
 
 export interface UltDef {
@@ -77,6 +78,8 @@ export interface Species {
   look: Look;
   larva?: Look; // 어린 모습(없으면 계열 기본)
   fact: string;
+  /** 이 종이 쓸 수 있는 기술 형태(생태에 안 맞는 형태를 뺌). 없으면 계열의 3가지 모두 */
+  forms?: string[];
 }
 
 export interface Family {
@@ -223,7 +226,7 @@ export const FAMILIES: Family[] = [
     sub: { id: 'waggle', name: '8자 춤', icon: '💃', desc: '주변 먹이를 끌어오고, 가까운 특별 먹이·황금 꿀방울을 표시', cd: 15, ai: 'self', range: 300 },
     ult: { name: '벌 떼 습격', icon: '🐝', desc: '벌 10마리가 5초 동안 함께 싸움', awake: '벌이 적을 둘러싸 열 공', range: 320 },
     larva: GRUB(0xe0b84a, 0xfdf6e8, 0xf0e4c8), likes: 8, hates: 2, strong: '방어', weak: '사격',
-    species: ['honeybee', 'nativebee', 'bumble', 'leafcutter'],
+    species: ['honeybee', 'nativebee', 'bumble', 'giantbee'],
   },
   {
     id: 'firefly', name: '반딧불이', role: 'support', hp: 0.9, atk: 1.0, spd: 1.0, cdMul: 1, knockTaken: 1,
@@ -305,9 +308,9 @@ export const SPECIES: Species[] = [
     look: { body: 0xf2d04a, stripe: 0x2a2a2a, head: 0x2a2a2a, shape: 'spider', feats: ['legs8'], fang: 16 }, fact: '가을에 크고 노란빛이 도는 그물을 친다.' }),
   sp({ id: 'gardenspider', family: 'spider', name: '왕거미', instinct: { id: 'rebuild', name: '그물 다시 짓기', desc: '그물에 적이 걸리면 재사용 시간이 바로 절반' },
     look: { body: 0x9a6a3a, stripe: 0xe8d2a6, head: 0x7a4a22, shape: 'spider', pattern: 'fuzzy', feats: ['legs8'], fang: 16 }, fact: '둥근 그물을 자주 새로 친다.' }),
-  sp({ id: 'jumper', family: 'spider', name: '깡충거미', instinct: { id: 'pounce', name: '뛰어 덮치기', desc: '줄·그물에 걸린 적에게 자동으로 뛰어 붙음' },
+  sp({ id: 'jumper', family: 'spider', forms: ['silk', 'trail'], name: '깡충거미', instinct: { id: 'pounce', name: '뛰어 덮치기', desc: '줄·그물에 걸린 적에게 자동으로 뛰어 붙음' },
     look: { body: 0x6a6a72, stripe: 0xe8c547, head: 0x4a4a52, shape: 'spider', pattern: 'fuzzy', feats: ['legs8'], fang: 14, eye: 0x111111 }, fact: '그물 대신 앞쪽의 큰 눈으로 거리를 재고 뛰어서 덮친다.' }),
-  sp({ id: 'wolfspider', family: 'spider', name: '늑대거미', instinct: { id: 'babies', name: '새끼 업기', desc: '쓰러질 때 새끼거미가 흩어져 주변 적을 느리게 함' },
+  sp({ id: 'wolfspider', family: 'spider', forms: ['silk', 'trail'], name: '늑대거미', instinct: { id: 'babies', name: '새끼 업기', desc: '쓰러질 때 새끼거미가 흩어져 주변 적을 느리게 함' },
     look: { body: 0x6a5a48, stripe: 0x4a3e30, head: 0x5a4a3a, shape: 'spider', pattern: 'fuzzy', feats: ['legs8'], fang: 16 }, fact: '어미가 새끼를 등에 업고 다닌다.' }),
   sp({ id: 'widow', family: 'spider', name: '검은과부거미', instinct: { id: 'venom', name: '강한 독', desc: '묶인 적에게 독 피해가 계속 들어감' },
     look: { body: 0x1e1e24, stripe: 0xd8262f, head: 0x16161a, shape: 'spider', pattern: 'metal', feats: ['legs8'], fang: 20 }, fact: '독이 강하기로 유명하다. 배에 붉은 모래시계 무늬가 있다.' }),
@@ -315,10 +318,10 @@ export const SPECIES: Species[] = [
   sp({ id: 'myrm', family: 'antlion', name: '명주잠자리', instinct: { id: 'deep', name: '깊은 구덩이', desc: '구덩이가 더 크고 오래 감' },
     larva: { body: 0x9a8a6a, stripe: 0x7a6a4a, head: 0x8a7a5a, shape: 'antlion', antenna: 'short', mandible: { size: 52, teeth: true, color: 0x5a4a2a }, pattern: 'fuzzy' },
     look: { body: 0x5a5040, stripe: 0x4a4234, head: 0x4a4234, shape: 'lace', antenna: 'club', feats: ['wings4'] }, fact: '애벌레(개미귀신)가 모래에 깔때기 함정을 판다.' }),
-  sp({ id: 'owlfly', family: 'antlion', name: '노랑뿔잠자리', instinct: { id: 'jaws', name: '큰턱 벌리고 기다리기', desc: '웅크리고 1초 뒤, 다음 물기가 치명타(2배)' },
+  sp({ id: 'owlfly', family: 'antlion', forms: ['ambush', 'sand'], name: '노랑뿔잠자리', instinct: { id: 'jaws', name: '큰턱 벌리고 기다리기', desc: '웅크리고 1초 뒤, 다음 물기가 치명타(2배)' },
     larva: { body: 0x8a7a58, stripe: 0x6e6046, head: 0x7a6a4a, shape: 'antlion', antenna: 'short', mandible: { size: 60, teeth: true, color: 0x4a3a20 }, pattern: 'fuzzy' },
     look: { body: 0x3a3a2a, stripe: 0xf2c230, head: 0x3a3a2a, shape: 'lace', antenna: 'long', feats: ['wings4'] }, fact: '애벌레가 땅 위에서 큰턱을 벌리고 기다린다.' }),
-  sp({ id: 'lacewing', family: 'antlion', name: '풀잠자리', instinct: { id: 'trash', name: '쓰레기 등짐', desc: '먹을수록 등에 찌꺼기를 얹어 몸 뒤쪽 피해를 최대 40% 막음' },
+  sp({ id: 'lacewing', family: 'antlion', forms: ['ambush', 'sand'], name: '풀잠자리', instinct: { id: 'trash', name: '쓰레기 등짐', desc: '먹을수록 등에 찌꺼기를 얹어 몸 뒤쪽 피해를 최대 40% 막음' },
     larva: { body: 0xb8a878, stripe: 0x9a8a5a, head: 0xa89868, shape: 'antlion', antenna: 'short', mandible: { size: 44, color: 0x6a5a3a }, feats: ['pack'] },
     look: { body: 0x8ad85a, stripe: 0x6ac040, head: 0x7ac84a, shape: 'lace', antenna: 'long', feats: ['wings4'], eye: 0xe8c040 }, fact: '일부 애벌레는 먹이 찌꺼기를 등에 지고 위장한다.' }),
   // 꿀벌
@@ -326,10 +329,10 @@ export const SPECIES: Species[] = [
     look: { body: 0xf6c94a, stripe: 0x3a2a10, head: 0x3a2a10, shape: 'bee', pattern: 'swarm', antenna: 'elbow', feats: ['wings', 'stinger'] }, fact: '꿀을 모아 저장하고, 8자 춤으로 꽃밭의 위치를 알린다.' }),
   sp({ id: 'nativebee', family: 'bee', name: '토종벌', instinct: { id: 'heat', name: '열 공 전문', desc: '열 공 지속 2배, 말벌 계열에게 주는 피해 +30%' },
     look: { body: 0xb08a3a, stripe: 0x2a1e10, head: 0x2a1e10, shape: 'bee', pattern: 'swarm', antenna: 'elbow', feats: ['wings', 'stinger'] }, fact: '말벌을 둘러싸 체온을 올려 물리친다.' }),
-  sp({ id: 'bumble', family: 'bee', name: '뒤영벌', instinct: { id: 'buzz', name: '붕붕 진동', desc: '질주하는 동안 주변 적을 살짝 밀어냄' },
+  sp({ id: 'bumble', family: 'bee', forms: ['workers', 'honey'], name: '뒤영벌', instinct: { id: 'buzz', name: '붕붕 진동', desc: '질주하는 동안 주변 적을 살짝 밀어냄' },
     look: { body: 0xf2d04a, stripe: 0x1e1e1e, head: 0x1e1e1e, shape: 'bee', pattern: 'fuzzy', antenna: 'elbow', feats: ['wings'] }, fact: '날개 근육을 떨어 꽃가루를 털어낸다.' }),
-  sp({ id: 'leafcutter', family: 'bee', name: '가위벌', instinct: { id: 'leafshield', name: '잎 조각 집', desc: '웅크리면 잎으로 몸을 덮어 앞쪽 피해를 막음' },
-    look: { body: 0x4a4a4a, stripe: 0xd8c8a8, head: 0x3a3a3a, shape: 'bee', pattern: 'swarm', antenna: 'elbow', feats: ['wings'], mandible: { size: 24 } }, fact: '잎을 오려 둥지를 만든다.' }),
+  sp({ id: 'giantbee', family: 'bee', forms: ['workers', 'honey'], name: '큰꿀벌', instinct: { id: 'leafshield', name: '벌 커튼', desc: '웅크리면 일벌들이 몸을 덮어 앞쪽 피해를 막음' },
+    look: { body: 0xd89a2a, stripe: 0x2a1a10, head: 0x2a1a10, shape: 'bee', pattern: 'swarm', antenna: 'elbow', feats: ['wings', 'stinger'] }, fact: '나뭇가지나 절벽에 벌집 한 장을 드러내 짓고, 적이 오면 벌들이 물결치듯 몸을 뒤집어 겁을 준다.' }),
   // 반딧불이
   sp({ id: 'genji', family: 'firefly', name: '애반딧불이', instinct: { id: 'waterborn', name: '물가 태생', desc: '웅덩이 안에서 체력 회복' },
     look: { body: 0x2a2a2a, stripe: 0x1e1e1e, head: 0xe8803a, shape: 'firefly', antenna: 'club', feats: ['wings', 'lamp'] }, fact: '애벌레가 물속에서 산다.' }),
@@ -370,16 +373,16 @@ export const BOSS_LOOK: Look = { body: 0x8a2a1a, stripe: 0x5a1a10, head: 0x4a120
 
 /** 공용 보조 기술 10개 */
 export const COMMON_SUBS: SubDef[] = [
-  { id: 'camo', name: '위장', icon: '🍃', desc: '2초 동안 안 보이고, 다음 공격 피해 1.5배', cd: 14, ai: 'buff', range: 200, roles: ['charge', 'trap'] },
-  { id: 'hop', name: '짧은 비행', icon: '🪽', desc: '몸 충돌을 무시하고 앞으로 날아감', cd: 10, ai: 'move', range: 0, roles: ['charge', 'shoot', 'support'] },
-  { id: 'escape', name: '탈출 질주', icon: '💨', desc: '1초 동안 매우 빨라지고, 묶임·느려짐·잡힘이 풀림', cd: 12, ai: 'escape', range: 0, roles: ['tank', 'charge', 'shoot', 'trap', 'support'] },
-  { id: 'curl', name: '껍질 웅크림', icon: '🐚', desc: '1.5초 동안 받는 피해 −60%, 대신 움직이지 못함', cd: 12, ai: 'defense', range: 0, roles: ['tank', 'support'] },
-  { id: 'reserve', name: '저장 양분', icon: '🫙', desc: '체력 25% 즉시 회복', cd: 20, ai: 'heal', range: 0, roles: ['support', 'tank'] },
-  { id: 'spit', name: '끈끈이 침', icon: '💧', desc: '침을 뱉어 맞은 적이 1.5초 느려짐', cd: 8, ai: 'proj', range: 300, roles: ['shoot', 'trap'] },
-  { id: 'bait', name: '가짜 먹이', icon: '🍬', desc: '먹이처럼 보이는 미끼를 놓음. 닿은 적은 1초 묶임', cd: 12, ai: 'place', range: 150, roles: ['trap', 'support'] },
-  { id: 'roll', name: '구르기', icon: '🔄', desc: '짧게 굴러 자리를 피하고, 다음 물기 피해 +50%', cd: 8, ai: 'move', range: 0, roles: ['tank', 'charge'] },
-  { id: 'chirp', name: '경고 소리', icon: '📢', desc: '찌르르 소리로 주변 적을 0.5초 기절', cd: 15, ai: 'aoe', range: 150, roles: ['tank', 'charge', 'shoot', 'trap', 'support'] },
-  { id: 'molt', name: '허물 남기기', icon: '👻', desc: '제자리에 허물을 남기고 앞으로 순간이동. 적은 허물을 나로 봄', cd: 14, ai: 'escape', range: 0, roles: ['charge', 'shoot'] },
+  { id: 'camo', name: '위장', icon: '🍃', desc: '2초 동안 안 보이고, 다음 공격 피해 1.5배', cd: 14, ai: 'buff', range: 200, families: ['mantis', 'stinkbug', 'spider', 'antlion'] },
+  { id: 'hop', name: '짧은 비행', icon: '🪽', desc: '몸 충돌을 무시하고 앞으로 날아감', cd: 10, ai: 'move', range: 0, families: ['rhino', 'stag', 'mantis', 'dragonfly', 'wasp', 'stinkbug', 'bee', 'firefly'] },
+  { id: 'escape', name: '탈출 질주', icon: '💨', desc: '1초 동안 매우 빨라지고, 묶임·느려짐·잡힘이 풀림', cd: 12, ai: 'escape', range: 0, families: ['rhino', 'stag', 'mantis', 'dragonfly', 'wasp', 'stinkbug', 'spider', 'antlion', 'bee', 'firefly'] },
+  { id: 'curl', name: '껍질 웅크림', icon: '🐚', desc: '1.5초 동안 받는 피해 −60%, 대신 움직이지 못함', cd: 12, ai: 'defense', range: 0, families: ['rhino', 'stag', 'stinkbug'] },
+  { id: 'reserve', name: '저장 양분', icon: '🫙', desc: '체력 25% 즉시 회복', cd: 20, ai: 'heal', range: 0, families: ['rhino', 'stag', 'antlion', 'bee'] },
+  { id: 'spit', name: '끈끈이 침', icon: '💧', desc: '끈끈한 실 섞인 침을 뱉어 맞은 적이 1.5초 느려짐', cd: 8, ai: 'proj', range: 300, families: ['spider'] },
+  { id: 'bait', name: '가짜 먹이', icon: '🍬', desc: '먹이처럼 보이는 미끼를 놓음. 닿은 적은 1초 묶임', cd: 12, ai: 'place', range: 150, families: ['mantis', 'spider', 'antlion', 'firefly'] },
+  { id: 'roll', name: '구르기', icon: '🔄', desc: '짧게 굴러 자리를 피하고, 다음 물기 피해 +50%', cd: 8, ai: 'move', range: 0, families: ['rhino', 'stag'] },
+  { id: 'chirp', name: '경고 소리', icon: '📢', desc: '몸이나 날개를 비벼 낸 경고 소리로 주변 적을 0.5초 기절', cd: 15, ai: 'aoe', range: 150, families: ['rhino', 'stag', 'wasp', 'stinkbug', 'bee'] },
+  { id: 'molt', name: '허물 남기기', icon: '👻', desc: '제자리에 허물을 남기고 앞으로 순간이동. 적은 허물을 나로 봄', cd: 14, ai: 'escape', range: 0, families: ['mantis', 'dragonfly', 'stinkbug', 'spider'] },
 ];
 
 export const SUBS_BY_ID = new Map<string, SubDef>([...COMMON_SUBS.map((s) => [s.id, s] as const), ...FAMILIES.map((f) => [f.sub.id, f.sub] as const)]);
@@ -411,4 +414,11 @@ export function taste(f: FamilyId | null | undefined, food: number): -1 | 0 | 1 
 /** 이 먹이를 좋아하는 계열 */
 export function likerOf(food: number): Family | undefined {
   return FAMILIES.find((f) => f.likes === food);
+}
+
+/** 이 종이 쓸 수 있는 기술 형태 */
+export function formsOf(speciesId: string): FormDef[] {
+  const sp = SPECIES_BY_ID.get(speciesId)!;
+  const F = FAMILY[sp.family];
+  return sp.forms ? F.forms.filter((f) => sp.forms!.includes(f.id)) : F.forms;
 }

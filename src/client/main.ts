@@ -1,7 +1,7 @@
 // 시작점: 화면·조작·시뮬레이션 호스트를 연결하고, 받은 상태를 보간해서 그린다.
 import './fonts.css';
 import { CONFIG } from '../shared/config';
-import { FAMILIES, FAMILY, ROLE_LIST, ROLES, SPECIAL_FOODS, SPECIES_BY_ID, SUBS_BY_ID, type Family, type FamilyId } from '../shared/species';
+import { FAMILIES, FAMILY, ROLE_LIST, ROLES, SPECIAL_FOODS, SPECIES_BY_ID, SUBS_BY_ID, formsOf, type Family, type FamilyId, type Role } from '../shared/species';
 import { ABILITY_BY_ID, BONUS_CARDS, MAIN_UPS, SUB_UP, COMMON_TRAITS, TRAIT_BY_ID, familyTraits, type TraitDef } from '../shared/cards';
 import { relation } from '../shared/combat';
 import type { CardView, EnemyKind, EnemyView, GameOpts, Loadout, Snapshot, SnakeView } from '../shared/types';
@@ -581,10 +581,10 @@ function updateHud(latest: Snapshot) {
   const all = latest.snakes.filter((s) => !s.isBoss).sort((x, y) => y.score - x.score);
   const row = (s: SnakeView, i: number) => {
     const icon = s.family ? ROLES[FAMILY[s.family].role].icon : '';
-    return `<div class="row ${s.isPlayer ? 'me' : ''} ol-thin"><span class="rk">${i + 1}</span><span class="li" style="--c:${hex(famColor(s.family))}">${icon}</span><span class="n">${s.isPlayer ? '나' : s.name}</span><span class="k">${s.level}</span><span class="v">${s.score}</span></div>`;
+    return `<div class="row ${s.isPlayer ? 'me' : ''} ol-thin"><span class="rk">${i + 1}</span><span class="li" style="--c:${hex(famColor(s.family))}">${icon}</span><span class="n">${s.isPlayer ? '나' : s.name}</span><span class="k">${s.level}</span><span class="kd">${s.killsAll}/${s.deaths}</span><span class="v">${s.score}</span></div>`;
   };
   const myI = all.findIndex((s) => s.isPlayer);
-  $('board').innerHTML = '<div class="hd">🏆 순위 <span>Lv · 점수</span></div>' + all.slice(0, 5).map(row).join('') + (myI >= 5 ? `<div class="sep">⋯</div>${row(all[myI], myI)}` : '');
+  $('board').innerHTML = '<div class="hd">🏆 순위 <span>Lv · 처치/쓰러짐 · 점수</span></div>' + all.slice(0, 5).map(row).join('') + (myI >= 5 ? `<div class="sep">⋯</div>${row(all[myI], myI)}` : '');
   updateCards(latest);
   drawMinimap(latest);
 }
@@ -683,12 +683,17 @@ function showResult(latest: Snapshot) {
   over.classList.toggle('win', won);
   over.classList.toggle('mid', !won && rank <= 3);
   $('overTitle').textContent = won ? '🏆 1등! 숲의 왕' : rank <= 3 ? `${rank === 2 ? '🥈' : '🥉'} ${rank}등!` : timeUp ? `${rank}등` : '목숨을 다 썼어요';
-  $('overSub').textContent = `${total}마리 중 ${rank}등 · ${timeUp ? '8분 완주' : '중간 탈락'} · Lv${me.level}`;
+  $('overSub').textContent = `${total}마리 중 ${rank}등 · ${timeUp ? `${Math.round(CONFIG.roundTime / 60)}분 완주` : '중간 탈락'} · Lv${me.level}`;
   countUp($('oScore'), me.score);
   $('oStage').textContent = `Lv${me.level}`;
-  countUp($('oKills'), me.kills, 600);
+  countUp($('oKills'), me.killsAll, 600);
+  countUp($('oDeaths'), me.deaths, 600);
   countUp($('oCrush'), me.crushes, 600);
-  countUp($('oLen'), maxLen, 700);
+  // 최종 순위(위 5 + 나)
+  const all = latest.snakes.filter((s) => !s.isBoss).sort((x, y) => y.score - x.score);
+  const myI = all.findIndex((s) => s.isPlayer);
+  const rr = (s: SnakeView, i: number) => `<tr class="${s.isPlayer ? 'me' : ''}"><td>${i + 1}</td><td class="n">${s.isPlayer ? '나' : s.name}</td><td>${s.level}</td><td>${s.killsAll}/${s.deaths}</td><td>${s.score}</td></tr>`;
+  $('oRank').innerHTML = `<table><tr><th>순위</th><th class="n">이름</th><th>Lv</th><th>처치/쓰러짐</th><th>점수</th></tr>${all.slice(0, 5).map(rr).join('')}${myI >= 5 ? rr(all[myI], myI) : ''}</table>`;
   const sec = Math.floor((performance.now() - startedAt) / 1000);
   $('oTime').textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
   // 빌드 요약
@@ -719,66 +724,116 @@ function statBar(label: string, v: number) {
   return `<div class="sbar"><em>${label}</em><i><b style="width:${k * 100}%"></b></i></div>`;
 }
 
+// 단계별 크롤러 고르기: 역할 → 계열 → 종 → 기술 형태 → 공용 특성 → 전용 특성 → 확인
+const STEPS = ['역할', '계열', '종', '기술', '특성①', '특성②', '확인'] as const;
+const STEP_TITLE = ['역할 고르기', '계열 고르기', '종 고르기', '기술 형태 고르기', '공용 특성 고르기', '전용 특성 고르기', '이대로 시작할까요?'];
+const ROLE_DESC: Record<string, string> = {
+  tank: '단단하게 버티며 밀어내고 붙잡는다',
+  charge: '빠르게 파고들어 큰 피해를 준다',
+  shoot: '멀리서 독침·가스로 깎아 낸다',
+  trap: '그물·구덩이로 묶고 끌어들인다',
+  support: '벌을 부르고 빛으로 흐트러뜨린다',
+};
+let step = 0;
+
+function setFamily(f: Family) {
+  if (famOf(LO.species).id === f.id) return;
+  LO.species = f.species[0];
+  LO.form = formsOf(LO.species)[0].id;
+  normTraits();
+}
+
 function buildSelect() {
   const F = famOf(LO.species);
   const sp = SPECIES_BY_ID.get(LO.species)!;
-  if (!F.forms.some((f) => f.id === LO.form)) LO.form = F.forms[0].id;
-  $('roleChips').innerHTML = [['all', '전체', '🐞'], ...ROLE_LIST.map((r) => [r, ROLES[r].name, ROLES[r].icon])]
-    .map(([id, name, icon]) => `<button class="chip${roleFilter === id ? ' on' : ''}" data-r="${id}">${icon} ${name}</button>`).join('');
-  const fams = FAMILIES.filter((f) => roleFilter === 'all' || f.role === roleFilter);
-  $('famRow').innerHTML = fams
-    .map((f) => `<button class="fcard${f.id === F.id ? ' on' : ''}" data-f="${f.id}" style="--c:${hex(f.color)}"><div class="pic"><img src="${renderer.portrait(f.species[0] + '@2')}" alt=""></div><div class="nm">${f.name}</div><div class="rl">${ROLES[f.role].icon} ${ROLES[f.role].name}</div></button>`)
-    .join('');
-  const like = SPECIAL_FOODS[F.likes], hate = SPECIAL_FOODS[F.hates];
-  $('selInfo').innerHTML = `<div class="big" style="--c:${hex(F.color)}"><img src="${renderer.portrait(LO.species + '@3')}" alt=""></div>
-    <div class="tx"><div class="nm ol">${sp.name}</div>
-      <div class="rl">${ROLES[F.role].icon} ${ROLES[F.role].name} · ${F.stages.join(' → ')}</div>
-      <div class="inst"><b>🧬 ${sp.instinct.name}</b> ${sp.instinct.desc}</div>
-      ${statBar('❤ 체력', F.hp)}${statBar('🦷 공격', F.atk)}${statBar('⚡ 속도', F.spd)}
-      <div class="tst"><span class="lk">♥ ${like.icon} ${like.name}</span> <span class="ht">✖ ${hate.icon} ${hate.name}</span></div>
-      <div class="mt">강함 ${F.strong} · 약함 ${F.weak}</div></div>`;
-  $('spChips').innerHTML = F.species
-    .map((id) => {
-      const s = SPECIES_BY_ID.get(id)!;
-      return `<button class="chip sp${id === LO.species ? ' on' : ''}" data-s="${id}"><img src="${renderer.portrait(id + '@2')}" alt="">${s.name}</button>`;
-    }).join('');
-  $('forms').innerHTML = `<div class="lbl">🎯 ${F.skill} · 기술 형태</div>` + F.forms
-    .map((f, i) => `<button class="form${f.id === LO.form ? ' on' : ''}" data-m="${f.id}" style="--c:${hex(F.color)}"><span class="ic">${f.icon}</span><span class="nm">${f.name}${i === 0 ? ' <em>추천</em>' : ''}</span><span class="ds">${f.desc}</span><span class="aw">각성: ${f.awake}</span></button>`)
-    .join('') + `<div class="ultline">⚡ 필살기 <b>${F.ult.icon} ${F.ult.name}</b> — ${F.ult.desc}<br><small>각성: ${F.ult.awake} · 전용 보조 기술 ${F.sub.icon} ${F.sub.name}</small></div>`;
+  const okForms = formsOf(LO.species);
+  if (!okForms.some((f) => f.id === LO.form)) LO.form = okForms[0].id;
   normTraits();
-  const tBtn = (t: TraitDef) => `<button class="trait${LO.traits.includes(t.id) ? ' on' : ''}" data-t="${t.id}"><b>${t.icon} ${t.name}</b><small class="up">▲ ${t.up}</small><small class="dn">▼ ${t.down}</small></button>`;
-  $('traits').innerHTML = `<div class="lbl">🎒 특성 · 공용 1개</div><div class="tgrid">${COMMON_TRAITS.map(tBtn).join('')}</div>`
-    + `<div class="lbl">🧬 특성 · ${F.name} 전용 1개</div><div class="tgrid">${familyTraits(F.id).map(tBtn).join('')}</div>`;
+  const role = roleFilter === 'all' ? F.role : (roleFilter as Role);
+  $('selTitle').textContent = STEP_TITLE[step];
+  $('stepDots').innerHTML = STEPS.map((n, i) => `<button class="sd${i === step ? ' on' : i < step ? ' done' : ''}" data-st="${i}">${i + 1}. ${n}</button>`).join('');
+  const form = okForms.find((f) => f.id === LO.form)!;
+  const tc = TRAIT_BY_ID.get(LO.traits[0])!, tf = TRAIT_BY_ID.get(LO.traits[1])!;
+  // 지금까지 고른 것(작게)
+  $('selCur').innerHTML = step === 6 ? '' : `<img src="${renderer.portrait(LO.species + '@3')}" alt=""><span>${ROLES[F.role].icon} ${F.name} · ${sp.name} · ${form.icon} ${form.name} · ${tc.icon}${tf.icon}</span>`;
+  const like = SPECIAL_FOODS[F.likes], hate = SPECIAL_FOODS[F.hates];
+  let body = '';
+  if (step === 0) {
+    body = `<div class="list">${ROLE_LIST.map((r) => {
+      const fams = FAMILIES.filter((f) => f.role === r);
+      return `<button class="opt${r === role ? ' on' : ''}" data-r="${r}"><span class="oi">${ROLES[r].icon}</span><span class="ot"><b>${ROLES[r].name}</b><small>${ROLE_DESC[r]}</small></span><span class="op">${fams.map((f) => `<img src="${renderer.portrait(f.species[0] + '@3')}" alt="">`).join('')}</span></button>`;
+    }).join('')}</div>`;
+  } else if (step === 1) {
+    body = `<div class="list">${FAMILIES.filter((f) => f.role === role).map((f) => `<button class="opt big${f.id === F.id ? ' on' : ''}" data-f="${f.id}" style="--c:${hex(f.color)}"><span class="pic"><img src="${renderer.portrait(f.species[0] + '@3')}" alt=""></span><span class="ot"><b>${f.name}</b><small>🎯 ${f.skill} · ⚡ ${f.ult.icon} ${f.ult.name}</small>${statBar('❤ 체력', f.hp)}${statBar('🦷 공격', f.atk)}${statBar('⚡ 속도', f.spd)}<small class="mt">강함 ${f.strong} · 약함 ${f.weak}</small></span></button>`).join('')}</div>`;
+  } else if (step === 2) {
+    body = `<div class="list">${F.species.map((id) => {
+      const s2 = SPECIES_BY_ID.get(id)!;
+      const fs = formsOf(id);
+      return `<button class="opt big${id === LO.species ? ' on' : ''}" data-s="${id}" style="--c:${hex(F.color)}"><span class="pic"><img src="${renderer.portrait(id + '@3')}" alt=""></span><span class="ot"><b>${s2.name}</b><small class="inst">🧬 <em>${s2.instinct.name}</em> ${s2.instinct.desc}</small><small class="fact">${s2.fact}</small>${fs.length < F.forms.length ? `<small class="mt">기술 형태 ${fs.map((x) => x.name).join('·')}만</small>` : ''}</span></button>`;
+    }).join('')}</div>`;
+  } else if (step === 3) {
+    body = `<div class="list">${okForms.map((f, i) => `<button class="opt form${f.id === LO.form ? ' on' : ''}" data-m="${f.id}" style="--c:${hex(F.color)}"><span class="oi">${f.icon}</span><span class="ot"><b>${f.name}${i === 0 ? ' <em>추천</em>' : ''}</b><small>${f.desc}</small><small class="aw">각성: ${f.awake}</small></span></button>`).join('')}</div>
+      <div class="ultline">⚡ 필살기 <b>${F.ult.icon} ${F.ult.name}</b> — ${F.ult.desc}<br><small>각성: ${F.ult.awake} · Lv5 전용 보조 기술 ${F.sub.icon} ${F.sub.name}</small></div>`;
+  } else if (step === 4 || step === 5) {
+    const list = step === 4 ? COMMON_TRAITS : familyTraits(F.id);
+    body = `<p class="hint">${step === 4 ? '모든 크롤러가 고를 수 있는 특성 1개. 얻는 만큼 잃어요.' : `${F.name}만 고를 수 있는 특성 1개. 기술을 한쪽으로 기울여요.`}</p><div class="tgrid">${list.map((t) => `<button class="trait${LO.traits.includes(t.id) ? ' on' : ''}" data-t="${t.id}"><b>${t.icon} ${t.name}</b><small class="up">▲ ${t.up}</small><small class="dn">▼ ${t.down}</small></button>`).join('')}</div>`;
+  } else {
+    const row = (st: number, label: string, v: string) => `<button class="sumrow" data-st="${st}"><em>${label}</em><span>${v}</span><i>바꾸기 ›</i></button>`;
+    body = `<div class="selinfo"><div class="big" style="--c:${hex(F.color)}"><img src="${renderer.portrait(LO.species + '@3')}" alt=""></div>
+      <div class="tx"><div class="nm ol">${sp.name}</div><div class="rl">${ROLES[F.role].icon} ${ROLES[F.role].name} · ${F.name} · ${F.stages.join(' → ')}</div>
+      <div class="inst"><b>🧬 ${sp.instinct.name}</b> ${sp.instinct.desc}</div>
+      <div class="tst"><span class="lk">♥ ${like.icon} ${like.name}</span> <span class="ht">✖ ${hate.icon} ${hate.name}</span></div></div></div>
+      <div class="sum">${row(0, '역할', `${ROLES[F.role].icon} ${ROLES[F.role].name}`)}${row(1, '계열', F.name)}${row(2, '종', sp.name)}${row(3, '기술', `${form.icon} ${form.name}`)}${row(4, '공용 특성', `${tc.icon} ${tc.name}`)}${row(5, '전용 특성', `${tf.icon} ${tf.name}`)}</div>`;
+  }
+  $('stepBody').innerHTML = body;
+  $('goBtn').textContent = step === 6 ? '시작!' : '다음 ▶';
+  $('goBtn').classList.toggle('pulse', step === 6);
   // 이벤트
-  $('roleChips').querySelectorAll<HTMLButtonElement>('.chip').forEach((el) => (el.onclick = () => ((roleFilter = el.dataset.r!), sfx.play('click'), buildSelect())));
-  $('famRow').querySelectorAll<HTMLButtonElement>('.fcard').forEach((el) =>
-    (el.onclick = () => {
-      const f = FAMILY[el.dataset.f as FamilyId];
-      LO.species = f.species[0];
-      LO.form = f.forms[0].id;
-      sfx.play('click');
-      saveLoadout();
-      buildSelect();
-    }),
+  const pick = (fn: () => void) => () => (fn(), sfx.play('click'), saveLoadout(), buildSelect());
+  $('stepDots').querySelectorAll<HTMLButtonElement>('.sd').forEach((el) => (el.onclick = () => ((step = Number(el.dataset.st)), sfx.play('click'), buildSelect())));
+  $('stepBody').querySelectorAll<HTMLButtonElement>('[data-st]').forEach((el) => (el.onclick = () => ((step = Number(el.dataset.st)), sfx.play('click'), buildSelect())));
+  $('stepBody').querySelectorAll<HTMLButtonElement>('[data-r]').forEach((el) =>
+    (el.onclick = pick(() => {
+      roleFilter = el.dataset.r!;
+      if (F.role !== roleFilter) setFamily(FAMILIES.find((f) => f.role === roleFilter)!);
+    })),
   );
-  $('spChips').querySelectorAll<HTMLButtonElement>('.chip').forEach((el) => (el.onclick = () => ((LO.species = el.dataset.s!), sfx.play('click'), saveLoadout(), buildSelect())));
-  $('forms').querySelectorAll<HTMLButtonElement>('.form').forEach((el) => (el.onclick = () => ((LO.form = el.dataset.m!), sfx.play('click'), saveLoadout(), buildSelect())));
-  $('traits').querySelectorAll<HTMLButtonElement>('.trait').forEach((el) =>
-    (el.onclick = () => {
+  $('stepBody').querySelectorAll<HTMLButtonElement>('[data-f]').forEach((el) => (el.onclick = pick(() => setFamily(FAMILY[el.dataset.f as FamilyId]))));
+  $('stepBody').querySelectorAll<HTMLButtonElement>('[data-s]').forEach((el) => (el.onclick = pick(() => (LO.species = el.dataset.s!))));
+  $('stepBody').querySelectorAll<HTMLButtonElement>('[data-m]').forEach((el) => (el.onclick = pick(() => (LO.form = el.dataset.m!))));
+  $('stepBody').querySelectorAll<HTMLButtonElement>('[data-t]').forEach((el) =>
+    (el.onclick = pick(() => {
       const t = TRAIT_BY_ID.get(el.dataset.t!)!;
       LO.traits = t.family ? [LO.traits[0], t.id] : [t.id, LO.traits[1]];
-      sfx.play('click');
-      saveLoadout();
-      buildSelect();
-    }),
+    })),
   );
-  // 고른 계열 카드가 보이게
-  const on = $('famRow').querySelector<HTMLElement>('.fcard.on');
-  on?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  $('stepBody').scrollTop = 0;
 }
 
-function openSelect() {
+function selNext() {
+  sfx.play('click');
+  if (step >= 6) return startGame();
+  step++;
+  buildSelect();
+}
+function selBack() {
+  sfx.play('click');
+  if (step > 0) {
+    step--;
+    buildSelect();
+    return;
+  }
+  $('select').classList.add('hidden');
+  $(selFrom).classList.remove('hidden');
+}
+let selFrom = 'start';
+
+function openSelect(from: 'start' | 'over' = 'start') {
   sfx.unlock();
+  selFrom = from;
+  roleFilter = famOf(LO.species).role;
+  // 처음이면 1단계부터, 전에 고른 적이 있으면 확인 단계에서(단계를 눌러 바꿀 수 있음)
+  step = localStorage.getItem(LO_KEY) ? 6 : 0;
   $('start').classList.add('hidden');
   $('over').classList.add('hidden');
   $('select').classList.remove('hidden');
@@ -933,9 +988,15 @@ async function boot() {
   $('lineup').innerHTML = ['rhino', 'kingmantis', 'hornet', 'orbspider', 'honeybee'].map((id) => `<img src="${renderer.portrait(id + '@2')}" alt="">`).join('');
   const best = bestScore();
   $('startBest').textContent = best > 0 ? `🏆 최고 점수 ${best}` : '';
-  $('startBtn').onclick = openSelect;
-  $('goBtn').onclick = startGame;
-  $('selBack').onclick = () => ($('select').classList.add('hidden'), $('start').classList.remove('hidden'));
+  $('arenaBtn').onclick = () => openSelect('start');
+  $('advBtn').onclick = () => {
+    sfx.play('click');
+    const n = $('advNote');
+    n.classList.remove('hidden');
+    n.textContent = '🗺️ 모험은 기획 중이에요. 지역을 넘으며 보스를 잡고 크롤러를 모으는 모드로 만들 거예요.';
+  };
+  $('goBtn').onclick = selNext;
+  $('selBack').onclick = selBack;
   buildSettings();
   applySettings();
   for (const id of ['setBtn', 'setBtnO']) $(id).onclick = () => openSettings();
@@ -952,7 +1013,7 @@ async function boot() {
   document.addEventListener('pointerdown', unlock, { passive: true });
   document.addEventListener('keydown', unlock);
   $('againBtn').onclick = startGame;
-  $('pickBtn').onclick = openSelect;
+  $('pickBtn').onclick = () => openSelect('over');
   document.addEventListener('visibilitychange', () => host?.pause(document.hidden || settingsOpen));
 
   renderer.app.ticker.add((tk) => {
