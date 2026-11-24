@@ -192,7 +192,7 @@ function onSnap(s: Snapshot) {
       } else if (killer) feed(`${who(killer)} ${ic} ${who(victim)}${e.cause === 'crush' ? ' 압착!' : ''}`, mine);
     }
     if (e.type === 'lifeLost') {
-      banner(`쓰러졌다! 남은 목숨 ${'❤️'.repeat(e.lives)}`, '#ff6b5a', '#c93a2a', 1900);
+      banner(e.lives < 0 ? `쓰러졌다! ${Math.ceil(e.respawn ?? 2)}초 뒤 다시 나와요` : `쓰러졌다! 남은 목숨 ${'❤️'.repeat(e.lives)}`, '#ff6b5a', '#c93a2a', 1900);
       flash();
     }
     if (e.type === 'hit' && e.snake === s.playerId && e.dmg > 0) hurt(Math.min(1, e.dmg / 40));
@@ -489,7 +489,7 @@ function updateHud(latest: Snapshot) {
   hb.querySelector<HTMLElement>('span')!.textContent = `${me.hp} / ${me.maxHp}`;
   hb.classList.toggle('low', hpk < 0.3);
   hb.classList.toggle('guard', me.sneaking);
-  $('lives').innerHTML = Array.from({ length: CONFIG.lives }, (_, i) => `<b class="${i < p.lives ? '' : 'lost'}">❤</b>`).join('');
+  $('lives').innerHTML = CONFIG.lives > 0 ? Array.from({ length: CONFIG.lives }, (_, i) => `<b class="${i < p.lives ? '' : 'lost'}">❤</b>`).join('') : '';
   const left = Math.ceil(latest.timeLeft);
   const tm = $('timer');
   tm.textContent = `⏱ ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
@@ -500,9 +500,9 @@ function updateHud(latest: Snapshot) {
     cp.innerHTML = `<div class="ol">🧒 채집망에 갇혔다!</div><b class="ol">${Math.ceil(p.captured)}</b><div class="ol-thin">풀려나면 몸이 반쪽이 돼요</div>`;
   } else cp.classList.add('hidden');
   const rs = $('respawn');
-  if (p.respawnIn > 0 && p.lives > 0 && playing) {
+  if (p.respawnIn > 0 && (CONFIG.lives <= 0 || p.lives > 0) && playing) {
     rs.classList.remove('hidden');
-    rs.innerHTML = `<div class="ol">부활까지</div><b class="ol">${Math.ceil(p.respawnIn)}</b><div class="ol-thin">남은 목숨 ${'❤️'.repeat(p.lives)}</div>`;
+    rs.innerHTML = `<div class="ol">부활까지</div><b class="ol">${Math.ceil(p.respawnIn)}</b><div class="ol-thin">${CONFIG.lives > 0 ? `남은 목숨 ${'❤️'.repeat(p.lives)}` : `쓰러짐 ${me.deaths}번 · 레벨과 카드는 그대로`}</div>`;
   } else rs.classList.add('hidden');
   const hl = $('hLen');
   if (hl) hl.textContent = `${me.length}마디 · 점수 ${me.score}`;
@@ -705,6 +705,7 @@ function showResult(latest: Snapshot) {
       return `<span>${d.icon} ${d.name} ${dots(a.lv, 3)}</span>`;
     }).join('') || '<span>능력 카드 없음</span>'}</div>
     <div class="ex">⚡ 필살기 ${p.ultUses}번 · 기술 강화 ${p.mainLv + p.subLv}단계</div>`;
+  drawStats(latest, me);
   $('oFact').textContent = `🔎 ${sp.name}: ${sp.fact}`;
   const ob = $('oBest');
   ob.className = isNew ? 'new' : '';
@@ -712,6 +713,69 @@ function showResult(latest: Snapshot) {
   over.classList.remove('hidden');
   $('cards').classList.add('hidden');
   for (const id of ['stats', 'board', 'minimap', 'gauge', 'hpbar', 'lives', 'abil', 'timer', 'setBtnG', 'respawn', 'captured']) $(id).classList.add('hidden');
+}
+
+// ---------- 판 통계 ----------
+type StatDef = { k: string; icon: string; name: string; val: (s: SnakeView, t: number) => number | null; fmt: (v: number) => string; title?: string; low?: boolean };
+const n0 = (v: number) => Math.round(v).toLocaleString('ko-KR');
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+const mmss = (v: number) => `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
+const STAT_DEFS: StatDef[] = [
+  { k: 'dmg', icon: '🗡️', name: '준 피해', val: (s) => s.stats!.dmgDealt, fmt: n0, title: '파괴왕' },
+  { k: 'dps', icon: '⚡', name: '평균 DPS', val: (s, t) => s.stats!.dmgDealt / Math.max(1, t), fmt: (v) => v.toFixed(1), title: '꾸준한 딜러' },
+  { k: 'peak', icon: '💥', name: '최고 DPS(5초)', val: (s) => s.stats!.peakDps, fmt: (v) => v.toFixed(1), title: '한방꾼' },
+  { k: 'skill', icon: '🎇', name: '기술 피해 비율', val: (s) => (s.stats!.dmgDealt > 0 ? s.stats!.skillDmg / s.stats!.dmgDealt : null), fmt: pct },
+  { k: 'acc', icon: '🎯', name: '기술 명중률', val: (s) => (s.stats!.casts >= 3 ? s.stats!.castsHit / s.stats!.casts : null), fmt: pct, title: '명사수' },
+  { k: 'crit', icon: '🔥', name: '급소율(물기)', val: (s) => (s.stats!.bites >= 5 ? s.stats!.crits / s.stats!.bites : null), fmt: pct, title: '급소 사냥꾼' },
+  { k: 'kill', icon: '🏹', name: '처치', val: (s) => s.killsAll, fmt: n0, title: '사냥왕' },
+  { k: 'assist', icon: '🤝', name: '도움', val: (s) => s.stats!.assists, fmt: n0, title: '도우미' },
+  { k: 'death', icon: '💀', name: '쓰러짐', val: (s) => s.deaths, fmt: n0, low: true, title: '불사신' },
+  { k: 'taken', icon: '🩹', name: '받은 피해', val: (s) => s.stats!.dmgTaken, fmt: n0, title: '샌드백' },
+  { k: 'block', icon: '🛡️', name: '막은 피해', val: (s) => s.stats!.dmgBlocked, fmt: n0, title: '철벽' },
+  { k: 'heal', icon: '💚', name: '회복량', val: (s) => s.stats!.healed, fmt: n0, title: '회복왕' },
+  { k: 'dist', icon: '🏃', name: '이동 거리', val: (s) => s.stats!.distance / 100, fmt: (v) => `${n0(v)}m`, title: '마라토너' },
+  { k: 'food', icon: '🍖', name: '먹은 먹이', val: (s) => s.stats!.food, fmt: (v) => `${n0(v)}개`, title: '대식가' },
+  { k: 'life', icon: '⏳', name: '가장 오래 버팀', val: (s) => s.stats!.bestLife, fmt: mmss, title: '생존왕' },
+  { k: 'len', icon: '📏', name: '최대 길이', val: (s) => s.stats!.maxLen, fmt: (v) => `${n0(v)}마디`, title: '왕꼬리' },
+  { k: 'ult', icon: '🌟', name: '필살기', val: (s) => s.stats!.ultCasts, fmt: (v) => `${n0(v)}번` },
+];
+const BEST_KEY = 'crawlution.records';
+
+function drawStats(latest: Snapshot, me: SnakeView) {
+  const t = Math.max(1, CONFIG.roundTime - latest.timeLeft);
+  const all = latest.snakes.filter((s) => !s.isBoss && s.stats);
+  let rec: Record<string, number> = {};
+  try {
+    rec = JSON.parse(localStorage.getItem(BEST_KEY) ?? '{}');
+  } catch {
+    rec = {};
+  }
+  const titles: string[] = [];
+  const tiles = STAT_DEFS.map((d) => {
+    const v = d.val(me, t);
+    if (v === null) return `<div class="st na"><em>${d.icon} ${d.name}</em><b>-</b><small>표본 부족</small></div>`;
+    const vals = all.map((s) => d.val(s, t)).filter((x): x is number => x !== null);
+    const rank = 1 + vals.filter((x) => (d.low ? x < v : x > v)).length;
+    if (rank === 1 && d.title && v > 0) titles.push(`${d.icon} ${d.title}`);
+    const prev = rec[d.k];
+    const isRec = !d.low && v > 0 && prev !== undefined && v > prev;
+    if (!d.low && v > (prev ?? -1)) rec[d.k] = v;
+    const meaningful = d.low || v > 0; // 0은 순위를 매기지 않음(모두 같으면 1위가 되므로)
+    return `<div class="st${meaningful && rank <= 3 ? ' top' : ''}"><em>${d.icon} ${d.name}</em><b>${d.fmt(v)}</b><small>${meaningful ? `${rank}위/${vals.length}` : '—'}${isRec ? ' · <i>내 신기록</i>' : ''}</small></div>`;
+  });
+  try {
+    localStorage.setItem(BEST_KEY, JSON.stringify(rec));
+  } catch {
+    /* 저장 안 돼도 괜찮음 */
+  }
+  $('oTitles').innerHTML = titles.length ? titles.map((x) => `<span>${x}</span>`).join('') : '';
+  $('oStats').innerHTML = `<div class="sts">${tiles.join('')}</div><p class="sn">순위는 이번 판 곤충 ${all.length}마리 중. DPS = 준 피해 ÷ 시간(초). 명중률 = 기술을 써서 누군가 맞힌 비율.</p>`;
+  showOTab('stats');
+}
+function showOTab(t: 'rank' | 'stats') {
+  document.querySelectorAll<HTMLButtonElement>('.otabs button').forEach((b) => b.classList.toggle('on', b.dataset.ot === t));
+  $('oRank').classList.toggle('hidden', t !== 'rank');
+  $('oStats').classList.toggle('hidden', t !== 'stats');
 }
 
 // ---------- 크롤러 고르기 ----------
@@ -1014,6 +1078,7 @@ async function boot() {
   document.addEventListener('keydown', unlock);
   $('againBtn').onclick = startGame;
   $('pickBtn').onclick = () => openSelect('over');
+  document.querySelectorAll<HTMLButtonElement>('.otabs button').forEach((b) => (b.onclick = () => showOTab(b.dataset.ot as 'rank' | 'stats')));
   document.addEventListener('visibilitychange', () => host?.pause(document.hidden || settingsOpen));
 
   renderer.app.ticker.add((tk) => {

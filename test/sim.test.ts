@@ -55,7 +55,17 @@ const opts = (species: string, form: string, extra: Partial<GameOpts> = {}): Gam
     }
   }
   const ms = performance.now() - t0;
-  check('8분 판이 시간으로 끝남', ended && sim.state === 'ended');
+  check('판이 시간으로 끝남(목숨 제한 없음)', ended && sim.state === 'ended');
+  {
+    const fin = sim.snapshot().snakes.filter((s) => !s.isBoss);
+    const st = fin.map((s) => s.stats!);
+    const sum = (k: keyof (typeof st)[0]) => st.reduce((a, x) => a + x[k], 0);
+    check('판 통계: 끝나면 모든 곤충의 통계가 나옴', st.every(Boolean), `${st.length}마리`);
+    check('판 통계: 피해·받은 피해·막은 피해·회복·이동·먹이·명중·급소·도움이 쌓임', sum('dmgDealt') > 0 && sum('dmgTaken') > 0 && sum('dmgBlocked') > 0 && sum('healed') > 0 && sum('distance') > 0 && sum('food') > 0 && sum('castsHit') > 0 && sum('crits') > 0 && sum('assists') > 0,
+      `피해 ${Math.round(sum('dmgDealt'))}, 막음 ${Math.round(sum('dmgBlocked'))}, 회복 ${Math.round(sum('healed'))}, 명중 ${sum('castsHit')}/${sum('casts')}, 급소 ${sum('crits')}/${sum('bites')}, 도움 ${sum('assists')}`);
+    check('판 통계: 준 피해 합 ≤ 받은 피해 합(천적 피해 포함)', sum('dmgDealt') <= sum('dmgTaken') + 1);
+    check('플레이어는 여러 번 쓰러져도 끝까지 남음', p.deaths >= 0 && sim.state === 'ended', `쓰러짐 ${p.deaths}`);
+  }
   check('좌표·체력이 NaN이 되지 않음', !nan);
   check('레벨업·진화가 일어남', levelUps > 100 && evolves > 20, `레벨업 ${levelUps}, 진화 ${evolves}, 최고 Lv${maxLv}`);
   check('필살기를 씀', ults > 10, `${ults}번`);

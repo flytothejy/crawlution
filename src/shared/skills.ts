@@ -463,7 +463,7 @@ export function castSub(sim: Simulation, s: Snake) {
       sim.fx('curl', s, s.x, s.y);
       return;
     case 'reserve':
-      s.hp = Math.min(s.maxHp, s.hp + s.maxHp * 0.25 * D);
+      sim.heal(s, s.maxHp * 0.25 * D);
       sim.fx('heal', s, s.x, s.y);
       return;
     case 'spit':
@@ -1058,7 +1058,7 @@ export function updateZones(sim: Simulation, dt: number) {
         break;
       }
       case 'honey':
-        if (owner.alive && dist(owner.x, owner.y, z.x, z.y) < z.r) owner.hp = Math.min(owner.maxHp, owner.hp + owner.maxHp * 0.04 * dt * sim.tm(owner, 'heal'));
+        if (owner.alive && dist(owner.x, owner.y, z.x, z.y) < z.r) sim.heal(owner, owner.maxHp * 0.04 * dt * sim.tm(owner, 'heal'));
         if (z.awake) for (const o of sim.snakes) if (o.id !== z.owner && sim.hittable(o) && dist(o.x, o.y, z.x, z.y) < z.r) sim.slow(o, 0.3, z.mul);
         break;
       case 'stingers':

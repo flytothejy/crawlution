@@ -58,7 +58,7 @@ export const CONFIG = {
   knockback: 10,
   wallDamage: 0.15,
   invulnTime: 3,
-  lives: 3,
+  lives: 0, // 0 = 목숨 제한 없음(쓰러져도 판 끝까지 다시 나옴, 부활은 쓰러질수록 늦어짐)
   respawnDelay: 2,
   evolveTime: 1, // 진화 연출(무적)
   tailCritSegs: 0.12,

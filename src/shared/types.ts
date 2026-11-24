@@ -42,7 +42,7 @@ export type GameEvent =
   | { type: 'bounce'; snake: number; x: number; y: number }
   | { type: 'respawn'; snake: number }
   | { type: 'hit'; snake: number; by: number; dmg: number; x: number; y: number; kind: HitKind; good: boolean; blocked?: boolean }
-  | { type: 'lifeLost'; lives: number }
+  | { type: 'lifeLost'; lives: number; respawn?: number }
   | { type: 'levelUp'; snake: number; level: number; x: number; y: number }
   | { type: 'evolveStart'; snake: number }
   | { type: 'evolve'; snake: number; stage: number; x: number; y: number }
@@ -64,6 +64,27 @@ export type GameEvent =
   | { type: 'released'; snake: number; x: number; y: number }
   | { type: 'end'; rank: number; total: number; timeUp: boolean };
 
+/** 판 통계(판 전체 누적, 봇이 새로 태어나도 이어 셈) */
+export interface Stats {
+  dmgDealt: number; // 준 피해(곤충에게)
+  skillDmg: number; // 그중 기술·필살기·부른 벌
+  dmgTaken: number; // 받은 피해
+  dmgBlocked: number; // 막은 피해(웅크리기·껍질·무적 등으로 줄어든 양)
+  healed: number; // 회복량
+  distance: number; // 이동 거리(맵 단위)
+  food: number; // 먹은 먹이 수
+  casts: number; // 기술 쓴 횟수(주·보조)
+  castsHit: number; // 그중 누군가 맞힌 횟수
+  bites: number; // 물기 성공
+  crits: number; // 그중 급소(꼬리 끝)
+  assists: number; // 도움(쓰러지기 5초 안에 피해를 준 다른 곤충)
+  ultCasts: number;
+  peakDps: number; // 5초 동안 가장 많이 준 피해 ÷ 5
+  bestLife: number; // 가장 오래 산 시간(초)
+  maxLen: number; // 가장 길었던 마디 수
+}
+export const emptyStats = (): Stats => ({ dmgDealt: 0, skillDmg: 0, dmgTaken: 0, dmgBlocked: 0, healed: 0, distance: 0, food: 0, casts: 0, castsHit: 0, bites: 0, crits: 0, assists: 0, ultCasts: 0, peakDps: 0, bestLife: 0, maxLen: 0 });
+
 export interface SnakeView {
   id: number;
   name: string;
@@ -83,6 +104,8 @@ export interface SnakeView {
   kills: number;
   killsAll: number;
   deaths: number;
+  /** 판 통계: 내 곤충은 늘, 다른 곤충은 판이 끝났을 때만 */
+  stats?: Stats;
   crushes: number;
   length: number;
   hp: number;
