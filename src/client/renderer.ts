@@ -2,6 +2,7 @@
 import { Application, BitmapFont, BitmapText, Container, Graphics, Rectangle, Sprite, Text, Texture, TilingSprite } from 'pixi.js';
 import { CONFIG } from '../shared/config';
 import { relation } from '../shared/combat';
+import { V3_BY_ID } from '../shared/v3';
 import { themeOf, type FxBit, type FxTheme } from './fxtheme';
 import { FAMILY, likerOf, SPECIAL_FOODS, SPECIES_BY_ID, taste, type FamilyId } from '../shared/species';
 import type { EnemyView, FxKind, GameEvent, MapTheme, MapView, MinionView, ProjView, RingView, SnakeView, TeleView, ZoneView } from '../shared/types';
@@ -14,6 +15,13 @@ export { lookOf, lookKey };
 export function famColor(f: FamilyId | null | undefined, k: 1 | 2 = 1): number {
   if (!f) return 0xff4a3a;
   return k === 1 ? FAMILY[f].color : FAMILY[f].color2;
+}
+
+/** 나비 날개 텍스처 크기와 뿌리 위치 */
+const BW_W = 130, BW_H = 200, BW_AX = 0.04, BW_AY = 0.52;
+function lighterC(c: number, k: number) {
+  const f = (v: number) => Math.round(v + (255 - v) * k);
+  return (f((c >> 16) & 255) << 16) | (f((c >> 8) & 255) << 8) | f(c & 255);
 }
 
 const FOOD_COLORS = [0xfff07a, 0xa6f37a, 0x7ae3f3, 0xf3a1d7, 0xffc37a, 0xd6a1ff];
@@ -58,6 +66,7 @@ interface SnakeGfx {
   kit: HeadKit;
   head: Container;
   wings: Sprite[];
+  bw: boolean; // 나비 날개
   stinger: boolean;
   headBase: Sprite;
   parts: PartSprite[];
@@ -417,6 +426,18 @@ export class GameRenderer {
     mk('star', (g) => g.poly([16, 0, 19, 13, 32, 16, 19, 19, 16, 32, 13, 19, 0, 16, 13, 13]).fill(0xffffff));
     mk('bubble', (g) => g.circle(14, 14, 12).stroke({ width: 2.5, color: 0xffffff }).circle(10, 9, 3).fill({ color: 0xffffff, alpha: 0.8 }));
     mk('paper', (g) => g.poly([0, 2, 14, 0, 16, 12, 3, 14]).fill(0xffffff));
+    // 3판: 개미(머리·배 두 덩이 + 다리), 인분(반짝이 마름모), 독털(가는 바늘), 나비(날개 네 장)
+    mk('ant', (g) => {
+      g.moveTo(4, 3).lineTo(20, 15).moveTo(4, 15).lineTo(20, 3).moveTo(12, 0).lineTo(12, 18).stroke({ width: 1.6, color: 0xffffff });
+      g.circle(19, 9, 3.6).fill(0xffffff).circle(12, 9, 2.6).fill(0xffffff).ellipse(5, 9, 4.6, 3.6).fill(0xffffff);
+    });
+    mk('scale', (g) => g.poly([8, 0, 13, 8, 8, 16, 3, 8]).fill(0xffffff).circle(8, 8, 1.6).fill({ color: 0xffffff, alpha: 0.6 }));
+    mk('hair', (g) => g.moveTo(0, 3).lineTo(30, 1).stroke({ width: 1.8, color: 0xffffff, cap: 'round' }).circle(30, 1, 1.6).fill(0xffffff));
+    mk('bfly', (g) => {
+      g.ellipse(9, 9, 8, 6).fill(0xffffff).ellipse(23, 9, 8, 6).fill(0xffffff);
+      g.ellipse(10, 20, 6, 5).fill({ color: 0xffffff, alpha: 0.85 }).ellipse(22, 20, 6, 5).fill({ color: 0xffffff, alpha: 0.85 });
+      g.rect(15, 4, 2, 20).fill(0x2a2a2a);
+    });
 
     for (const theme of ['grass', 'sand', 'forest'] as MapTheme[]) this.tex['ground_' + theme] = this.makeGround(theme);
   }
@@ -556,7 +577,7 @@ export class GameRenderer {
   }
 
   private labelText(s: FrameSnake) {
-    const spName = SPECIES_BY_ID.get(s.species)?.name ?? '';
+    const spName = SPECIES_BY_ID.get(s.species)?.name ?? V3_BY_ID.get(s.species)?.name ?? '';
     return s.isBoss ? '👑 왕지네' : s.isPlayer ? `Lv${s.level} 나 · ${spName}` : `Lv${s.level} ${s.name} · ${spName}`;
   }
 
@@ -578,11 +599,20 @@ export class GameRenderer {
     });
     label.anchor.set(0.5, 1);
     const wings: Sprite[] = [];
-    if (feats.has('wings') || feats.has('wings4')) {
+    const bw = feats.has('bwings') && !!look.bwing;
+    if (bw) {
+      const t = this.bwingTex(key, look);
+      for (let k = 0; k < 2; k++) {
+        const w = new Sprite(t);
+        w.anchor.set(BW_AX, BW_AY);
+        wings.push(w);
+      }
+    } else if (feats.has('wings') || feats.has('wings4')) {
       const n = feats.has('wings4') ? 4 : 2;
       for (let k = 0; k < n; k++) {
         const w = new Sprite(this.tex.wing);
         w.anchor.set(0.05, 0.5);
+        if (look.wingTint !== undefined) w.tint = look.wingTint;
         wings.push(w);
       }
     }
@@ -609,7 +639,7 @@ export class GameRenderer {
     this.headLayer.addChild(head);
     this.labelLayer.addChild(label);
     g = {
-      species: key, level: s.level, kit, head, wings, stinger, headBase, parts, label,
+      species: key, level: s.level, kit, head, wings, stinger, headBase, parts, label, bw,
     };
     this.snakes.set(s.id, g);
     return g;
@@ -832,7 +862,7 @@ export class GameRenderer {
           break;
         case 'skillHit': {
           if (!this.isNear(e.x, e.y)) break;
-          const col = { cut: 0xffffff, stun: 0xffe066, push: 0xbfe0ff, slow: 0x9ad0ff, root: 0xe8e0ff, blind: 0xf6ff8a, mark: 0xff7a5a, fear: 0xb88aff, silence: 0xff9a9a, grab: 0xd8b878, poison: 0x9aff5a }[e.kind];
+          const col = { cut: 0xffffff, stun: 0xffe066, push: 0xbfe0ff, slow: 0x9ad0ff, root: 0xe8e0ff, blind: 0xf6ff8a, mark: 0xff7a5a, fear: 0xb88aff, silence: 0xff9a9a, grab: 0xd8b878, poison: 0x9aff5a, confuse: 0xffe066, charm: 0xff9ad8, itch: 0xfff0b0 }[e.kind];
           for (let i = 0; i < 12; i++) this.spawnParticle(e.x, e.y, col, 80 + Math.random() * 160, 0.45, 0.55);
           if (e.kind === 'cut') {
             const a = Math.random() * Math.PI;
@@ -1065,6 +1095,241 @@ export class GameRenderer {
       case 'decoy':
         if (e.x1 !== undefined && e.y1 !== undefined) this.lineFx(e.x1, e.y1, Math.atan2(e.y - e.y1, e.x - e.x1), Math.hypot(e.x - e.x1, e.y - e.y1), 20, 0xffffff, 0xcfe8ff);
         break;
+      default:
+        this.v3Fx(e, th, C, near, hit);
+    }
+  }
+
+  /** 3판 새 기술 이펙트(도감에서 재생). 색은 종 테마 [주색, 보조, 강조] */
+  private v3Fx(e: Extract<GameEvent, { type: 'fx' }>, th: FxTheme | null, C: (def: number, k: 0 | 1 | 2) => number, near: boolean, hit: (shake: number, punch: number) => void) {
+    if (!near) return;
+    const r = e.r ?? 100, a = e.angle ?? 0, len = e.len ?? 200, half = e.half ?? 0.6;
+    const bit = th?.bit ?? 'mote';
+    const P = (k: 0 | 1 | 2, def: number) => C(def, k);
+    const later = (t: number, fn: () => void) => setTimeout(fn, t * 1000);
+    const cos = Math.cos, sin = Math.sin, rnd = Math.random;
+    switch (e.kind as FxKind) {
+      case 'fangstab': {
+        // 독턱 두 줄이 X자로 겹치는 찌르기
+        const c = P(0, 0xff4a2a);
+        this.lineFx(e.x, e.y, a + 0.1, len, 20, c, P(1, 0xffd23f));
+        this.lineFx(e.x, e.y, a - 0.1, len, 20, c, 0xffffff);
+        const hx = e.x + cos(a) * len, hy = e.y + sin(a) * len;
+        this.fx('slash', hx, hy, c, 50, 120, 0.3, a + 0.8, 0);
+        this.fx('slash', hx, hy, 0xffffff, 50, 120, 0.3, a - 0.8, 0);
+        for (let i = 0; i < 18; i++) this.spawnBit('drop', hx, hy, i % 2 ? 0xb88aff : c, 120 + rnd() * 160, 0.6, 0.7, a, 1.6);
+        hit(10, 0.05);
+        break;
+      }
+      case 'coil': {
+        // 나선으로 조여드는 몸 고리
+        const c = P(0, 0xff4a2a);
+        for (let k = 0; k < 3; k++) later(k * 0.12, () => this.ringFx(e.x, e.y, r * (1.25 - k * 0.25), k === 1 ? P(1, 0xffd23f) : c));
+        for (let i = 0; i < 40; i++) {
+          const t = i / 40, aa = t * Math.PI * 6, d = r * (1.3 - t * 0.8);
+          later(t * 0.45, () => this.spawnBit(i % 3 === 0 ? 'ember' : 'dot', e.x + cos(aa) * d, e.y + sin(aa) * d, i % 2 ? c : P(1, 0xffd23f), 40, 0.5, 0.9, aa + Math.PI / 2, 0.2));
+        }
+        hit(6, 0.03);
+        break;
+      }
+      case 'vortex': {
+        // 큰 원 다리 자국 + 가운데로 빨려 드는 나선 바람
+        const c = P(0, 0xff4a2a);
+        this.ringFx(e.x, e.y, r, c);
+        later(0.25, () => this.ringFx(e.x, e.y, r * 0.6, P(1, 0xffd23f)));
+        for (let i = 0; i < 90; i++) {
+          const aa = rnd() * Math.PI * 2, d = r * (0.7 + rnd() * 0.6);
+          later(rnd() * 0.9, () => this.spawnBit(i % 4 === 0 ? 'ember' : bit, e.x + cos(aa) * d, e.y + sin(aa) * d, i % 2 ? c : P(2, 0xffffff), 180 + rnd() * 120, 0.8, 0.9, aa + Math.PI + 0.7, 0.3));
+        }
+        later(0.7, () => this.aoeFx(e.x, e.y, r * 0.45, c, true));
+        hit(16, 0.06);
+        break;
+      }
+      case 'acid': {
+        // 지글거리는 산 줄기
+        const c = P(0, 0xffa030);
+        this.lineFx(e.x, e.y, a, len, 26, c, P(1, 0xfff0a0));
+        for (let i = 0; i < 26; i++) {
+          const t = rnd(), x = e.x + cos(a) * len * t, y = e.y + sin(a) * len * t;
+          this.spawnBit(i % 3 === 0 ? 'bubble' : 'drop', x, y, i % 2 ? c : 0xfff0a0, 30 + rnd() * 70, 0.8, 0.6);
+        }
+        const hx = e.x + cos(a) * len, hy = e.y + sin(a) * len;
+        for (let i = 0; i < 14; i++) this.spawnBit('bubble', hx, hy, 0xffffff, 40 + rnd() * 50, 1.1, 0.7, -Math.PI / 2, 1.4);
+        hit(6, 0.03);
+        break;
+      }
+      case 'burrow': {
+        // 흙 고리 + 흙 분수
+        const c = P(0, 0xc89a5a);
+        this.aoeFx(e.x, e.y, r, c, true);
+        for (let i = 0; i < 34; i++) this.spawnBit('sand', e.x, e.y, i % 2 ? c : 0x8a6a3a, 120 + rnd() * 220, 0.7, 1.2, -Math.PI / 2, 2.4);
+        hit(8, 0.03);
+        break;
+      }
+      case 'antcall': {
+        // 땅에서 개미가 원을 그리며 솟아나 바깥으로 달려 나간다
+        const c = P(0, 0xe8a05a);
+        this.ringFx(e.x, e.y, r * 0.7, c);
+        const n = Math.round(r / 6) + 8;
+        for (let i = 0; i < n; i++) {
+          const aa = (i / n) * Math.PI * 2;
+          later(rnd() * 0.5, () => this.spawnBit('ant', e.x + cos(aa) * r * 0.5, e.y + sin(aa) * r * 0.5, i % 3 === 0 ? P(1, 0xffd8a0) : 0x2a2018, 70 + rnd() * 60, 1.6, 1.0, aa + 0.4, 0.4));
+        }
+        break;
+      }
+      case 'antriver': {
+        // 앞쪽 넓은 띠로 개미 강물
+        const c = P(0, 0xe8a05a);
+        this.coneFx(e.x, e.y, a, len, half * 0.6, c, false);
+        for (let i = 0; i < 110; i++) {
+          const side = (rnd() - 0.5) * 2, off = side * 60;
+          const x = e.x - sin(a) * off, y = e.y + cos(a) * off;
+          later(rnd() * 0.8, () => this.spawnBit('ant', x, y, i % 4 === 0 ? P(1, 0xffd8a0) : i % 4 === 1 ? c : 0x2a2018, 380 + rnd() * 160, len / 450, 1.05, a + side * 0.12, 0.08));
+        }
+        later(0.6, () => {
+          const hx = e.x + cos(a) * len, hy = e.y + sin(a) * len;
+          for (let i = 0; i < 24; i++) this.spawnBit('sand', hx, hy, 0xc89a5a, 100 + rnd() * 160, 0.6, 1.1, a, 1.6);
+        });
+        hit(14, 0.05);
+        break;
+      }
+      case 'leafwall': {
+        // 머리 앞에 부채처럼 선 큰 잎
+        const c = P(0, 0x7ad84a);
+        for (let i = 0; i < 9; i++) {
+          const aa = a + (i / 8 - 0.5) * 1.8, d = 46 + (i % 2) * 8;
+          for (let k = 0; k < 5; k++) later(k * 0.5, () => this.spawnBit('leaf', e.x + cos(aa) * d, e.y + sin(aa) * d, i % 2 ? c : P(1, 0xd8ffa0), 6, 0.6, 1.8, aa, 0.1));
+        }
+        this.coneFx(e.x, e.y, a, 70, 0.9, c, false);
+        break;
+      }
+      case 'nest': {
+        // 흙 둔덕 + 들끓는 붉은 개미 + 불씨
+        const c = P(0, 0xff5a2a);
+        this.aoeFx(e.x, e.y, r * 0.8, 0xb07a4a, true);
+        for (let k = 0; k < 8; k++)
+          later(k * 0.25, () => {
+            for (let i = 0; i < 10; i++) {
+              const aa = rnd() * Math.PI * 2, d = rnd() * r * 0.9;
+              this.spawnBit(i % 3 === 0 ? 'ember' : 'ant', e.x + cos(aa) * d, e.y + sin(aa) * d, i % 2 ? c : 0x3a1a10, 30 + rnd() * 40, 0.5, 0.8);
+            }
+          });
+        this.ringFx(e.x, e.y, r, c);
+        break;
+      }
+      case 'buzz': {
+        // 겹겹이 퍼지는 진동 고리
+        const c = P(0, 0xffe066);
+        for (let k = 0; k < 5; k++) later(k * 0.12, () => this.ringFx(e.x, e.y, r * (0.4 + k * 0.18), k % 2 ? c : 0xffffff));
+        for (let i = 0; i < 24; i++) this.spawnBit('mote', e.x, e.y, c, 140 + rnd() * 120, 0.5, 0.9);
+        hit(6, 0.02);
+        break;
+      }
+      case 'mudpot': {
+        // 진흙 덩이가 호를 그리며 날아가 철퍽
+        const c = P(0, 0xd8a868);
+        const x0 = e.x1 ?? e.x, y0 = e.y1 ?? e.y;
+        for (let i = 0; i <= 10; i++) {
+          const t = i / 10, x = x0 + (e.x - x0) * t, y = y0 + (e.y - y0) * t - Math.sin(t * Math.PI) * 70;
+          later(t * 0.3, () => this.spawnBit('drop', x, y, c, 10, 0.3, 1.4));
+        }
+        later(0.32, () => {
+          this.aoeFx(e.x, e.y, r, c, false);
+          for (let i = 0; i < 22; i++) this.spawnBit('drop', e.x, e.y, i % 2 ? c : 0x8a6a3a, 120 + rnd() * 150, 0.7, 0.9);
+          hit(8, 0.03);
+        });
+        break;
+      }
+      case 'powder': {
+        // 부채꼴로 퍼져 천천히 가라앉는 반짝이 가루
+        const c = P(0, 0xffe066);
+        this.coneFx(e.x, e.y, a, r, Math.min(half, 1.4), c, false);
+        for (let i = 0; i < 80; i++) {
+          const aa = a + (rnd() - 0.5) * half * 2, d = r * (0.15 + rnd() * 0.85);
+          later(rnd() * 0.35, () => this.spawnBit('scale', e.x + cos(aa) * d * 0.3, e.y + sin(aa) * d * 0.3, [c, P(1, 0xff9ad8), P(2, 0xffffff)][i % 3], d * 1.4, 1.6 + rnd() * 1.2, 0.8 + rnd() * 0.5, aa, 0.2));
+        }
+        hit(4, 0.02);
+        break;
+      }
+      case 'flutter': {
+        // 지그재그 날개 잔상과 가루
+        const c = P(0, 0xffe066);
+        this.ringFx(e.x, e.y, 50, c);
+        for (let k = 0; k < 6; k++) later(k * 0.22, () => {
+          for (let i = 0; i < 6; i++) this.spawnBit('scale', e.x, e.y, [c, P(1, 0xff9ad8), 0xffffff][i % 3], 60 + rnd() * 80, 1.0, 0.8);
+        });
+        break;
+      }
+      case 'charm': {
+        // 분홍 꽃가루 띠가 대상에게 이어지고 머리 위에 꽃이 핀다
+        const c = P(1, 0xff9ad8);
+        if (e.x1 !== undefined && e.y1 !== undefined) {
+          const d = Math.hypot(e.x - e.x1, e.y - e.y1), aa = Math.atan2(e.y - e.y1, e.x - e.x1);
+          this.lineFx(e.x1, e.y1, aa, d, 14, c, 0xffffff);
+          for (let i = 0; i < 26; i++) {
+            const t = i / 26;
+            later(t * 0.3, () => this.spawnBit('petal', e.x1! + cos(aa) * d * t, e.y1! + sin(aa) * d * t, i % 2 ? c : 0xffffff, 30, 1.2, 0.8));
+          }
+        }
+        later(0.3, () => {
+          this.ringFx(e.x, e.y, 60, c);
+          for (let i = 0; i < 10; i++) {
+            const aa = (i / 10) * Math.PI * 2;
+            this.spawnBit('petal', e.x + cos(aa) * 14, e.y - 40 + sin(aa) * 14, i % 2 ? c : 0xffe0f0, 12, 1.4, 1.1, aa, 0.2);
+          }
+        });
+        break;
+      }
+      case 'bstorm': {
+        // 색색 나비 떼 회오리
+        const pal = [P(0, 0xffe066), P(1, 0xff9ad8), P(2, 0xffffff), 0x7ad8ff];
+        this.ringFx(e.x, e.y, r, pal[0]);
+        for (let k = 0; k < 16; k++)
+          later(k * 0.24, () => {
+            for (let i = 0; i < 7; i++) {
+              const aa = rnd() * Math.PI * 2, d = r * (0.3 + rnd() * 0.7);
+              this.spawnBit(i % 2 ? 'bfly' : 'scale', e.x + cos(aa) * d, e.y + sin(aa) * d, pal[(i + k) % 4], 160 + rnd() * 80, 0.7, i % 2 ? 0.9 + rnd() * 0.5 : 0.8, aa + Math.PI / 2, 0.3);
+            }
+            if (k % 4 === 0) this.ringFx(e.x, e.y, r * (0.6 + rnd() * 0.3), pal[k % 4]);
+          });
+        hit(12, 0.04);
+        break;
+      }
+      case 'eyespot': {
+        // 큰 눈알 두 개가 확 커지며 깜빡 + 밀어내는 바람
+        const c = P(0, 0xffd23f);
+        for (const sd of [-1, 1]) {
+          const x = e.x + cos(a) * 50 - sin(a) * 38 * sd, y = e.y + sin(a) * 50 + cos(a) * 38 * sd;
+          this.fx('ring', x, y, c, 10, 120, 0.5);
+          this.fx('ring', x, y, 0x1b1b1b, 6, 60, 0.45);
+          this.fx('ring', x, y, 0xffffff, 2, 22, 0.4);
+          later(0.25, () => this.fx('ring', x, y, c, 30, 90, 0.35));
+        }
+        this.coneFx(e.x, e.y, a, r, 0.8, P(1, 0xd8b888), false);
+        for (let i = 0; i < 20; i++) this.spawnBit('scale', e.x, e.y, i % 2 ? c : 0xffffff, 200 + rnd() * 200, 0.6, 0.9, a, 1.6);
+        hit(12, 0.06);
+        break;
+      }
+      case 'morpho': {
+        // 금속빛 파랑 섬광 부채꼴과 별 조각
+        const c = P(0, 0x4aa8ff);
+        this.coneFx(e.x, e.y, a, r, half, c, true);
+        this.fx('ring', e.x, e.y, 0xffffff, 20, 140, 0.25);
+        for (let i = 0; i < 40; i++) {
+          const aa = a + (rnd() - 0.5) * half * 2, d = r * rnd();
+          this.spawnBit(i % 3 === 0 ? 'star' : 'scale', e.x + cos(aa) * d, e.y + sin(aa) * d, i % 2 ? c : P(1, 0xb0f0ff), 40 + rnd() * 80, 0.8, 0.9);
+        }
+        hit(10, 0.05);
+        break;
+      }
+      case 'hairs': {
+        // 바늘처럼 날아가는 독털
+        const c = P(0, 0xfff0b0);
+        this.coneFx(e.x, e.y, a, r, half, c, false);
+        for (let i = 0; i < 60; i++) later(rnd() * 0.25, () => this.spawnBit('hair', e.x, e.y, i % 3 ? c : P(1, 0xd8b870), r * (1.6 + rnd() * 1.4), 0.5, 0.8, a, half * 2));
+        hit(5, 0.02);
+        break;
+      }
     }
   }
 
@@ -1192,13 +1457,13 @@ export class GameRenderer {
   }
 
   /** 종별 입자 하나: 모양마다 움직임이 다르다(꽃잎은 흔들리며 떠다니고, 불씨는 오르고, 방울은 떨어진다) */
-  private spawnBit(bit: FxBit, x: number, y: number, color: number, speed: number, life: number, size: number, dir?: number, spread = Math.PI) {
+  private spawnBit(bit: FxBit | 'bfly', x: number, y: number, color: number, speed: number, life: number, size: number, dir?: number, spread = Math.PI) {
     if (this.particles.length > this.particleCap) return;
     if (bit === 'dot') return this.spawnParticle(x, y, color, speed, life, size);
     const s = this.freeParticles.pop() ?? new Sprite(this.tex.dot);
     s.texture = this.tex['bit_' + bit];
     s.anchor.set(0.5);
-    const glow = bit === 'mote' || bit === 'ember' || bit === 'star' || bit === 'shard';
+    const glow = bit === 'mote' || bit === 'ember' || bit === 'star' || bit === 'shard' || bit === 'scale';
     s.blendMode = glow ? 'add' : 'normal';
     s.tint = color;
     s.alpha = 1;
@@ -1256,6 +1521,33 @@ export class GameRenderer {
       case 'mote':
         p.drag = 3;
         p.sway = 0.3;
+        break;
+      case 'scale':
+        p.vr = (Math.random() - 0.5) * 10;
+        p.sway = 0.5;
+        p.g = 18;
+        p.drag = 3.2;
+        p.grow = 0;
+        p.fade = 0.6;
+        break;
+      case 'hair':
+        p.s.rotation = a;
+        p.drag = 1.4;
+        p.grow = 0;
+        p.fade = 0.7;
+        break;
+      case 'ant':
+        p.s.rotation = a;
+        p.drag = 0.6;
+        p.grow = 0;
+        p.fade = 0.85;
+        break;
+      case 'bfly':
+        p.s.rotation = a + Math.PI / 2;
+        p.sway = 1.2;
+        p.drag = 0.8;
+        p.grow = 0;
+        p.fade = 0.7;
         break;
     }
     this.particles.push(p);
@@ -1399,6 +1691,83 @@ export class GameRenderer {
   }
 
   /** 종 초상화(카드·HUD·결과 화면용 이미지). 한 번 그려 두고 재사용 */
+  private bwingCache = new Map<string, Texture>();
+  /** 나비 날개 한쪽(앞날개 + 뒷날개). 뿌리 = (BW_AX, BW_AY), +x = 몸 바깥, -y = 앞쪽 */
+  private bwingTex(key: string, look: import('../shared/species').Look): Texture {
+    const hit = this.bwingCache.get(key);
+    if (hit) return hit;
+    const b = look.bwing!;
+    const g = new Graphics();
+    const W = BW_W, H = BW_H, ox = W * BW_AX, oy = H * BW_AY;
+    g.rect(0, 0, W, H).fill({ color: 0, alpha: 0 });
+    const ink = { width: 3, color: 0x1b2a12 };
+    const moth = b.kind === 'moth';
+    const fw = moth ? 0.8 : 1, hw = moth ? 0.8 : 1;
+    // 앞날개: 뿌리에서 앞·바깥으로 뻗은 둥근 세모
+    const fore = (gg: Graphics) => gg.moveTo(ox, oy - 4).bezierCurveTo(ox + 30 * fw, oy - 70 * fw, ox + 92 * fw, oy - 92 * fw, ox + 112 * fw, oy - 72 * fw).bezierCurveTo(ox + 122 * fw, oy - 40 * fw, ox + 100 * fw, oy - 8, ox + 76 * fw, oy + 2).closePath();
+    // 뒷날개: 뒤·바깥으로 둥글게(호랑나비는 꼬리 돌기)
+    const hind = (gg: Graphics) => {
+      gg.moveTo(ox + 2, oy + 2).bezierCurveTo(ox + 50 * hw, oy - 6, ox + 96 * hw, oy + 14 * hw, ox + 88 * hw, oy + 48 * hw);
+      if (b.kind === 'swallow') gg.lineTo(ox + 74, oy + 66).lineTo(ox + 70, oy + 92).lineTo(ox + 60, oy + 68);
+      gg.bezierCurveTo(ox + 44 * hw, oy + 78 * hw, ox + 14, oy + 50 * hw, ox + 2, oy + 10).closePath();
+    };
+    const c1 = b.c1, c2 = b.c2, c3 = b.c3;
+    hind(g);
+    g.fill(b.kind === 'owl' ? lighterC(c1, 0.1) : c1).stroke(ink);
+    fore(g);
+    g.fill(c1).stroke(ink);
+    switch (b.kind) {
+      case 'swallow':
+        // 검은 줄무늬(앞날개 가로 띠) + 검은 테두리 + 뒷날개 푸른 점·붉은 눈무늬
+        for (let i = 0; i < 4; i++) {
+          const t = 0.22 + i * 0.2;
+          g.moveTo(ox + 10 + t * 20, oy - 8 - t * 60).lineTo(ox + 30 + t * 80, oy - 30 - t * 60).stroke({ width: 7 - i, color: c2, cap: 'round' });
+        }
+        g.moveTo(ox + 76, oy + 2).bezierCurveTo(ox + 100, oy - 8, ox + 122, oy - 40, ox + 112, oy - 72).stroke({ width: 9, color: c2 });
+        g.moveTo(ox + 88, oy + 48).bezierCurveTo(ox + 70, oy + 62, ox + 44, oy + 70, ox + 24, oy + 52).stroke({ width: 9, color: c2 });
+        for (let i = 0; i < 4; i++) g.circle(ox + 32 + i * 14, oy + 54 - i * 4, 3.6).fill(c3);
+        g.circle(ox + 22, oy + 50, 6).fill(0xff5a3a).circle(ox + 22, oy + 50, 2.5).fill(c2);
+        break;
+      case 'monarch':
+        // 굵은 검은 날개맥 + 검은 테두리에 흰 점 두 줄
+        for (const [x1, y1] of [[100, -76], [112, -50], [92, -22], [70, -4]]) g.moveTo(ox + 6, oy - 2).quadraticCurveTo(ox + x1 * 0.4, oy + y1 * 0.7, ox + x1, oy + y1).stroke({ width: 3, color: c2 });
+        for (const [x1, y1] of [[84, 40], [60, 62], [30, 58]]) g.moveTo(ox + 4, oy + 6).quadraticCurveTo(ox + x1 * 0.5, oy + y1 * 0.4, ox + x1, oy + y1).stroke({ width: 3, color: c2 });
+        g.moveTo(ox + 76, oy + 2).bezierCurveTo(ox + 100, oy - 8, ox + 122, oy - 40, ox + 112, oy - 72).bezierCurveTo(ox + 92, oy - 92, ox + 40, oy - 74, ox + 20, oy - 44).stroke({ width: 8, color: c2 });
+        g.moveTo(ox + 88, oy + 48).bezierCurveTo(ox + 70, oy + 72, ox + 30, oy + 72, ox + 12, oy + 40).stroke({ width: 8, color: c2 });
+        for (let i = 0; i < 7; i++) g.circle(ox + 112 - i * 5, oy - 70 + i * 11, 2).fill(c3);
+        for (let i = 0; i < 6; i++) g.circle(ox + 84 - i * 12, oy + 50 + Math.sin(i) * 8, 2).fill(c3);
+        break;
+      case 'owl':
+        // 갈색 물결 무늬 + 뒷날개 큰 노란 눈알
+        for (let i = 0; i < 3; i++) g.moveTo(ox + 20, oy - 20 - i * 18).bezierCurveTo(ox + 50, oy - 30 - i * 18, ox + 70, oy - 10 - i * 18, ox + 104, oy - 30 - i * 16).stroke({ width: 3, color: c2, alpha: 0.7 });
+        g.circle(ox + 58, oy + 34, 20).fill(c3).stroke({ width: 3, color: c2 });
+        g.circle(ox + 58, oy + 34, 12).fill(0x141414);
+        g.circle(ox + 53, oy + 29, 4.5).fill(0xffffff);
+        g.circle(ox + 92, oy - 56, 6).fill(c3).circle(ox + 92, oy - 56, 3).fill(0x141414);
+        break;
+      case 'morpho': {
+        // 가운데가 밝은 금속 파랑 + 검은 테두리 + 흰 점
+        g.moveTo(ox + 10, oy - 8).bezierCurveTo(ox + 40, oy - 56, ox + 80, oy - 66, ox + 96, oy - 52).bezierCurveTo(ox + 96, oy - 30, ox + 80, oy - 10, ox + 60, oy - 4).closePath().fill({ color: c3, alpha: 0.55 });
+        g.moveTo(ox + 8, oy + 8).bezierCurveTo(ox + 40, oy + 6, ox + 66, oy + 22, ox + 62, oy + 44).bezierCurveTo(ox + 40, oy + 54, ox + 20, oy + 40, ox + 8, oy + 12).closePath().fill({ color: c3, alpha: 0.5 });
+        g.moveTo(ox + 76, oy + 2).bezierCurveTo(ox + 100, oy - 8, ox + 122, oy - 40, ox + 112, oy - 72).bezierCurveTo(ox + 92, oy - 92, ox + 60, oy - 84, ox + 44, oy - 68).stroke({ width: 10, color: c2 });
+        g.moveTo(ox + 88, oy + 48).bezierCurveTo(ox + 70, oy + 72, ox + 30, oy + 72, ox + 12, oy + 40).stroke({ width: 9, color: c2 });
+        for (let i = 0; i < 4; i++) g.circle(ox + 108 - i * 6, oy - 66 + i * 12, 2.4).fill(0xffffff);
+        break;
+      }
+      case 'moth':
+        // 복슬한 크림색 + 작은 갈색 점
+        for (let i = 0; i < 6; i++) g.circle(ox + 30 + (i % 3) * 22, oy - 20 - Math.floor(i / 3) * 22, 3).fill({ color: c2, alpha: 0.8 });
+        g.moveTo(ox + 20, oy - 10).bezierCurveTo(ox + 50, oy - 40, ox + 70, oy - 40, ox + 86, oy - 56).stroke({ width: 2, color: c3, alpha: 0.6 });
+        g.circle(ox + 40, oy + 30, 4).fill({ color: c3, alpha: 0.7 });
+        break;
+    }
+    // 날개 뿌리 털
+    g.circle(ox + 4, oy, 7).fill(look.body);
+    const t = this.app.renderer.generateTexture({ target: g, resolution: 2, frame: new Rectangle(0, 0, W, H) });
+    this.bwingCache.set(key, t);
+    return t;
+  }
+
   portrait(key: string): string {
     if (!key.includes('@') && key !== 'boss') key = `${key}@2`;
     const cached = this.portraits.get(key);
@@ -1470,10 +1839,21 @@ export class GameRenderer {
         c.addChild(gl);
       }
     }
-    if (feats.has('wings') || feats.has('wings4')) {
+    if (feats.has('bwings') && look.bwing) {
+      const t = this.bwingTex(key, look);
+      for (const side of [1, -1]) {
+        const w = new Sprite(t);
+        w.anchor.set(BW_AX, BW_AY);
+        w.position.set((pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2);
+        w.rotation = ang + side * (Math.PI / 2 + 0.12);
+        w.scale.set(scale * 1.15, scale * 1.15 * side);
+        c.addChild(w);
+      }
+    } else if (feats.has('wings') || feats.has('wings4')) {
       const k = feats.has('wings4') ? 4 : 2;
       for (let j = 0; j < k; j++) {
         const w = new Sprite(this.tex.wing);
+        if (look.wingTint !== undefined) w.tint = look.wingTint;
         w.anchor.set(0.05, 0.5);
         w.position.set(pts[1][0], pts[1][1]);
         const side = j % 2 === 0 ? 1 : -1;
@@ -2226,7 +2606,20 @@ export class GameRenderer {
       this.spawnParticle(s.segs[i * 2], s.segs[i * 2 + 1], Math.random() < 0.5 ? lcol : 0xffffff, 25, 0.6, 0.35);
     }
     // 날개(1~2번 마디 위, 퍼덕임)
-    if (g.wings.length) {
+    if (g.bw) {
+      // 나비: 큰 날개를 느리고 크게 친다. 위에서 보면 접힐 때 폭이 좁아진다
+      const wi = Math.min(n - 1, 1);
+      const wx = (s.segs[0] + s.segs[wi * 2]) / 2, wy = (s.segs[1] + s.segs[wi * 2 + 1]) / 2;
+      const ph = this.time * (s.fly ? 16 : 7) + s.id;
+      const open = 0.45 + 0.55 * Math.abs(Math.cos(ph));
+      g.wings.forEach((w, k) => {
+        const side = k === 0 ? 1 : -1;
+        w.position.set(wx, wy);
+        w.rotation = s.angle + side * (Math.PI / 2 + 0.12);
+        w.scale.set(scale * 1.6 * open * lift, scale * 1.6 * side * lift);
+        w.alpha = 0.97;
+      });
+    } else if (g.wings.length) {
       const wi = Math.min(n - 1, 1);
       const wx = s.segs[wi * 2], wy = s.segs[wi * 2 + 1];
       const flap = Math.sin(this.time * (s.fly ? 60 : 30)) * (s.fly ? 0.35 : 0.12);

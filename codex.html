@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>크롤루션 도감 · 2판 시험판</title>
+    <title>크롤루션 도감 · 3판 설계</title>
     <style>
       :root {
         --ink: #1b2a12;
@@ -34,16 +34,16 @@
       .fc b { font-weight: normal; font-size: 13px; }
       .fc small { font-size: 10.5px; opacity: 0.8; }
       .fc.on { background: var(--gold); box-shadow: 0 0 0 2.5px #fff, 0 3px 0 var(--ink); }
-      #hero { display: flex; gap: 10px; align-items: center; background: rgba(0, 0, 0, 0.25); border-radius: 16px; padding: 8px; border: 2px solid rgba(255, 255, 255, 0.12); }
-      #hero .pic { flex: none; width: 86px; height: 86px; border-radius: 18px; border: 3px solid var(--ink); background: radial-gradient(circle, #fff8dc, color-mix(in srgb, var(--c) 60%, #fff)); }
-      #hero .pic img { width: 100%; height: 100%; }
-      #hero .nm { font-family: var(--title); font-size: 22px; color: var(--gold); }
-      #hero .nm small { font-family: var(--ui); font-size: 13px; color: #cfe3b8; }
-      #hero .rl { font-size: 13px; color: #dfeccf; }
-      #hero .inst { font-size: 13px; margin-top: 3px; }
-      #hero .inst b { color: #b9f58f; font-weight: normal; }
-      #hero .fact { font-size: 11.5px; color: #b8c9a6; margin-top: 3px; }
-      #hero .fxt { font-size: 12px; color: #ffe9a0; margin-top: 3px; }
+      #hero , .hero { display: flex; gap: 10px; align-items: center; background: rgba(0, 0, 0, 0.25); border-radius: 16px; padding: 8px; border: 2px solid rgba(255, 255, 255, 0.12); }
+      #hero .pic , .hero .pic { flex: none; width: 86px; height: 86px; border-radius: 18px; border: 3px solid var(--ink); background: radial-gradient(circle, #fff8dc, color-mix(in srgb, var(--c) 60%, #fff)); }
+      #hero .pic img , .hero .pic img { width: 100%; height: 100%; }
+      #hero .nm , .hero .nm { font-family: var(--title); font-size: 22px; color: var(--gold); }
+      #hero .nm small , .hero .nm small { font-family: var(--ui); font-size: 13px; color: #cfe3b8; }
+      #hero .rl , .hero .rl { font-size: 13px; color: #dfeccf; }
+      #hero .inst , .hero .inst { font-size: 13px; margin-top: 3px; }
+      #hero .inst b , .hero .inst b { color: #b9f58f; font-weight: normal; }
+      #hero .fact , .hero .fact { font-size: 11.5px; color: #b8c9a6; margin-top: 3px; }
+      #hero .fxt , .hero .fxt { font-size: 12px; color: #ffe9a0; margin-top: 3px; }
       .spc small.fxs { color: #9a6a00; }
       #stageWrap { margin-top: 8px; scroll-margin-top: 48px; }
       #stage { position: relative; width: 100%; height: min(52vh, 340px); border-radius: 16px; overflow: hidden; border: 3px solid var(--ink); box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35); }
@@ -121,6 +121,38 @@
       table.cmp tr[data-f] { cursor: pointer; }
       table.cmp td.fm { font-size: 11.5px; white-space: normal; min-width: 76px; }
       table.cmp td.fm b { display: block; font-weight: normal; font-size: 15px; color: var(--gold); }
+      /* 3판 */
+      .note.top { margin: 2px 2px 6px; }
+      #v3stageHost { scroll-margin-top: 52px; }
+      #v3stageHost #stage { margin-top: 8px; }
+      #v3acts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 2px; }
+      #v3acts .act small { font-size: 11px; }
+      .act.atk { background: #ffe0d6; } .act.def { background: #d9ecff; } .act.spc { background: #e8dcff; } .act.ult { background: #ffd9a8; }
+      .act.mine { box-shadow: 0 0 0 2px #ff6ad8, 0 3px 0 var(--ink); }
+      .act.on { background: var(--gold); }
+      .fh { background: rgba(0, 0, 0, 0.25); border: 2px solid rgba(255, 255, 255, 0.12); border-left: 8px solid var(--c); border-radius: 16px; padding: 8px 10px; margin-bottom: 6px; }
+      .fh .nm { font-family: var(--title); font-size: 21px; color: var(--gold); }
+      .fh .nm small { font-family: var(--ui); font-size: 13px; color: #cfe3b8; }
+      .fh .kv span { background: rgba(255, 255, 255, 0.12); font-size: 12.5px; }
+      .kv .g { color: #cfe3b8; }
+      .tr2 { background: var(--paper); color: var(--ink); border: 2.5px solid var(--ink); border-radius: 14px; padding: 6px 9px; margin: 6px 0; }
+      .tr2 b { font-weight: normal; font-size: 15px; }
+      .tr2 p { margin: 3px 0; font-size: 13px; line-height: 1.35; }
+      .fxd { color: #6a3a9a; font-size: 12.5px !important; }
+      .ref { color: #2f5a8a; font-size: 12px !important; }
+      .slot { font-size: 12px; border-radius: 8px; padding: 1px 7px; border: 2px solid var(--ink); }
+      .slot small { font-size: 10px; opacity: 0.75; }
+      .slot.atk { background: #ffb8a0; } .slot.def { background: #a8d4ff; } .slot.spc { background: #d4bfff; } .slot.ult { background: #ffc46a; }
+      .badge.mine { background: #e04ab8; }
+      .kv .nw { background: #ffe066 !important; }
+      .v3hero { margin-top: 2px; }
+      .pal { display: inline-flex; gap: 2px; vertical-align: middle; margin-left: 4px; }
+      .pal em { width: 12px; height: 12px; border-radius: 4px; border: 1.5px solid var(--ink); display: inline-block; }
+      table.v3t td.fm { min-width: 90px; text-align: left; }
+      table.v3t td.fm small { color: #c4d6b0; }
+      table.v3t tr.grp td { text-align: left; font-size: 15px; padding-top: 8px; }
+      table.v3t tr[data-s], table.v3t tr[data-f] { cursor: pointer; }
+      table.v3t b.in { font-weight: normal; color: #b9f58f; }
       @media (min-width: 640px) {
         .abgrid { grid-template-columns: 1fr 1fr; gap: 0 8px; }
         .trgrid { grid-template-columns: 1fr 1fr 1fr; }
@@ -129,16 +161,33 @@
     </style>
   </head>
   <body>
-    <header><h1>크롤루션 도감</h1><small>2판 시험판 · 10계열 40종 · <span id="date"></span></small></header>
+    <header><h1>크롤루션 도감</h1><small>3판 설계 8계열 40종 · 2판 시험판 · <span id="date"></span></small></header>
     <nav>
-      <button data-t="crawler" class="on">🐞 크롤러</button>
-      <button data-t="compare">📊 한눈에 비교</button>
-      <button data-t="traits">🎒 특성</button>
+      <button data-t="v3" class="on">🆕 3판 40종</button>
+      <button data-t="v3list">📋 3판 표</button>
+      <button data-t="crawler">🐞 2판 크롤러</button>
+      <button data-t="compare">📊 2판 비교</button>
+      <button data-t="traits">🎒 2판 특성</button>
       <button data-t="cards">🃏 능력 카드</button>
-      <button data-t="subs">🧩 공용 보조 기술</button>
+      <button data-t="subs">🧩 2판 보조 기술</button>
     </nav>
     <main>
-      <div id="t-crawler" class="tab">
+      <div id="t-v3" class="tab">
+        <p class="note top">3판 구조: 계열 특성(늘) + 공격(Lv1) · 방어(Lv3) · 특수(Lv5) + 필살기(게이지), Lv10 각성. 종마다 한 칸이 종 기술로 바뀌고 본능이 하나 붙는다. ⭐ 대표 종, 🆕 3판에 새로 들어온 종.</p>
+        <div class="row" id="v3fams"></div>
+        <div id="v3famBox"></div>
+        <div class="row" id="v3sps"></div>
+        <div id="v3hero" class="hero"></div>
+        <div id="v3stageHost"></div>
+        <div class="row" id="v3stages"></div>
+        <div id="v3acts"></div>
+        <div id="v3skills"></div>
+      </div>
+      <div id="t-v3list" class="tab hidden">
+        <section><h3>8계열 뼈대 <small>줄을 누르면 그 계열로</small></h3><div class="scroll" id="v3famTable"></div></section>
+        <section><h3>40종 <small>바뀐 칸과 본능 · 줄을 누르면 그 종으로</small></h3><div class="scroll" id="v3spTable"></div></section>
+      </div>
+      <div id="t-crawler" class="tab hidden">
         <div class="row" id="roles"></div>
         <div class="row" id="fams"></div>
         <div id="hero"></div>

@@ -217,6 +217,45 @@ function drawBase(g: Graphics, look: Look) {
       eye(g, C + 30, C + 9, 5, 5, 0xf6f2e6);
       break;
     }
+    case 'ant': {
+      // 하트 모양 큰 머리(두 덩이) + 옆의 작은 눈
+      for (const sd of [-1, 1]) g.ellipse(C - 6, C + sd * 15, R * 0.82, R * 0.6).fill(hc).stroke(ol);
+      g.ellipse(C + 6, C, R * 0.7, R * 0.8).fill(hc);
+      g.ellipse(C - 16, C - 18, 12, 6).fill({ color: 0xffffff, alpha: 0.3 });
+      g.moveTo(C - 30, C).lineTo(C + 10, C).stroke({ width: 2.5, color: edge });
+      eye(g, C + 4, C - 32, 6, 8, ec ?? 0x141414);
+      eye(g, C + 4, C + 32, 6, 8, ec ?? 0x141414);
+      break;
+    }
+    case 'butterfly': {
+      // 작고 둥근 털 머리 + 큰 겹눈 + 앞에 말린 대롱 입
+      for (let k = 0; k < 18; k++) {
+        const a = (k / 18) * Math.PI * 2;
+        g.circle(C + Math.cos(a) * R * 0.66, C + Math.sin(a) * R * 0.66, 7).fill(lighter(hc, 0.12));
+      }
+      g.circle(C, C, R * 0.66).fill(hc).stroke(ol);
+      for (const sd of [-1, 1]) {
+        g.ellipse(C + 8, C + sd * 22, 13, 15).fill(ec ?? 0x2a2a30).stroke({ width: 2.5, color: INK });
+        facets(g, C + 8, C + sd * 22, 13, ec ?? 0x2a2a30);
+        g.circle(C + 12, C + sd * 22 - 6, 3.5).fill({ color: 0xffffff, alpha: 0.85 });
+      }
+      // 대롱 입: 작은 소용돌이
+      g.moveTo(C + 24, C);
+      for (let i = 0; i <= 24; i++) {
+        const t = i / 24, a = t * Math.PI * 3.2, rr = 11 * (1 - t * 0.75);
+        g.lineTo(C + 34 + Math.cos(a) * rr, C + Math.sin(a) * rr);
+      }
+      g.stroke({ width: 3, color: 0x3a2a1a, cap: 'round' });
+      break;
+    }
+    case 'milli': {
+      // 반들반들한 둥근 머리 + 작은 눈 무리
+      g.ellipse(C, C, R * 0.92, R * 0.98).fill(hc).stroke(ol);
+      g.ellipse(C - 8, C - 14, 18, 9).fill({ color: 0xffffff, alpha: 0.28 });
+      for (const sd of [-1, 1]) for (let i = 0; i < 4; i++) g.circle(C + 14 + (i % 2) * 6, C + sd * (16 + Math.floor(i / 2) * 6), 3).fill(0x0e0e0e);
+      g.moveTo(C + 22, C - 8).quadraticCurveTo(C + 30, C, C + 22, C + 8).stroke({ width: 3, color: INK });
+      break;
+    }
     case 'centipede': {
       g.ellipse(C, C, R * 1.0, R * 1.12).fill(0x8a1e14).stroke(ol);
       g.ellipse(C - 10, C - 16, 14, 7).fill({ color: 0xffffff, alpha: 0.3 });

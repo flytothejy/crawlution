@@ -1,9 +1,10 @@
+import { V3_BY_ID } from '../shared/v3';
 // 종별 연출 테마: 같은 계열 기술이라도 종마다 색·입자·모션이 다르다.
 // base: 계열 대표 종(지금 연출 그대로). 나머지 종은 pal 색으로 기술 색을 바꾸고, bit 입자와 motion 연출을 더한다.
 // pal: [주색, 보조색(밝게), 강조색] — 빛·궤적에 쓰이므로 모두 밝은 색이어야 한다.
 
 /** 입자 모양 */
-export type FxBit = 'dot' | 'petal' | 'leaf' | 'shard' | 'drop' | 'mote' | 'ember' | 'sand' | 'silk' | 'star' | 'bubble' | 'paper';
+export type FxBit = 'dot' | 'petal' | 'leaf' | 'shard' | 'drop' | 'mote' | 'ember' | 'sand' | 'silk' | 'star' | 'bubble' | 'paper' | 'ant' | 'scale' | 'hair';
 /** 기술을 쓸 때 몸에 붙는 연출
  * heavy: 땅 울림·먼지 고리 / swift: 머리 잔상 + 속도선 / phantom: 흐린 잔상이 길게 남음
  * spin: 머리 주변을 도는 입자 / glow: 부드러운 빛무리 / zigzag: 번개처럼 튀는 선 / drip: 떨어지는 방울과 얼룩 */
@@ -71,6 +72,9 @@ export const FX_THEMES: Record<string, FxTheme> = {
   photuris: { pal: [0xff9a3a, 0xd8ff5a, 0xffffff], bit: 'star', motion: 'phantom', tag: '주황·연두로 깜빡이는 가짜 빛' },
 };
 
+/** 3판 종: v3: 로 시작하는 새 종은 설계 데이터의 테마를 쓴다 */
 export function themeOf(sp: string | undefined | null): FxTheme | null {
-  return sp ? FX_THEMES[sp] ?? null : null;
+  if (!sp) return null;
+  if (sp.startsWith('v3:')) return V3_BY_ID.get(sp)?.theme ?? null;
+  return FX_THEMES[sp] ?? null;
 }

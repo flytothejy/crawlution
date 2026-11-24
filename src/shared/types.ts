@@ -32,7 +32,9 @@ export type FxKind =
   | 'pit' | 'sand' | 'ambush' | 'hell'
   | 'summon' | 'honey' | 'heat' | 'waggle'
   | 'flash' | 'signal' | 'lantern' | 'aurora'
-  | 'camo' | 'hop' | 'escape' | 'curl' | 'heal' | 'chirp' | 'decoy' | 'roll' | 'backstep' | 'playdead' | 'backplate' | 'bitter' | 'fang' | 'alarm';
+  | 'camo' | 'hop' | 'escape' | 'curl' | 'heal' | 'chirp' | 'decoy' | 'roll' | 'backstep' | 'playdead' | 'backplate' | 'bitter' | 'fang' | 'alarm'
+  // 3판 새 기술(도감 연출)
+  | 'fangstab' | 'coil' | 'vortex' | 'acid' | 'burrow' | 'antcall' | 'antriver' | 'leafwall' | 'nest' | 'buzz' | 'mudpot' | 'powder' | 'flutter' | 'charm' | 'bstorm' | 'eyespot' | 'morpho' | 'hairs';
 
 export type GameEvent =
   | { type: 'eat'; snake: number; x: number; y: number; big: boolean; gold?: boolean; special?: number; taste?: number }
@@ -48,7 +50,7 @@ export type GameEvent =
   | { type: 'evolve'; snake: number; stage: number; x: number; y: number }
   | { type: 'skill'; snake: number; fam: FamilyId; name: string; icon: string; x: number; y: number; angle: number; slot: 'main' | 'sub' | 'ult' }
   | { type: 'fx'; kind: FxKind; snake: number; fam: FamilyId | null; sp?: string; x: number; y: number; r?: number; angle?: number; len?: number; half?: number; x1?: number; y1?: number; awake?: boolean }
-  | { type: 'skillHit'; x: number; y: number; kind: 'cut' | 'stun' | 'push' | 'slow' | 'root' | 'blind' | 'mark' | 'fear' | 'silence' | 'grab' | 'poison' }
+  | { type: 'skillHit'; x: number; y: number; kind: 'cut' | 'stun' | 'push' | 'slow' | 'root' | 'blind' | 'mark' | 'fear' | 'silence' | 'grab' | 'poison' | 'confuse' | 'charm' | 'itch' }
   | { type: 'pop'; snake: number; x: number; y: number; text: string; color: number }
   | { type: 'ultReady'; snake: number }
   | { type: 'enemyWarn'; kind: EnemyKind; x: number; y: number }

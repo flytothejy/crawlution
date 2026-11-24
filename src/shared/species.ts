@@ -53,7 +53,11 @@ export interface Look {
   head: number;
   shape: HeadShape;
   pattern?: 'spots' | 'swarm' | 'metal' | 'fuzzy' | 'lamp';
-  feats?: ('wings' | 'wings4' | 'legs8' | 'stinger' | 'centipede' | 'longLegs' | 'lamp' | 'pack')[];
+  feats?: ('wings' | 'wings4' | 'legs8' | 'stinger' | 'centipede' | 'longLegs' | 'lamp' | 'pack' | 'bwings')[];
+  /** 나비 날개(앞·뒷날개 한 벌, 위에서 본 모습) */
+  bwing?: { kind: 'swallow' | 'monarch' | 'owl' | 'morpho' | 'moth'; c1: number; c2: number; c3: number };
+  /** 보통 날개 색(없으면 투명한 흰색) */
+  wingTint?: number;
   antenna?: 'short' | 'long' | 'elbow' | 'club' | 'feather' | null;
   horn?: 'rhino' | 'herc' | 'cauc';
   mandible?: { size: number; teeth?: boolean; branch?: boolean; color?: number };
@@ -62,7 +66,7 @@ export interface Look {
   eye?: number; // 눈 색
 }
 
-export type HeadShape = 'cute' | 'beetle' | 'dome' | 'mantis' | 'dragon' | 'naiad' | 'wasp' | 'bee' | 'shield' | 'assassin' | 'strider' | 'spider' | 'antlion' | 'lace' | 'firefly' | 'centipede';
+export type HeadShape = 'cute' | 'beetle' | 'dome' | 'mantis' | 'dragon' | 'naiad' | 'wasp' | 'bee' | 'shield' | 'assassin' | 'strider' | 'spider' | 'antlion' | 'lace' | 'firefly' | 'centipede' | 'ant' | 'butterfly' | 'milli';
 
 export interface Instinct {
   id: string;

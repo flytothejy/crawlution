@@ -10,6 +10,9 @@ import type { Snapshot, SnakeView } from '../shared/types';
 import { GameRenderer, type Frame, type FrameSnake } from '../client/renderer';
 import measured from './measured.json';
 import { themeOf } from '../client/fxtheme';
+import { startDash } from '../shared/skills';
+import { SLOT_LV, SLOT_NAME, V3_BY_ID, V3_FAMILIES, V3_FAMILY, v3Kit, type V3FamId, type V3Family, type V3Play, type V3React, type V3Skill, type V3Slot, type V3Species } from '../shared/v3';
+import type { FxKind } from '../shared/types';
 
 type Meas = { dmg: number; fx: string[] };
 const M = measured as unknown as {
@@ -36,7 +39,26 @@ let roleFilter: string = 'all';
 type Action = { kind: 'bite' } | { kind: 'main'; form: string } | { kind: 'sub'; sub: SubDef } | { kind: 'ult' };
 let action: Action = { kind: 'main', form: fam.forms[0].id };
 let loop = true;
-let tab = 'crawler';
+let tab = 'v3';
+// 3판 탭 상태
+let mode: 'old' | 'v3' = 'v3';
+let v3f: V3Family = V3_FAMILIES[0];
+let v3s: V3Species = V3_BY_ID.get(v3f.species[0])!;
+let v3slot: V3Slot = 'atk';
+let v3stage: 1 | 3 = 3;
+/** 새 기술은 몸이 비슷한 2판 종으로 장면을 돌리고 이펙트만 연출한다 */
+const PROXY: Record<V3FamId, string> = { beetle: 'rhino', centipede: 'widow', mantis: 'kingmantis', dragonfly: 'giantdf', bee: 'hornet', ant: 'brownbug', spider: 'orbspider', butterfly: 'genji' };
+let script: V3Play | null = null;
+let curAct: Action = { kind: 'bite' };
+let curLen = 4.2;
+const charmed = new Map<Snake, number>();
+const confused = new Map<Snake, number>();
+const itchy = new Map<Snake, number>();
+let circleT = 0;
+let puffT = 0;
+function findSub(id: string): SubDef {
+  return FAMILIES.find((f) => f.sub.id === id)?.sub ?? COMMON_SUBS.find((c) => c.id === id)!;
+}
 
 const renderer = new GameRenderer();
 let sim: Simulation | null = null;
@@ -80,11 +102,35 @@ function actionName(a: Action) {
   return lip ? { icon: '👄', name: '아랫입술 발사', desc: '수채(어린 모습)일 때 주 기술: 아랫입술을 쏘아 낚아챔' } : { icon: fo.icon, name: fo.name, desc: fo.desc };
 }
 
+function sceneParams(): { sp: string; act: Action; level: number } {
+  script = null;
+  if (mode === 'old') {
+    if (action.kind === 'main' && !formsOf(species).some((f) => f.id === (action as { form: string }).form)) action = { kind: 'main', form: formsOf(species)[0].id };
+    return { sp: species, act: action, level: LV[stage - 1] };
+  }
+  const sk = v3Kit(v3s)[v3slot];
+  const real = sk.play.real;
+  if (!real) {
+    script = sk.play;
+    return { sp: PROXY[v3f.id], act: { kind: 'bite' }, level: 10 };
+  }
+  const act: Action = real.kind === 'main' ? { kind: 'main', form: real.form! } : real.kind === 'ult' ? { kind: 'ult' } : { kind: 'sub', sub: findSub(real.sub!) };
+  return { sp: real.sp, act, level: 10 };
+}
+
 function setupScene() {
-  if (action.kind === 'main' && !formsOf(species).some((f) => f.id === (action as { form: string }).form)) action = { kind: 'main', form: formsOf(species)[0].id };
-  const form = action.kind === 'main' ? action.form : fam.forms[0].id;
-  const level = LV[stage - 1];
-  sim = new Simulation(11, '나', { power: 1, bots: 3, map: 'grass', loadout: { species, form, traits: [] }, startLevel: level });
+  const P = sceneParams();
+  curAct = P.act;
+  const spId = P.sp;
+  const form = curAct.kind === 'main' ? curAct.form : formsOf(spId)[0].id;
+  const level = P.level;
+  const spFam = SPECIES_BY_ID.get(spId)!.family;
+  curLen = script ? 4.6 : curAct.kind === 'ult' || spFam === 'bee' ? 6 : 4.2;
+  charmed.clear();
+  confused.clear();
+  itchy.clear();
+  circleT = 0;
+  sim = new Simulation(11, '나', { power: 1, bots: 3, map: 'grass', loadout: { species: spId, form, traits: [] }, startLevel: level });
   sim.enemies.next = 1e9;
   me = sim.snakes[0];
   me.abilities = [];
@@ -93,7 +139,7 @@ function setupScene() {
   me.pending = 0;
   me.subPending = false;
   me.lives = 99;
-  me.sub = action.kind === 'sub' ? action.sub : stage >= 2 ? fam.sub : null;
+  me.sub = curAct.kind === 'sub' ? curAct.sub : mode === 'old' && stage >= 2 ? fam.sub : null;
   sim.spawnAt(me, -40, 0, 0, 26);
   dummies = sim.snakes.slice(1, 4);
   dummies.forEach((d, i) => {
@@ -126,7 +172,10 @@ function stepScene() {
     const [hx, hy] = homes[i];
     const dx = hx - d.x, dy = hy - d.y;
     const far = Math.hypot(dx, dy) > 34;
-    const a = far ? Math.atan2(dy, dx) : Math.atan2(d.y - hy, d.x - hx) + Math.PI / 2;
+    let a = far ? Math.atan2(dy, dx) : Math.atan2(d.y - hy, d.x - hx) + Math.PI / 2;
+    // 3판 연출: 매혹된 적은 나에게 천천히 걸어오고, 혼란된 적은 갈지자로 흔들린다
+    if ((charmed.get(d) ?? 0) > sceneT) a = Math.atan2(me.y - d.y, me.x - d.x);
+    if ((confused.get(d) ?? 0) > sceneT) a += Math.sin(sceneT * 11 + i) * 1.3;
     d.cmd = { ...d.cmd, angle: a, sneak: true, boost: false };
     if (d.hp < d.maxHp * 0.35) d.hp = d.maxHp;
     d.ult = 0;
@@ -135,24 +184,35 @@ function stepScene() {
   // 내 곤충: 표적을 바라보며 다가간다. 가까우면 웅크려 속도를 줄인다
   const ta = Math.atan2(tgt.y - me.y, tgt.x - me.x);
   const d0 = Math.hypot(tgt.x - me.x, tgt.y - me.y);
-  const back = action.kind === 'main' && action.form === 'backjet';
+  const act = curAct;
+  const back = act.kind === 'main' && act.form === 'backjet';
   const cmd = { ...me.cmd, angle: back && sceneT > 0.15 ? ta + Math.PI : ta, sneak: false, boost: false };
+  if (circleT > sceneT) cmd.angle = me.angle + 0.16;
+  if (script && cast && sceneT < 1.2 && d0 < 120) cmd.sneak = true; // 연출 중에는 표적에 너무 붙지 않게
   if (!cast && sceneT > 0.35) {
     cast = true;
-    if (action.kind === 'main') ((me.skillCd = 0), (me.ult = 0), (cmd.skillSeq = me.lastSkillSeq + 1));
-    if (action.kind === 'ult') ((me.ult = CONFIG.ultMax), (cmd.skillSeq = me.lastSkillSeq + 1));
-    if (action.kind === 'sub') ((me.subCd = 0), (cmd.subSeq = me.lastSubSeq + 1));
-    if (action.kind === 'main' && action.form === 'ambush') sim.later(0.8, () => sim?.shove(tgt, Math.PI, 70));
+    if (act.kind === 'main') ((me.skillCd = 0), (me.ult = 0), (cmd.skillSeq = me.lastSkillSeq + 1));
+    if (act.kind === 'ult') ((me.ult = CONFIG.ultMax), (cmd.skillSeq = me.lastSkillSeq + 1));
+    if (act.kind === 'sub') ((me.subCd = 0), (cmd.subSeq = me.lastSubSeq + 1));
+    if (act.kind === 'main' && act.form === 'ambush') sim.later(0.8, () => sim?.shove(tgt, Math.PI, 70));
+    if (script) runScript(script, tgt);
   }
-  if (action.kind !== 'ult' && me.ult >= CONFIG.ultMax) me.ult = 0;
+  if (act.kind !== 'ult' && me.ult >= CONFIG.ultMax) me.ult = 0;
   sim.setCommand(me.id, cmd);
   sim.step();
   sceneT += sim.dt;
+  // 상태 표시 입자(혼란·매혹·가려움)
+  puffT -= sim.dt;
+  if (puffT <= 0) {
+    puffT = 0.28;
+    for (const [m, kind] of [[confused, 'confuse'], [charmed, 'charm'], [itchy, 'itch']] as const)
+      for (const [d, t] of m) if (t > sceneT && d.alive) sim.events.push({ type: 'skillHit', x: d.x, y: d.y, kind });
+  }
   snap = sim.snapshot();
+  if (mode === 'v3') for (const e of snap.events) if (e.type === 'fx' && e.snake === me.id) e.sp = v3s.id;
   const byId = new Map<number, SnakeView>(snap.snakes.map((s) => [s.id, s]));
   renderer.handleEvents(snap.events, byId, snap.playerId);
-  const len = action.kind === 'ult' || fam.id === 'bee' ? 6 : 4.2;
-  if (!me.alive || (loop && sceneT > len)) setupScene();
+  if (!me.alive || (loop && sceneT > curLen)) setupScene();
 }
 
 async function initStage() {
@@ -161,7 +221,7 @@ async function initStage() {
   renderer.opts.numbers = false; // 도감은 모션을 보려는 곳이라 피해 숫자는 끔(반복 칩 옆 '숫자'로 켬)
   renderer.opts.zoomMul = 0.72; // 기술 범위가 다 보이게 조금 멀리서
   renderer.app.ticker.add((tk) => {
-    if (tab !== 'crawler') return;
+    if (tab !== 'crawler' && tab !== 'v3') return;
     acc += Math.min(0.1, tk.deltaMS / 1000);
     if (!sim) setupScene();
     while (sim && acc >= sim.dt) {
@@ -170,7 +230,7 @@ async function initStage() {
     }
     if (!snap) return;
     renderer.reveal = snap.player.reveal;
-    const snakes = snap.snakes.map((s) => (s.id === snap!.playerId ? s : { ...s, isPlayer: false })) as FrameSnake[];
+    const snakes = snap.snakes.map((s) => (s.id === snap!.playerId ? (mode === 'v3' ? { ...s, species: v3s.id, stage: v3stage } : s) : { ...s, isPlayer: false })) as FrameSnake[];
     const frame: Frame = { snakes, foods: snap.foods, rings: snap.rings, zones: snap.zones, projs: snap.projs, minions: snap.minions, teles: snap.teles, enemy: null, map: snap.map, playerId: snap.playerId };
     renderer.render(frame, Math.min(0.05, tk.deltaMS / 1000));
   });
@@ -180,6 +240,174 @@ function play(a: Action) {
   action = a;
   setupScene();
   drawControls();
+}
+
+// ---------- 3판: 새 기술 연출 ----------
+function runScript(p: V3Play, tgt: Snake) {
+  const S = sim!;
+  const T = p.reactT ?? 1;
+  const dist = p.dist ?? 120;
+  // 내 몸 움직임
+  if (p.move === 'dash') startDash(S, me, '', dist, 3.2);
+  if (p.move === 'hop') startDash(S, me, '', dist, 3, true);
+  if (p.move === 'back') {
+    me.dashAngle = me.angle + Math.PI;
+    startDash(S, me, '', dist, 3);
+    S.later(0.4, () => (me.dashAngle = NaN));
+  }
+  if (p.move === 'zig')
+    for (let k = 0; k < 4; k++)
+      S.later(k * 0.32, () => {
+        me.dashAngle = me.angle + (k % 2 ? -0.9 : 0.9);
+        startDash(S, me, '', dist / 4, 2.6, true);
+      });
+  if (p.move === 'zig') S.later(1.35, () => (me.dashAngle = NaN));
+  if (p.move === 'skip') for (let k = 0; k < 3; k++) S.later(k * 0.25, () => startDash(S, me, '', dist / 3, 3, true));
+  if (p.move === 'circle') {
+    circleT = sceneT + 1.1;
+    startDash(S, me, '', 300, 2.2);
+  }
+  // 내 몸 상태
+  const st = p.selfT ?? 1;
+  for (const k of p.self ?? []) {
+    if (k === 'fly') me.flyT = st;
+    if (k === 'ghost') me.ghostT = st;
+    if (k === 'hide') me.hiddenT = st;
+    if (k === 'shield') me.reduceT = st;
+    if (k === 'curl') me.curlT = st;
+    if (k === 'bitter') me.bitterT = st;
+  }
+  // 이펙트(터지는 순간의 내 위치, 방향은 쓴 순간 기준)
+  const a0 = me.angle, x0 = me.x, y0 = me.y;
+  for (const f of p.fx ?? []) {
+    S.later(f.delay ?? 0.02, () => {
+      const a = a0 + (f.aoff ?? 0);
+      let x = me.x, y = me.y;
+      if (f.at === 'front') ((x = x0 + Math.cos(a) * (f.d ?? 100)), (y = y0 + Math.sin(a) * (f.d ?? 100))); // 쓴 자리 기준(도약 착지점 등)
+      if (f.at === 'tgt') ((x = tgt.x), (y = tgt.y));
+      if (f.at === undefined || f.at === 'head') ((x += Math.cos(a) * 14), (y += Math.sin(a) * 14));
+      S.fx(f.kind as FxKind, me, x, y, { r: f.r, len: f.len, half: f.half, angle: a, x1: me.x, y1: me.y });
+    });
+  }
+  // 맞은 쪽 반응
+  const hitAt = (p.fx ?? []).reduce((m, f) => Math.max(m, f.delay ?? 0), 0) * 0.5 + 0.12;
+  S.later(hitAt, () => {
+    const list = p.all ? dummies.filter((d) => d.alive && Math.hypot(d.x - me.x, d.y - me.y) < 360) : [tgt];
+    for (const d of list) for (const r of p.react ?? []) react(d, r, T);
+  });
+}
+
+function react(d: Snake, r: V3React, T: number) {
+  const S = sim!;
+  const away = Math.atan2(d.y - me.y, d.x - me.x);
+  const hitFx = (kind: 'cut' | 'stun' | 'push' | 'slow' | 'root' | 'blind' | 'mark' | 'fear' | 'silence' | 'grab' | 'poison') => S.events.push({ type: 'skillHit', x: d.x, y: d.y, kind });
+  switch (r) {
+    case 'stun': d.stunT = T; hitFx('stun'); break;
+    case 'lift': d.stunT = Math.max(d.stunT, T); S.shove(d, away, 30); hitFx('grab'); break;
+    case 'root': d.rootT = T; hitFx('root'); break;
+    case 'slow': d.slowT = T; d.slowMul = 0.5; hitFx('slow'); break;
+    case 'fear': d.fearT = T; hitFx('fear'); break;
+    case 'blind': d.blindT = T; hitFx('blind'); break;
+    case 'silence': d.silenceT = T; hitFx('silence'); break;
+    case 'mark': d.markT = 3; hitFx('mark'); break;
+    case 'poison': d.poisonT = 3; d.poisonDps = 1; d.poisonBy = me.id; hitFx('poison'); break;
+    case 'push': for (let k = 0; k < 6; k++) S.later(k * 0.03, () => S.shove(d, away, 14)); hitFx('push'); break;
+    case 'pull': for (let k = 0; k < 10; k++) S.later(k * 0.05, () => S.shove(d, Math.atan2(me.y - d.y, me.x - d.x), 9)); hitFx('grab'); break;
+    case 'cut': hitFx('cut'); break;
+    case 'confuse': confused.set(d, sceneT + T); break;
+    case 'charm': charmed.set(d, sceneT + T); break;
+    case 'itch': itchy.set(d, sceneT + T); hitFx('poison'); break;
+  }
+}
+
+// ---------- 3판 탭 ----------
+const SLOT_CLS: Record<V3Slot, string> = { atk: 'atk', def: 'def', spc: 'spc', ult: 'ult' };
+function playV3(slot: V3Slot) {
+  v3slot = slot;
+  setupScene();
+  drawV3Controls();
+}
+function pickV3Fam(id: V3FamId) {
+  v3f = V3_FAMILY[id];
+  v3s = V3_BY_ID.get(v3f.species[0])!;
+  v3slot = 'atk';
+  drawV3();
+  setupScene();
+}
+function pickV3Sp(id: string) {
+  v3s = V3_BY_ID.get(id)!;
+  v3f = V3_FAMILY[v3s.fam];
+  if (v3s.swap && v3s.swap !== v3slot) v3slot = v3s.swap; // 종 기술부터 보여 준다
+  drawV3();
+  setupScene();
+}
+
+function skillCard(slot: V3Slot, k: V3Skill & { mine?: boolean }, c: number) {
+  return `<div class="sk v3 ${SLOT_CLS[slot]}${slot === 'ult' ? ' ult' : ''}" style="--c:${hex(c)}">
+    <div class="hd"><span class="slot ${SLOT_CLS[slot]}">${SLOT_NAME[slot]} <small>${SLOT_LV[slot]}</small></span><b>${k.icon} ${k.name}</b>${k.mine ? '<span class="badge mine">종 기술</span>' : ''}<button class="pl" data-slot="${slot}">▶ 보기</button></div>
+    <div class="kv"><span>${k.type}</span>${k.cd ? `<span>재사용 ${k.cd}초</span>` : slot === 'ult' ? '<span>게이지가 차면</span>' : ''}${k.from ? `<span class="g">2판 ${k.from}</span>` : '<span class="nw">새 기술</span>'}</div>
+    <p>${k.desc}</p>${k.awake ? `<p class="aw">각성: ${k.awake}</p>` : ''}
+    <p class="fxd">✨ ${k.fx}</p><p class="ref">🎮 ${k.ref}</p></div>`;
+}
+
+function drawV3Controls() {
+  const kit = v3Kit(v3s);
+  const k = kit[v3slot];
+  $('now').innerHTML = mode === 'v3' ? `<b>${k.icon} ${k.name}</b><small>${k.desc}</small>` : $('now').innerHTML;
+  $('v3acts').innerHTML = (['atk', 'def', 'spc', 'ult'] as V3Slot[])
+    .map((sl) => `<button class="act ${sl}${sl === v3slot ? ' on' : ''}${kit[sl].mine ? ' mine' : ''}" data-slot="${sl}">${kit[sl].icon}<small>${SLOT_NAME[sl]}<br>${kit[sl].name}</small></button>`)
+    .join('');
+  $('v3acts').querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) => (b.onclick = () => playV3(b.dataset.slot as V3Slot)));
+  $('v3stages').innerHTML =
+    [1, 3].map((st) => `<button class="chip${v3stage === st ? ' on' : ''}" data-st="${st}">${st === 1 ? v3f.stages[0] : v3f.stages[1]} 모습</button>`).join('') +
+    `<button class="chip tog${loop ? ' on' : ''}" id="v3loop">🔁 반복</button><button class="chip tog${renderer.opts.numbers ? ' on' : ''}" id="v3num">🔢 숫자</button>`;
+  $('v3stages').querySelectorAll<HTMLButtonElement>('[data-st]').forEach((b) => (b.onclick = () => ((v3stage = Number(b.dataset.st) as 1 | 3), drawV3())));
+  $('v3loop').onclick = () => ((loop = !loop), drawV3Controls(), loop || setupScene());
+  $('v3num').onclick = () => ((renderer.opts.numbers = !renderer.opts.numbers), drawV3Controls());
+}
+
+function drawV3() {
+  const F = v3f, sp = v3s;
+  $('v3fams').innerHTML = V3_FAMILIES.map((f) => `<button class="fc${f.id === F.id ? ' on' : ''}" data-f="${f.id}" style="--c:${hex(f.color)}"><img src="${renderer.portrait(f.species[0] + '@3')}" alt=""><b>${f.name}</b><small>${f.cc}</small></button>`).join('');
+  $('v3fams').querySelectorAll<HTMLButtonElement>('button').forEach((b) => (b.onclick = () => pickV3Fam(b.dataset.f as V3FamId)));
+  $('v3fams').querySelector<HTMLElement>('.on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  $('v3famBox').innerHTML = `<div class="fh" style="--c:${hex(F.color)}"><div class="nm">${F.icon} ${F.name} <small>${F.seat}</small></div>
+    <div class="kv"><span>제어: ${F.cc}</span><span>${F.stages.join(' → ')}</span>${F.merged ? `<span class="g">${F.merged}</span>` : ''}</div>
+    <div class="tr2"><b>${F.trait.icon} 계열 특성 · ${F.trait.name}</b><p>${F.trait.desc}</p><p class="fxd">✨ ${F.trait.fx}</p><p class="ref">🎮 ${F.trait.ref}</p></div>
+    <p class="note">🎨 모습: ${F.look}<br>🎆 공통 연출: ${F.motion}<br>💪 강함: ${F.strong}<br>⚠️ 약함: ${F.weak}</p></div>`;
+  $('v3sps').innerHTML = F.species
+    .map((id) => {
+      const s = V3_BY_ID.get(id)!;
+      return `<button class="chip sp${id === sp.id ? ' on' : ''}" data-s="${id}"><img src="${renderer.portrait(id + '@' + v3stage)}" alt="">${s.name}${s.base ? ' ⭐' : s.isNew ? ' 🆕' : ''}</button>`;
+    })
+    .join('');
+  $('v3sps').querySelectorAll<HTMLButtonElement>('button').forEach((b) => (b.onclick = () => pickV3Sp(b.dataset.s!)));
+  const swapTxt = sp.base ? '대표 종 · 계열 기술 그대로' : `${SLOT_NAME[sp.swap!]} 칸 → <b>${sp.skill!.icon} ${sp.skill!.name}</b>`;
+  $('v3hero').innerHTML = `<div class="pic" style="--c:${hex(F.color)}"><img src="${renderer.portrait(sp.id + '@' + v3stage)}" alt=""></div>
+    <div><div class="nm">${sp.name} <small>${F.name}${sp.isNew ? ' · 3판 새 종' : ''}</small></div>
+    <div class="rl">${swapTxt}</div>
+    <div class="inst">🧬 본능 <b>${sp.instinct.name}</b> ${sp.instinct.desc}</div>
+    <div class="fxt">✨ 연출: ${sp.theme.tag} <i class="pal">${sp.theme.pal.map((c) => `<em style="background:${hex(c)}"></em>`).join('')}</i></div>
+    <div class="fact">🎨 ${sp.gfx}</div><div class="fact">📖 ${sp.fact}</div></div>`;
+  const kit = v3Kit(sp);
+  $('v3skills').innerHTML = `<section><h3>${sp.name}의 기술 4칸 <small>▶를 누르면 위 무대에서 재생</small></h3>${(['atk', 'def', 'spc', 'ult'] as V3Slot[]).map((sl) => skillCard(sl, kit[sl], F.color)).join('')}
+    <p class="note">'2판 …' 표시는 이미 있는 기술을 옮겨 온 것으로 실제 시뮬레이션이 돈다. '새 기술'은 이펙트와 맞은 쪽 반응(기절·밀림·혼란·매혹 등)만 연출로 보여 주고 피해 계산은 아직 없다.</p></section>`;
+  $('v3skills').querySelectorAll<HTMLButtonElement>('.pl').forEach((b) => (b.onclick = () => (playV3(b.dataset.slot as V3Slot), $('v3stageHost').scrollIntoView({ behavior: 'smooth', block: 'start' }))));
+  drawV3Controls();
+}
+
+function drawV3Tables() {
+  $('v3famTable').innerHTML = `<table class="cmp v3t"><tr><th>계열</th><th>자리 · 제어</th><th>계열 특성</th><th>공격</th><th>방어</th><th>특수</th><th>필살기</th></tr>${V3_FAMILIES.map(
+    (f) => `<tr data-f="${f.id}"><td class="nm"><img src="${renderer.portrait(f.species[0] + '@3')}" alt="">${f.name}</td><td class="fm">${f.seat.split(' · ')[0]}<br><small>${f.cc}</small></td><td class="fm">${f.trait.icon} ${f.trait.name}</td>${(['atk', 'def', 'spc', 'ult'] as V3Slot[]).map((sl) => `<td class="fm">${f[sl].icon} ${f[sl].name}<br><small>${f[sl].type}</small></td>`).join('')}</tr>`,
+  ).join('')}</table>`;
+  $('v3famTable').querySelectorAll<HTMLElement>('tr[data-f]').forEach((tr) => (tr.onclick = () => (pickV3Fam(tr.dataset.f as V3FamId), window.scrollTo({ top: 0, behavior: 'smooth' }))));
+  $('v3spTable').innerHTML = `<table class="cmp v3t"><tr><th>종</th><th>바뀐 칸 → 종 기술</th><th>본능</th></tr>${V3_FAMILIES.map(
+    (f) => `<tr class="grp"><td colspan="3" style="color:${hex(f.color)}">${f.icon} ${f.name}</td></tr>` + f.species.map((id) => {
+      const s = V3_BY_ID.get(id)!;
+      return `<tr data-s="${id}"><td class="nm"><img src="${renderer.portrait(id + '@3')}" alt="">${s.name}${s.isNew ? ' 🆕' : ''}</td><td class="fm">${s.base ? '⭐ 대표 · 그대로' : `${SLOT_NAME[s.swap!]} → ${s.skill!.icon} ${s.skill!.name}`}</td><td class="fm"><b class="in">${s.instinct.name}</b> ${s.instinct.desc}</td></tr>`;
+    }).join(''),
+  ).join('')}</table>`;
+  $('v3spTable').querySelectorAll<HTMLElement>('tr[data-s]').forEach((tr) => (tr.onclick = () => (pickV3Sp(tr.dataset.s!), window.scrollTo({ top: 0, behavior: 'smooth' }))));
 }
 
 // ---------- 크롤러 탭 ----------
@@ -364,10 +592,18 @@ function drawSubs() {
 }
 
 function showTab(t: string) {
+  const prev = mode;
   tab = t;
+  if (t === 'v3') ((mode = 'v3'), $('v3stageHost').appendChild($('stage')));
+  if (t === 'crawler') ((mode = 'old'), $('stageWrap').prepend($('stage')));
+  if (mode !== prev) {
+    setupScene();
+    if (mode === 'old') drawControls();
+    else drawV3Controls();
+  }
   document.querySelectorAll<HTMLElement>('nav button').forEach((b) => b.classList.toggle('on', b.dataset.t === t));
   document.querySelectorAll<HTMLElement>('.tab').forEach((el) => el.classList.toggle('hidden', el.id !== 't-' + t));
-  if (t === 'crawler') requestAnimationFrame(() => renderer.app.resize());
+  if (t === 'crawler' || t === 'v3') requestAnimationFrame(() => renderer.app.resize());
   window.scrollTo({ top: 0 });
 }
 
@@ -384,7 +620,10 @@ async function boot() {
   drawTraits();
   drawCards();
   drawSubs();
+  drawV3();
+  drawV3Tables();
+  showTab('v3');
   setupScene();
-  (globalThis as { __codex?: unknown }).__codex = { pickFam, play, get sim() { return sim; } };
+  (globalThis as { __codex?: unknown }).__codex = { pickFam, play, pickV3Fam, pickV3Sp, playV3, showTab, get sim() { return sim; } };
 }
 void boot();
