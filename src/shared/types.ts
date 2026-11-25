@@ -35,7 +35,7 @@ export type FxKind =
   | 'camo' | 'hop' | 'escape' | 'curl' | 'heal' | 'chirp' | 'decoy' | 'roll' | 'backstep' | 'playdead' | 'backplate' | 'bitter' | 'fang' | 'alarm'
   // 3판 새 기술(도감 연출)
   // 모션 신호: 기술 예고(windup), 들려 날아감(lifted)
-  | 'windup' | 'lifted'
+  | 'windup' | 'lifted' | 'trizone'
   | 'fangstab' | 'coil' | 'vortex' | 'acid' | 'burrow' | 'antcall' | 'antriver' | 'leafwall' | 'nest' | 'buzz' | 'mudpot' | 'powder' | 'flutter' | 'charm' | 'bstorm' | 'eyespot' | 'morpho' | 'hairs';
 
 export type GameEvent =

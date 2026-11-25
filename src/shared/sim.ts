@@ -1674,7 +1674,7 @@ export class Simulation {
     let want = c.angle;
     // 눈부심: 방향이 흔들린다
     if (s.blindT > 0) want += Math.sin(this.time * 11 + s.id) * 1.1;
-    if (s.chanT > 0 && s.chanKind === 'circle') s.angle += 6.5 * dt * s.side; // 맴돌기: 원을 그린다
+    if (s.chanT > 0 && s.chanKind === 'circle') s.angle += 8.4 * dt * s.side * (s.chanT > 0.75 ? 1 : -1); // 맴돌기: 반은 왼쪽, 반은 오른쪽으로 돌아 8자를 그린다
     else {
       let diff = want - s.angle;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));

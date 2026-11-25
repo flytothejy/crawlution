@@ -302,6 +302,18 @@ function runScript(p: V3Play, tgt: Snake) {
       });
   if (p.move === 'zig') S.later(1.35, () => (me.dashAngle = NaN));
   if (p.move === 'skip') for (let k = 0; k < 3; k++) S.later(k * 0.25, () => startDash(S, me, '', dist / 3, 3, true));
+  if (p.move === 'tri') {
+    // 삼각형 세 꼭짓점: 뒤왼쪽 → 뒤오른쪽 → 앞
+    const a = me.angle, cx = me.x + Math.cos(a) * 135, cy = me.y + Math.sin(a) * 135;
+    const pts = [a - (2 * Math.PI) / 3, a + (2 * Math.PI) / 3, a].map((t) => [cx + Math.cos(t) * 85, cy + Math.sin(t) * 85]);
+    pts.forEach(([px, py], k) =>
+      S.later(k * 0.25, () => {
+        me.dashAngle = Math.atan2(py - me.y, px - me.x);
+        startDash(S, me, '', Math.hypot(px - me.x, py - me.y), 4, true);
+      }),
+    );
+    S.later(0.78, () => (me.dashAngle = NaN));
+  }
   if (p.move === 'circle') {
     circleT = sceneT + 1.1;
     startDash(S, me, '', 300, 2.2);
@@ -329,7 +341,7 @@ function runScript(p: V3Play, tgt: Snake) {
     });
   }
   // 맞은 쪽 반응
-  const hitAt = (p.fx ?? []).reduce((m, f) => Math.max(m, f.delay ?? 0), 0) * 0.5 + 0.12;
+  const hitAt = p.reactAt ?? (p.fx ?? []).reduce((m, f) => Math.max(m, f.delay ?? 0), 0) * 0.5 + 0.12;
   S.later(hitAt, () => {
     const list = p.all ? dummies.filter((d) => d.alive && Math.hypot(d.x - me.x, d.y - me.y) < 360) : [tgt];
     for (const d of list) for (const r of p.react ?? []) react(d, r, T);

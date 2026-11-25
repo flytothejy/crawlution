@@ -111,14 +111,17 @@ export function castMain(sim: Simulation, s: Snake) {
       const reach = 70 * R * (sim.inst(s, 'sawjaw') ? 1.4 : sim.inst(s, 'longjaw') ? 1.8 : 1);
       if (form === 'scissor') {
         const cut = (mul: number) => {
-          sim.fx('scissor', s, s.x, s.y, { angle: s.angle, r: 110 * R, half: 1.05 });
+          sim.fx('scissor', s, s.x, s.y, { angle: s.angle, r: 110 * R, half: 1.05, dur: 0.3 });
           sim.cone(s, s.x, s.y, s.angle, 110 * R, 1.05, (o, x, y) => {
             sim.deal(s, o, B * mul * jawNear(sim, s, x, y), 'skill', x, y);
             sim.events.push({ type: 'skillHit', x, y, kind: 'cut' });
           });
         };
-        cut(1);
-        if (aw) sim.later(0.28, () => s.alive && cut(0.8));
+        // 큰턱을 활짝 벌렸다가(예고) 양쪽에서 휘둘러 닫는다
+        windup(sim, s, 0.14, 'scissor', () => {
+          cut(1);
+          if (aw) sim.later(0.28, () => s.alive && cut(0.8));
+        });
         return;
       }
       sim.fx('grab', s, hx, hy, { angle: s.angle, r: reach });
@@ -172,7 +175,7 @@ export function castMain(sim: Simulation, s: Snake) {
       } else if (form === 'snatch') {
         // 다리를 바구니처럼 벌리고 낮게 스쳐 지나가며 낚는다
         windup(sim, s, 0.1, 'snatch', () => {
-          startDash(sim, s, 'snatch', 260 * R, 3, true, B);
+          startDash(sim, s, 'snatch', 220 * R, 3.2, true, B);
           sim.fx('snatch', s, s.x, s.y, { angle: s.angle, len: 260 * R, dur: s.dashT });
         });
       } else {
@@ -180,7 +183,7 @@ export function castMain(sim: Simulation, s: Snake) {
         s.chanKind = 'circle';
         s.chanAcc = 0.3;
         s.chanDmg = B;
-        sim.fx('circle', s, hx, hy, { r: 110 * R });
+        sim.fx('circle', s, hx, hy, { r: 110 * R, dur: 1.5, angle: s.angle, half: s.side });
       }
       return;
     }
@@ -477,9 +480,19 @@ export function castSub(sim: Simulation, s: Snake) {
       s.nextMul = 1.5;
       sim.fx('camo', s, s.x, s.y);
       return;
-    case 'hop':
-      startDash(sim, s, 'hop', 220 * R, 2.6, true);
-      sim.fx('hop', s, s.x, s.y, { angle: s.angle, wk: 'flit', dur: s.dashT });
+    case 'hop': {
+      // 날아올라 옆으로 급선회: 가까운 적의 반대쪽으로 꺾어 빠진다
+      const foe = nearestEnemy(sim, s, 320);
+      let side = Math.random() < 0.5 ? 1 : -1;
+      if (foe) side = Math.sin(Math.atan2(foe.y - s.y, foe.x - s.x) - s.angle) > 0 ? -1 : 1;
+      s.dashAngle = s.angle + side * 0.35;
+      startDash(sim, s, 'hop', 200 * R, 2.6, true);
+      const turn = s.angle + side * 1.25;
+      sim.later(s.dashT * 0.35, () => { if (s.dashT > 0) s.dashAngle = turn; });
+      sim.later(s.dashT, () => { s.dashAngle = NaN; s.angle = turn; });
+      sim.fx('hop', s, s.x, s.y, { angle: s.angle, wk: 'flit', dur: s.dashT, half: side });
+      return;
+    }
       return;
     case 'escape':
       sim.cleanse(s);
@@ -509,13 +522,20 @@ export function castSub(sim: Simulation, s: Snake) {
       sim.addZone({ x: zx, y: zy, r: 30, kind: 'bait', life: 8, owner: s.id, dps: B * 0.2, mul: 1 * D });
       return;
     }
-    case 'roll':
+    case 'roll': {
+      // 옆으로 데굴 구른다: 가까운 적의 반대쪽 옆으로
+      const foe = nearestEnemy(sim, s, 320);
+      let side = Math.random() < 0.5 ? 1 : -1;
+      if (foe) side = Math.sin(Math.atan2(foe.y - s.y, foe.x - s.x) - s.angle) > 0 ? -1 : 1;
+      s.dashAngle = s.angle + side * (Math.PI / 2);
       startDash(sim, s, 'roll', 110, 2.4, false);
       s.ghostT = Math.max(s.ghostT, s.dashT);
       s.nextBite = 1.5;
       s.nextBiteT = 3;
-      sim.fx('roll', s, s.x, s.y, { angle: s.angle });
+      sim.later(s.dashT, () => (s.dashAngle = NaN));
+      sim.fx('roll', s, s.x, s.y, { angle: s.angle, wk: 'roll', dur: s.dashT, half: side });
       return;
+    }
     case 'chirp':
       sim.fx('chirp', s, s.x, s.y, { r: 150 * R });
       sim.circle(s, s.x, s.y, 150 * R, (o, x, y) => {
@@ -940,8 +960,19 @@ function snatchTick(sim: Simulation, s: Snake) {
       if (dist(o.segs[i * 2], o.segs[i * 2 + 1], s.x, s.y) < 30 + o.r + s.r) {
         s.dashHits.add(o.id);
         sim.deal(s, o, s.dashDmg * 0.8, 'skill', o.segs[i * 2], o.segs[i * 2 + 1]);
-        sim.events.push({ type: 'skillHit', x: o.segs[i * 2], y: o.segs[i * 2 + 1], kind: 'cut' });
-        if (s.evo >= 3 && s.grabTarget < 0) sim.grab(s, o, 0.5, 'drag');
+        sim.events.push({ type: 'skillHit', x: o.segs[i * 2], y: o.segs[i * 2 + 1], kind: 'grab' });
+        // 첫 표적을 다리로 낚아 내 앞으로 끌어온다(내가 딸려가지 않게 돌진은 멈춘다)
+        if (s.dashHits.size === 1) {
+          s.dashT = 0.01;
+          s.flyT = Math.max(s.flyT, 0.3);
+          const fx = s.x + Math.cos(s.angle) * (s.r * 2 + 24), fy = s.y + Math.sin(s.angle) * (s.r * 2 + 24);
+          const far = Math.hypot(fx - o.x, fy - o.y);
+          sim.pullTo(o, fx, fy, far + 40);
+          sim.stun(o, s.evo >= 3 ? 0.6 : 0.25);
+          sim.fx('lifted', o, o.x, o.y, { angle: s.angle, wk: 'yank', dur: 0.35, x1: s.x, y1: s.y });
+          sim.fx('snatch', s, s.x, s.y, { angle: s.angle, wk: 'grab', x1: o.x, y1: o.y, dur: 0.35 });
+          sim.hitstop(s, o, 0.06);
+        }
         if (sim.ab(s, 'ace') > 0) s.skillCd *= 1 - sim.ab(s, 'ace');
         break;
       }

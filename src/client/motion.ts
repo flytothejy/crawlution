@@ -15,9 +15,12 @@ export interface Pose {
   legSpread: number; // 다리 벌림(0~1)
   ghost: number; // 잔상 세기(0~1)
   tilt: number; // 몸 비틀기(라디안)
+  jaw: number; // 큰턱·뿔 벌림(+ 벌림, - 꽉 닫음)
+  wingFold: number; // 날개를 뒤로 접어 붙임(0~1, 급강하)
+  roll: number; // 옆구르기 위상(0~1 한 바퀴)
 }
 
-export const REST: Pose = { z: 0, headZ: 0, stretch: 1, width: 1, lean: 0, headScale: 1, jitter: 0, wingRate: 0, wingSpread: 0, legSpread: 0, ghost: 0, tilt: 0 };
+export const REST: Pose = { z: 0, headZ: 0, stretch: 1, width: 1, lean: 0, headScale: 1, jitter: 0, wingRate: 0, wingSpread: 0, legSpread: 0, ghost: 0, tilt: 0, jaw: 0, wingFold: 0, roll: 0 };
 
 type Prog = (k: number, t: number, d: number) => Partial<Pose>;
 
@@ -38,12 +41,18 @@ export const PROGS: Record<string, Prog> = {
   'windup:charge': (k) => ({ stretch: 1 - 0.28 * outQ(k), lean: -10 * outQ(k), headScale: 1 - 0.08 * k, width: 1 + 0.1 * k, jitter: 2.5 * k, legSpread: k }),
   // 돌진: 앞으로 쭉 늘어나며 잔상
   charge: (k) => ({ stretch: 1 + 0.35 * bump(k * 1.3), lean: 10 * (1 - k), ghost: 1 - k * 0.6, headScale: 1.06 }),
+  // 가위 닫기 예고: 큰턱을 활짝 벌리고 머리를 뒤로 젖힌다
+  'windup:scissor': (k) => ({ jaw: 1.1 * outQ(k), lean: -8 * k, headScale: 1 + 0.08 * k, jitter: 1.5 * k }),
+  // 가위 닫기: 양쪽 큰턱을 휘둘러 꽉 닫는다(머리가 앞으로 튀어나감)
+  scissor: (k) => ({ jaw: k < 0.3 ? 1.1 - 1.6 * outQ(k / 0.3) : -0.5 * (1 - (k - 0.3) / 0.7), lean: 16 * bump(Math.min(1, k * 1.6)), headScale: 1 + 0.12 * bump(k) }),
   // 퍼 올리기 예고: 머리를 땅에 박듯 숙인다
   'windup:lift': (k) => ({ headZ: -6 * outQ(k), headScale: 1 - 0.14 * outQ(k), lean: -6 * k, stretch: 1 - 0.15 * k, jitter: 1.5 * k }),
   // 퍼 올리기: 머리가 크게 솟았다가 내려온다(뿔을 위로 휘두름)
-  lift: (k) => ({ headZ: 34 * bump(k) * (k < 0.35 ? outB(k / 0.35) / 1 : 1), headScale: 1 + 0.3 * bump(k), lean: 12 * bump(k), stretch: 1 + 0.1 * bump(k) }),
+  lift: (k) => ({ headZ: 52 * bump(k) * (k < 0.35 ? outB(k / 0.35) : 1), headScale: 1 + 0.35 * bump(k), lean: 14 * bump(k), stretch: 1 + 0.12 * bump(k), jaw: 0.6 * bump(k) }),
   // 들려서 날아감(맞은 쪽): 높이 포물선 + 몸 비틀림
-  lifted: (k) => ({ z: 75 * bump(k), tilt: 1.8 * k, stretch: 1 - 0.15 * bump(k), headScale: 1 + 0.15 * bump(k), ghost: 0.8 }),
+  lifted: (k) => ({ z: 115 * (k < 0.45 ? outQ(k / 0.45) : 1 - inQ((k - 0.45) / 0.55)), tilt: 2.2 * k, stretch: 1 - 0.2 * bump(k), headScale: 1 + 0.2 * bump(k), ghost: 0.9 }),
+  // 낚여 끌려옴(맞은 쪽): 살짝 들려 내 앞으로 미끄러진다
+  yank: (k) => ({ z: 28 * bump(k), stretch: 1 - 0.2 * bump(k), ghost: 0.7, tilt: 0.6 * bump(k) }),
   // 땅에 떨어짐(맞은 쪽): 납작
   slammed: (k) => ({ width: 1 + 0.25 * (1 - k), stretch: 1 - 0.18 * (1 - k) }),
   // 버티고 밀기(2초): 다리를 넓게 벌리고 몸을 두껍게, 0.45초마다 앞으로 밀어붙임
@@ -69,14 +78,25 @@ export const PROGS: Record<string, Prog> = {
   // 급강하: 조금 더 솟았다가 앞으로 내리꽂힘
   dive: (k) => {
     const z = k < 0.35 ? 34 + 30 * outQ(k / 0.35) : 64 * (1 - inQ((k - 0.35) / 0.65));
-    return { z, stretch: 1 + 0.3 * clamp(k * 2), ghost: 1, wingRate: 2, wingSpread: 1, lean: 8, headScale: 1 + z / 400 };
+    // 솟는 동안은 날개를 활짝, 내리꽂을 때는 날개를 뒤로 바짝 접는다(매가 내리꽂듯)
+    const fold = k < 0.3 ? 0 : clamp((k - 0.3) / 0.15);
+    return { z, stretch: 1 + 0.3 * clamp(k * 2), ghost: 1, wingRate: fold > 0.5 ? 0.01 : 2.5, wingSpread: 1 - fold, wingFold: fold, lean: 8, headScale: 1 + z / 400 };
   },
   // 낚아채기 예고: 다리를 앞으로 바구니처럼 모으고 몸을 낮춤
   'windup:snatch': (k) => ({ z: 8 * k, stretch: 1 - 0.15 * k, legSpread: k, wingRate: 2, headScale: 1 - 0.05 * k }),
   // 낚아채기: 낮게 미끄러지듯 스쳐 지나감(끝에서 다리를 오므림)
-  snatch: (k) => ({ z: 14 * (1 - k * 0.6), stretch: 1 + 0.4 * bump(k * 1.2), ghost: 1, wingRate: 2.5, wingSpread: 1, legSpread: k < 0.8 ? 1 : 1 - (k - 0.8) / 0.2, lean: 10 }),
+  snatch: (k) => ({ z: 14 * (1 - k * 0.6), stretch: 1 + 0.4 * bump(k * 1.2), ghost: 1, wingRate: 2.5, wingSpread: 1, legSpread: 1, lean: 10 }),
+  // 낚아챈 순간: 다리를 오므리며 몸을 뒤로 당긴다(끌어오는 반동)
+  'snatch:grab': (k) => ({ lean: -14 * bump(k), legSpread: 1 - k, wingRate: 3, wingSpread: 1, stretch: 1 - 0.15 * bump(k), headScale: 1 + 0.1 * bump(k) }),
   // 짧은 비행(회피): 휙 떠서 옆으로 비껴 날아감
-  flit: (k) => ({ z: 48 * bump(k), stretch: 1 + 0.3 * bump(k), ghost: 1, wingRate: 3.5, wingSpread: 1, tilt: 0.45 * Math.sin(k * Math.PI * 2), headScale: 1 + 0.1 * bump(k) }),
+  // 짧은 비행(회피): 휙 떠올라 옆으로 급선회. 몸이 꺾이는 쪽으로 기운다(tilt 부호는 렌더러가 방향에 맞춤)
+  flit: (k) => ({ z: 44 * bump(k), stretch: 1 + 0.25 * bump(k), ghost: 1, wingRate: 3.5, wingSpread: 1, tilt: 0.9 * bump(Math.min(1, k * 1.3)), headScale: 1 + 0.1 * bump(k) }),
+  // 맴돌기: 날개를 활짝 펴고 8자로 돈다. 돌 때마다 안쪽으로 기운다
+  circle: (k) => ({ z: 18, wingSpread: 1, wingRate: 3, ghost: 0.8, stretch: 1.1, tilt: (k < 0.5 ? 1 : -1) * 0.5 }),
+  // 겹눈: 머리가 부풀며 눈이 빛난다
+  compound: (k) => ({ headScale: 1 + 0.18 * bump(Math.min(1, k * 4)) + 0.05 * Math.sin(k * 40), jitter: 0 }),
+  // 옆구르기: 몸이 옆으로 뒤집히며(폭이 줄었다 늘었다) 한 바퀴
+  roll: (k) => ({ roll: k, width: 0.45 + 0.55 * Math.abs(Math.cos(k * Math.PI * 2)), z: 10 * bump(k), stretch: 1 - 0.2 * bump(k), ghost: 0.6 }),
   // 하늘 사냥: 화면 위로 높이 떠 있음
   sky: (k, t) => ({ z: 120 * outQ(Math.min(1, t / 0.25)) * Math.min(1, (1 - k) / 0.05) + 5 * Math.sin(t * 6), wingRate: 2.5, wingSpread: 1, headScale: 1.15 }),
   // 하늘 사냥 내리꽂기: 땅에 닿은 순간부터 다시 솟음
@@ -87,18 +107,19 @@ interface Active {
   name: string;
   t0: number;
   dur: number;
+  sign: number; // 좌우 방향(기울기 부호)
 }
 
 export class Motion {
   private act = new Map<number, Active[]>();
 
-  play(id: number, name: string, dur: number, now: number) {
+  play(id: number, name: string, dur: number, now: number, sign = 1) {
     if (!PROGS[name]) return;
     const list = (this.act.get(id) ?? []).filter((a) => a.name !== name && !(name.startsWith('windup:') && a.name.startsWith('windup:')));
     // 본 동작이 시작되면 그 예고 동작은 끝난다
     const base = name.replace('windup:', '');
     const cleaned = list.filter((a) => a.name !== 'windup:' + base);
-    cleaned.push({ name, t0: now, dur: Math.max(0.05, dur) });
+    cleaned.push({ name, t0: now, dur: Math.max(0.05, dur), sign });
     this.act.set(id, cleaned);
   }
 
@@ -128,7 +149,10 @@ export class Motion {
       p.wingSpread = Math.max(p.wingSpread, q.wingSpread ?? 0);
       p.legSpread = Math.max(p.legSpread, q.legSpread ?? 0);
       p.ghost = Math.max(p.ghost, q.ghost ?? 0);
-      p.tilt += q.tilt ?? 0;
+      p.tilt += (q.tilt ?? 0) * a.sign;
+      p.jaw += q.jaw ?? 0;
+      p.wingFold = Math.max(p.wingFold, q.wingFold ?? 0);
+      p.roll = Math.max(p.roll, q.roll ?? 0);
     }
     if (keep.length) this.act.set(id, keep);
     else this.act.delete(id);
