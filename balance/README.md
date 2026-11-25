@@ -10,7 +10,7 @@ npm run balance -- --only=bench        # 한 층만(bench·duel·arena, 쉼표�
 npm run balance -- --only=none         # 측정 없이 보고서만 다시 만든다(가중치를 바꿨을 때)
 ```
 
-결과: `balance/out/report.html`(보기용, 도감처럼 게시), `balance/out/analysis.json`, `docs/balance.md`(저장소 기록).
+결과: `balance/out/report.html`(보기용 — 게시된 '크롤루션 밸런스 보고서' 아티팩트 `68222dcd-0f35-4fcc-91f3-67eea1c75132`에 다시 올린다), `balance/out/analysis.json`, `docs/balance.md`(저장소 기록).
 `balance/baseline.json`(분석 결과만, 약 170KB)은 저장소에 넣어 둔다 — 조정 전후를 비교하는 기준. 원자료(`balance/out/latest.json`)는 넣지 않는다.
 
 ## 세 층
