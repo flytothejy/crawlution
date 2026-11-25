@@ -18,9 +18,14 @@ export interface Pose {
   jaw: number; // 큰턱·뿔 벌림(+ 벌림, - 꽉 닫음)
   wingFold: number; // 날개를 뒤로 접어 붙임(0~1, 급강하)
   roll: number; // 옆구르기 위상(0~1 한 바퀴)
+  horn: number; // 뿔·큰턱 크게 보이기(0~1)
+  armL: number; // 왼쪽 낫(앞다리) 휘두름(+ 바깥으로 치켜듦, - 안쪽으로 벰)
+  armR: number; // 오른쪽 낫
+  armScale: number; // 낫 크게 보이기(0~1)
+  wingBig: number; // 날개를 옆으로 활짝·크게 펼침(0~1, 위협)
 }
 
-export const REST: Pose = { z: 0, headZ: 0, stretch: 1, width: 1, lean: 0, headScale: 1, jitter: 0, wingRate: 0, wingSpread: 0, legSpread: 0, ghost: 0, tilt: 0, jaw: 0, wingFold: 0, roll: 0 };
+export const REST: Pose = { z: 0, headZ: 0, stretch: 1, width: 1, lean: 0, headScale: 1, jitter: 0, wingRate: 0, wingSpread: 0, legSpread: 0, ghost: 0, tilt: 0, jaw: 0, wingFold: 0, roll: 0, horn: 0, armL: 0, armR: 0, armScale: 0, wingBig: 0 };
 
 type Prog = (k: number, t: number, d: number) => Partial<Pose>;
 
@@ -38,13 +43,13 @@ const clamp = (x: number) => Math.min(1, Math.max(0, x));
 export const PROGS: Record<string, Prog> = {
   // ---- 딱정벌레 ----
   // 돌진 예고: 몸을 뒤로 끌어 웅크리고 머리를 낮춘 채 부르르
-  'windup:charge': (k) => ({ stretch: 1 - 0.28 * outQ(k), lean: -10 * outQ(k), headScale: 1 - 0.08 * k, width: 1 + 0.1 * k, jitter: 2.5 * k, legSpread: k }),
+  'windup:charge': (k) => ({ stretch: 1 - 0.28 * outQ(k), lean: -10 * outQ(k), headScale: 1 - 0.08 * k, width: 1 + 0.1 * k, jitter: 2.5 * k, legSpread: k, horn: outB(k) }),
   // 돌진: 앞으로 쭉 늘어나며 잔상
-  charge: (k) => ({ stretch: 1 + 0.35 * bump(k * 1.3), lean: 10 * (1 - k), ghost: 1 - k * 0.6, headScale: 1.06 }),
+  charge: (k) => ({ stretch: 1 + 0.35 * bump(k * 1.3), lean: 10 * (1 - k), ghost: 1 - k * 0.6, headScale: 1.06, horn: 1 - inQ(clamp((k - 0.6) / 0.4)) }),
   // 가위 닫기 예고: 큰턱을 활짝 벌리고 머리를 뒤로 젖힌다
-  'windup:scissor': (k) => ({ jaw: 1.1 * outQ(k), lean: -8 * k, headScale: 1 + 0.08 * k, jitter: 1.5 * k }),
+  'windup:scissor': (k) => ({ jaw: 1.25 * outB(k), lean: -8 * k, headScale: 1 + 0.08 * k, jitter: 1.5 * k, horn: outB(k) }),
   // 가위 닫기: 양쪽 큰턱을 휘둘러 꽉 닫는다(머리가 앞으로 튀어나감)
-  scissor: (k) => ({ jaw: k < 0.3 ? 1.1 - 1.6 * outQ(k / 0.3) : -0.5 * (1 - (k - 0.3) / 0.7), lean: 16 * bump(Math.min(1, k * 1.6)), headScale: 1 + 0.12 * bump(k) }),
+  scissor: (k) => ({ jaw: k < 0.3 ? 1.25 - 1.75 * outQ(k / 0.3) : -0.5 * (1 - (k - 0.3) / 0.7), lean: 16 * bump(Math.min(1, k * 1.6)), headScale: 1 + 0.12 * bump(k), horn: 1 - inQ(clamp((k - 0.4) / 0.6)) }),
   // 퍼 올리기 예고: 머리를 땅에 박듯 숙인다
   'windup:lift': (k) => ({ headZ: -6 * outQ(k), headScale: 1 - 0.14 * outQ(k), lean: -6 * k, stretch: 1 - 0.15 * k, jitter: 1.5 * k }),
   // 퍼 올리기: 머리가 크게 솟았다가 내려온다(뿔을 위로 휘두름)
@@ -71,6 +76,40 @@ export const PROGS: Record<string, Prog> = {
   },
   // 착지 눌림
   land: (k) => ({ width: 1 + 0.35 * (1 - outQ(k)), stretch: 1 - 0.25 * (1 - outQ(k)), headScale: 1 - 0.1 * (1 - k), legSpread: 1 - k }),
+
+  // 집어 던지기(던지는 쪽): 큰턱으로 물고 머리를 들어 버틴다 → 머리를 뒤로 크게 젖히며 던진다
+  heft: (k) => ({ headZ: 22 * outQ(k), jaw: -0.45, lean: -6 * k, headScale: 1 + 0.12 * outQ(k), jitter: 1.5 * k, legSpread: 1, horn: 0.6 * k }),
+  fling: (k) => ({ headZ: 22 + 26 * bump(Math.min(1, k * 1.8)) - 22 * k, jaw: k < 0.25 ? -0.45 + 1.3 * outQ(k / 0.25) : 0.85 * (1 - k), lean: -16 * bump(Math.min(1, k * 1.5)), headScale: 1 + 0.15 * bump(k), stretch: 1 - 0.12 * bump(k), horn: 0.6 * (1 - k) }),
+  // 들려 있음(잡힌 쪽): 퍼 올리기보다 낮게 들린 채 버둥거림
+  held: (k) => ({ z: 40 * outQ(Math.min(1, k * 2)), tilt: 0.25 * Math.sin(k * 30), stretch: 1 - 0.12 * k, headScale: 1 + 0.1 * k }),
+  // 내던져짐(잡힌 쪽): 머리 위로 호를 그리며 뒤로 날아가 떨어짐
+  tossed: (k) => ({ z: 40 + 45 * bump(k) - 40 * k, tilt: 3.2 * outQ(k), stretch: 1 - 0.15 * bump(k), headScale: 1 + 0.15 * bump(k), ghost: 0.8 }),
+
+  // ---- 사마귀 ----
+  // 넓게 베기: 두 낫을 바깥 높이 치켜들었다가(짧게) 앞쪽을 가로질러 크게 휩쓴다
+  'windup:sweep': (k) => ({ armL: 1.4 * outB(k), armR: 1.4 * outB(k), armScale: outQ(k), lean: -8 * k, headZ: 10 * k, headScale: 1 + 0.08 * k, jitter: 1.5 * k }),
+  sweep: (k) => {
+    // 치켜든 자리(1.4)에서 안쪽 끝(-1.3)까지 한 번에 휩쓸고 천천히 제자리
+    const a = k < 0.35 ? 1.4 - 2.7 * outQ(k / 0.35) : -1.3 + 1.3 * clamp((k - 0.5) / 0.5);
+    return { armL: a, armR: a, armScale: 1 - inQ(clamp((k - 0.4) / 0.6)), lean: 14 * bump(Math.min(1, k * 1.6)), headScale: 1 + 0.1 * bump(k), headZ: 10 * (1 - k) };
+  },
+  // 연속 베기: 한 쪽 낫씩 번갈아(L·R), 마지막은 두 낫을 한꺼번에(X)
+  slashL: (k) => ({ armL: k < 0.25 ? 1.3 * outQ(k / 0.25) : 1.3 - 2.4 * outQ(clamp((k - 0.25) / 0.35)) + 1.1 * clamp((k - 0.6) / 0.4), armScale: 0.8 * bump(k), lean: 6 * bump(k), tilt: -0.3 * bump(k) }),
+  slashR: (k) => ({ armR: k < 0.25 ? 1.3 * outQ(k / 0.25) : 1.3 - 2.4 * outQ(clamp((k - 0.25) / 0.35)) + 1.1 * clamp((k - 0.6) / 0.4), armScale: 0.8 * bump(k), lean: 6 * bump(k), tilt: 0.3 * bump(k) }),
+  slashX: (k) => {
+    const a = k < 0.25 ? 1.5 * outQ(k / 0.25) : 1.5 - 2.9 * outQ(clamp((k - 0.25) / 0.3)) + 1.4 * clamp((k - 0.6) / 0.4);
+    return { armL: a, armR: a, armScale: 1.2 * bump(k), lean: 14 * bump(k), headScale: 1 + 0.15 * bump(k), jitter: 2 * bump(k) };
+  },
+  // 찌르기: 두 낫을 모아 앞으로 쭉 내지른다
+  thrust: (k) => ({ armL: -0.7 * bump(k), armR: -0.7 * bump(k), armScale: bump(k), lean: 22 * bump(Math.min(1, k * 1.5)), stretch: 1 + 0.2 * bump(k) }),
+  // 날개 펼쳐 위협: 몸을 세우고 날개를 옆으로 활짝, 낫을 높이 치켜든다
+  threat: (k) => {
+    const on = outB(Math.min(1, k / 0.18)) * Math.min(1, (1 - k) / 0.2);
+    return { wingBig: on, armL: 1.1 * on, armR: 1.1 * on, armScale: 0.6 * on, headZ: 14 * on, headScale: 1 + 0.12 * on, jitter: 1.2 * on, width: 1 + 0.1 * on };
+  },
+  // 위장·죽은 척: 몸은 그대로, 잎 그림은 렌더러가 덮는다
+  camo: (k) => ({ stretch: 1 - 0.06 * Math.min(1, k * 8), legSpread: 0 }),
+  playdead: (k) => ({ stretch: 1 - 0.1 * Math.min(1, k * 6), width: 1 + 0.08 * Math.min(1, k * 6), tilt: 0 }),
 
   // ---- 잠자리 ----
   // 급강하 예고: 제자리에서 날개를 세차게 치며 떠오른다
@@ -123,6 +162,11 @@ export class Motion {
     this.act.set(id, cleaned);
   }
 
+  /** 그 동작이 시작된 시각(없으면 now) */
+  started(id: number, name: string, now: number) {
+    return this.act.get(id)?.find((a) => a.name === name)?.t0 ?? now;
+  }
+
   has(id: number, name: string) {
     return !!this.act.get(id)?.some((a) => a.name === name);
   }
@@ -153,6 +197,11 @@ export class Motion {
       p.jaw += q.jaw ?? 0;
       p.wingFold = Math.max(p.wingFold, q.wingFold ?? 0);
       p.roll = Math.max(p.roll, q.roll ?? 0);
+      p.horn = Math.max(p.horn, q.horn ?? 0);
+      p.armL += q.armL ?? 0;
+      p.armR += q.armR ?? 0;
+      p.armScale = Math.max(p.armScale, q.armScale ?? 0);
+      p.wingBig = Math.max(p.wingBig, q.wingBig ?? 0);
     }
     if (keep.length) this.act.set(id, keep);
     else this.act.delete(id);

@@ -134,20 +134,29 @@ export function castMain(sim: Simulation, s: Snake) {
           s.grabDmg = B * mul;
           s.grabAcc = 0;
         }
-      } else if (sim.grab(s, t.o, 0.3, 'throw')) s.grabDmg = B * mul;
+      } else if (sim.grab(s, t.o, 0.3, 'throw')) {
+        s.grabDmg = B * mul;
+        // 큰턱으로 물어 낮게 들어 올린다(퍼 올리기보다 낮게) → 끝나면 머리 위로 뒤로 던진다
+        sim.fx('lifted', t.o, t.o.x, t.o.y, { angle: s.angle, wk: 'held', dur: 0.32 });
+        sim.fx('lifted', s, s.x, s.y, { angle: s.angle, wk: 'heft', dur: 0.32 });
+      }
       return;
     }
     case 'mantis': {
       if (form === 'sweep') {
-        sim.fx('sweep', s, hx, hy, { angle: s.angle, r: 120 * R, half: 1.05, awake: aw });
-        sim.cone(s, hx, hy, s.angle, 120 * R, 1.05, (o, x, y) => {
-          sim.deal(s, o, B, 'skill', x, y);
-          sim.events.push({ type: 'skillHit', x, y, kind: 'cut' });
+        // 두 낫을 바깥 높이 치켜들었다가(예고) 앞쪽을 크게 휩쓴다
+        windup(sim, s, 0.12, 'sweep', () => {
+          const [hx2, hy2] = head(s, 0);
+          sim.fx('sweep', s, hx2, hy2, { angle: s.angle, r: 120 * R, half: 1.05, awake: aw });
+          sim.cone(s, hx2, hy2, s.angle, 120 * R, 1.05, (o, x, y) => {
+            sim.deal(s, o, B, 'skill', x, y);
+            sim.events.push({ type: 'skillHit', x, y, kind: 'cut' });
+          });
+          if (aw) {
+            const [zx, zy] = head(s, 70 * R);
+            sim.addZone({ x: zx, y: zy, r: 85 * R, kind: 'blade', life: 2, owner: s.id, dps: B * 0.35 });
+          }
         });
-        if (aw) {
-          const [zx, zy] = head(s, 70 * R);
-          sim.addZone({ x: zx, y: zy, r: 85 * R, kind: 'blade', life: 2, owner: s.id, dps: B * 0.35 });
-        }
       } else if (form === 'stab') {
         sim.fx('stab', s, hx, hy, { angle: s.angle, len: 220 * R });
         sim.line(s, hx, hy, s.angle, 220 * R, 30, aw ? 2 : 1, (o, x, y) => {
@@ -346,7 +355,7 @@ function comboHit(sim: Simulation, s: Snake) {
   const R = sim.rangeMul(s);
   const n = s.chanN++;
   const last = n === 2;
-  sim.fx('combo', s, s.x, s.y, { angle: s.angle + (n - 1) * 0.5, r: 80 * R, half: 0.8, awake: last });
+  sim.fx('combo', s, s.x, s.y, { angle: s.angle + (n - 1) * 0.5, r: 80 * R, half: 0.8, awake: last, wk: last ? 'X' : n === 0 ? 'L' : 'R' });
   sim.cone(s, s.x, s.y, s.angle, 80 * R, 0.8, (o, x, y) => {
     const dmg = s.chanDmg * 0.45 * (last ? 1.6 * (1 + sim.ab(s, 'tail')) : 1);
     sim.deal(s, o, dmg, last ? 'crit' : 'skill', x, y);
@@ -430,10 +439,10 @@ export function castSub(sim: Simulation, s: Snake) {
     case 'playdead':
       s.deadT = 2 * D;
       sim.releaseGrab(s);
-      sim.fx('playdead', s, s.x, s.y);
+      sim.fx('playdead', s, s.x, s.y, { dur: s.deadT });
       return;
     case 'threat':
-      sim.fx('threat', s, s.x, s.y, { r: 160 * R });
+      sim.fx('threat', s, s.x, s.y, { r: 160 * R, dur: 0.9 });
       sim.circle(s, s.x, s.y, 160 * R, (o, x, y) => {
         sim.fear(o, 1 * D);
         sim.events.push({ type: 'skillHit', x, y, kind: 'fear' });
@@ -478,7 +487,7 @@ export function castSub(sim: Simulation, s: Snake) {
     case 'camo':
       s.hiddenT = 2 * D;
       s.nextMul = 1.5;
-      sim.fx('camo', s, s.x, s.y);
+      sim.fx('camo', s, s.x, s.y, { dur: s.hiddenT });
       return;
     case 'hop': {
       // 날아올라 옆으로 급선회: 가까운 적의 반대쪽으로 꺾어 빠진다
@@ -520,6 +529,8 @@ export function castSub(sim: Simulation, s: Snake) {
     case 'bait': {
       const [zx, zy] = head(s, 60 + s.r);
       sim.addZone({ x: zx, y: zy, r: 30, kind: 'bait', life: 8, owner: s.id, dps: B * 0.2, mul: 1 * D });
+      // 꽃을 내려놓으며 꽃잎이 흩뿌려진다
+      sim.fx('baitset', s, s.x, s.y, { x1: zx, y1: zy });
       return;
     }
     case 'roll': {
@@ -1012,10 +1023,15 @@ function grabTick(sim: Simulation, s: Snake, dt: number) {
     sim.fx('scissor', s, o.x, o.y, { angle: s.angle, r: 40 });
   } else if (kind === 'throw') {
     const B = s.grabDmg;
-    sim.knock(o, s.angle + PI, 200);
-    sim.stun(o, 0.4);
+    // 머리 위로 넘겨 뒤로 던진다: 날아가는 동안은 몸에 부딪히지 않는다
     sim.deal(s, o, B * 0.8, 'skill', o.x, o.y);
-    sim.fx('throw', s, o.x, o.y, { angle: s.angle + PI });
+    sim.stun(o, 0.4);
+    sim.knock(o, s.angle + PI, 260);
+    o.flyT = Math.max(o.flyT, 0.5);
+    sim.fx('throw', s, o.x, o.y, { angle: s.angle + PI, len: 260 });
+    sim.fx('lifted', o, o.x, o.y, { angle: s.angle + PI, wk: 'tossed', dur: 0.5 });
+    sim.fx('lifted', s, s.x, s.y, { angle: s.angle, wk: 'fling', dur: 0.4 });
+    sim.hitstop(s, o, 0.05);
     if (aw)
       sim.later(0.4, () => {
         if (!o.alive) return;

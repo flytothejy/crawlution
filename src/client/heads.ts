@@ -19,6 +19,8 @@ export interface HeadPart {
 
 export interface HeadKit {
   base: Texture;
+  /** 뿔만 따로(돌진 때 크게). ax, ay = 뿔 뿌리 */
+  horn?: { tex: Texture; ax: number; ay: number; x: number };
   ax: number;
   ay: number;
   parts: HeadPart[];
@@ -74,20 +76,7 @@ function drawBase(g: Graphics, look: Look) {
       eye(g, C + 22, C - 24, 6, 7);
       eye(g, C + 22, C + 24, 6, 7);
       const hcol = darker(hc, 0.8);
-      if (look.horn === 'rhino') {
-        // 끝이 갈라진 큰 뿔
-        g.poly([C + 8, C - 13, C + 60, C - 9, C + 78, C - 24, C + 82, C - 14, C + 72, C - 2, C + 82, C + 10, C + 76, C + 18, C + 60, C + 9, C + 8, C + 13]).fill(hcol).stroke(ol);
-        g.moveTo(C + 14, C - 4).lineTo(C + 60, C - 2).stroke({ width: 3, color: 0xffffff, alpha: 0.35 });
-      } else if (look.horn === 'herc') {
-        // 아주 긴 위 뿔 + 짧은 아래 뿔(집게)
-        g.poly([C + 4, C - 10, C + 70, C - 14, C + 104, C - 6, C + 108, C + 2, C + 96, C - 1, C + 70, C - 2, C + 4, C + 8]).fill(0x1a1612).stroke(ol);
-        for (let k = 0; k < 4; k++) g.circle(C + 40 + k * 14, C - 7 - k * 0.6, 2.2).fill(0xe8d070);
-        g.poly([C + 10, C + 6, C + 54, C + 10, C + 66, C + 3, C + 60, C + 16, C + 10, C + 16]).fill(0x1a1612).stroke({ width: 3, color: INK, join: 'round' });
-      } else if (look.horn === 'cauc') {
-        // 뿔 세 개
-        g.poly([C + 8, C - 6, C + 80, C - 3, C + 92, C + 2, C + 80, C + 6, C + 8, C + 6]).fill(hcol).stroke(ol);
-        for (const s of [-1, 1]) g.poly([C + 4, C + s * 16, C + 42, C + s * 26, C + 66, C + s * 14, C + 46, C + s * 18, C + 10, C + s * 6]).fill(hcol).stroke({ width: 3, color: INK, join: 'round' });
-      }
+      drawHorn(g, look, hcol, ol);
       break;
     }
     case 'mantis': {
@@ -329,6 +318,24 @@ function sickleTex(r: Renderer, color: number) {
   return { tex: r.generateTexture({ target: g, resolution: 2, frame: new Rectangle(0, 0, W, H) }), ax: 6 / W, ay: 10 / H };
 }
 
+/** 뿔 그리기(머리판에, 그리고 돌진 때 크게 보여 줄 뿔 텍스처에 같은 모양으로) */
+function drawHorn(g: Graphics, look: Look, hcol: number, ol: { width: number; color: number }) {
+  if (look.horn === 'rhino') {
+    // 끝이 갈라진 큰 뿔
+    g.poly([C + 8, C - 13, C + 60, C - 9, C + 78, C - 24, C + 82, C - 14, C + 72, C - 2, C + 82, C + 10, C + 76, C + 18, C + 60, C + 9, C + 8, C + 13]).fill(hcol).stroke(ol);
+    g.moveTo(C + 14, C - 4).lineTo(C + 60, C - 2).stroke({ width: 3, color: 0xffffff, alpha: 0.35 });
+  } else if (look.horn === 'herc') {
+    // 아주 긴 위 뿔 + 짧은 아래 뿔(집게)
+    g.poly([C + 4, C - 10, C + 70, C - 14, C + 104, C - 6, C + 108, C + 2, C + 96, C - 1, C + 70, C - 2, C + 4, C + 8]).fill(0x1a1612).stroke(ol);
+    for (let k = 0; k < 4; k++) g.circle(C + 40 + k * 14, C - 7 - k * 0.6, 2.2).fill(0xe8d070);
+    g.poly([C + 10, C + 6, C + 54, C + 10, C + 66, C + 3, C + 60, C + 16, C + 10, C + 16]).fill(0x1a1612).stroke({ width: 3, color: INK, join: 'round' });
+  } else if (look.horn === 'cauc') {
+    // 뿔 세 개
+    g.poly([C + 8, C - 6, C + 80, C - 3, C + 92, C + 2, C + 80, C + 6, C + 8, C + 6]).fill(hcol).stroke(ol);
+    for (const s of [-1, 1]) g.poly([C + 4, C + s * 16, C + 42, C + s * 26, C + 66, C + s * 14, C + 46, C + s * 18, C + 10, C + s * 6]).fill(hcol).stroke({ width: 3, color: INK, join: 'round' });
+  }
+}
+
 function fangTex(r: Renderer, color: number, size: number) {
   const g = new Graphics();
   const W = 12 + size, H = 40;
@@ -359,7 +366,14 @@ export function headKit(r: Renderer, key: string): HeadKit {
   if (m) add(mandibleTex(r, m.size, m.color ?? darker(look.head, 0.75), !!m.teeth, !!m.branch), look.shape === 'centipede' ? 'forcipule' : 'mandible', look.shape === 'antlion' ? 0.78 : 0.75, look.shape === 'antlion' ? 0.32 : 0.28, look.shape === 'antlion' ? 0.4 : 0.32);
   if (look.sickle) add(sickleTex(r, look.body), 'sickle', 0.15, 0.55, 0.35);
   if (look.fang) add(fangTex(r, 0x151515, look.fang), 'fang', 0.95, 0.12, 0.15, true);
-  const kit: HeadKit = { base, ax: C / FW, ay: C / FH, parts };
+  let horn: HeadKit['horn'];
+  if (look.horn && look.shape === 'beetle') {
+    const hg = new Graphics();
+    hg.rect(0, 0, FW, FH).fill({ color: 0, alpha: 0 });
+    drawHorn(hg, look, darker(look.head, 0.8), { width: 4, color: INK });
+    horn = { tex: r.generateTexture({ target: hg, resolution: 2, frame: new Rectangle(0, 0, FW, FH) }), ax: (C + 6) / FW, ay: C / FH, x: 6 / HR };
+  }
+  const kit: HeadKit = { base, ax: C / FW, ay: C / FH, parts, horn };
   cache.set(key, kit);
   return kit;
 }
