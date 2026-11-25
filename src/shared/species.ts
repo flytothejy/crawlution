@@ -117,7 +117,7 @@ const GRUB = (head: number, body = 0xf2e6c8, stripe = 0xe2d0aa): Look => ({ body
 // ---------- 계열 ----------
 export const FAMILIES: Family[] = [
   {
-    id: 'rhino', name: '장수풍뎅이', role: 'tank', hp: 1.3, atk: 1.0, spd: 0.9, cdMul: 1, knockTaken: 0.5,
+    id: 'rhino', name: '장수풍뎅이', role: 'tank', hp: 1.3, atk: 1.1, spd: 0.9, cdMul: 1, knockTaken: 0.5,
     color: 0xc8843a, color2: 0x7a4a1e, stages: ['애벌레', '성충', '각성'], skill: '뿔 들이받기',
     forms: [
       { id: 'charge', name: '돌진', icon: '🐂', desc: '앞으로 돌진해 부딪힌 적을 밀어내며 피해', awake: '돌진이 끝난 자리에 충격파', cd: 10, ai: 'dash', range: 260 },
@@ -156,7 +156,7 @@ export const FAMILIES: Family[] = [
     species: ['kingmantis', 'widemantis', 'smallmantis', 'orchid', 'ghost'],
   },
   {
-    id: 'dragonfly', name: '잠자리', role: 'charge', hp: 0.8, atk: 1.0, spd: 1.12, cdMul: 1, knockTaken: 1,
+    id: 'dragonfly', name: '잠자리', role: 'charge', hp: 0.88, atk: 1.0, spd: 1.12, cdMul: 1, knockTaken: 1,
     color: 0x4ab8f0, color2: 0xb8f0ff, stages: ['수채', '성충', '각성'], skill: '공중 강하',
     forms: [
       { id: 'dive', name: '급강하', icon: '🪂', desc: '빠르게 날아가 내려앉는 자리에 피해(날 때 몸 충돌 없음)', awake: '내려앉은 뒤 한 번 더', cd: 8, ai: 'dash', range: 300 },
@@ -195,7 +195,7 @@ export const FAMILIES: Family[] = [
     species: ['brownbug', 'jewelbug', 'assassin', 'strider'],
   },
   {
-    id: 'spider', name: '거미', role: 'trap', hp: 1.0, atk: 1.0, spd: 1.0, cdMul: 1, knockTaken: 1,
+    id: 'spider', name: '거미', role: 'trap', hp: 1.0, atk: 1.08, spd: 1.0, cdMul: 1, knockTaken: 1,
     color: 0xb8a8f0, color2: 0xe8e8f8, stages: ['새끼 거미', '어른 거미', '각성'], skill: '거미줄',
     forms: [
       { id: 'orb', name: '둥근 그물', icon: '🕸️', desc: '앞에 그물을 쳐 걸린 적을 묶음(최대 2개)', awake: '그물에 걸린 적에게 피해', cd: 10, ai: 'place', range: 190 },
@@ -268,7 +268,7 @@ export const NEW_FAMILIES: Family[] = [
     larva: GRUB(0xd8c8a8, 0xfaf4e6, 0xece2c8), likes: 8, hates: 5, strong: '지네·딱정벌레', weak: '거미·벌', species: ['v3:wangant', 'v3:armyant', 'v3:leafant', 'v3:bulldog', 'v3:fireant'],
   },
   {
-    id: 'butterfly', name: '나비', role: 'trap', hp: 0.85, atk: 0.9, spd: 1.08, cdMul: 1, knockTaken: 1.2,
+    id: 'butterfly', name: '나비', role: 'trap', hp: 1.0, atk: 1.0, spd: 1.08, cdMul: 1, knockTaken: 1.1,
     color: 0xe07ad8, color2: 0x7ad8ff, stages: ['애벌레', '나비', '각성'], skill: '인분', forms: kitForm('인분 흩뿌리기', '🌫️'),
     sub: { id: 'v3def', name: '팔랑 비행', icon: '🪽', desc: '', cd: 11, ai: 'move', range: 0 },
     ult: { name: '나비 떼 폭풍', icon: '🌪️', desc: '넓은 범위에 나비 떼가 휘몰아쳐 4초 동안 지속 피해 + 혼란.', awake: '폭풍이 나를 따라다님', range: 300 },

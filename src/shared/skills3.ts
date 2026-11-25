@@ -253,8 +253,8 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
       return;
     }
     case 'burrow': {
-      // 땅속으로 파고들어 1초 무적, 앞으로 160 가서 튀어나온다
-      const T = 0.95;
+      // 땅속으로 파고들어 0.75초 무적, 앞으로 160 가서 튀어나온다
+      const T = 0.75;
       s.invulnT = Math.max(s.invulnT, T);
       s.ghostT = Math.max(s.ghostT, T);
       s.hiddenT = Math.max(s.hiddenT, T);
@@ -272,12 +272,12 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
       return;
     }
     case 'antcall': {
-      // 일개미 4마리(각성 6)가 5초 동안 가까운 적을 쫓아 문다
+      // 일개미 4마리(각성 6)가 4초 동안 가까운 적을 쫓아 문다
       pose(sim, s, 'call', 0.5);
       sim.fx('antcall', s, s.x, s.y, { r: 50 });
       const n = (aw ? 6 : 4) + sim.tm(s, 'minion');
-      const life = 5 + sim.ab(s, 'colony');
-      for (let k = 0; k < n; k++) sim.addMinion(s, 'ant', life, B * 0.35 * (1 + sim.ab(s, 'formic')), false, k);
+      const life = 4 + sim.ab(s, 'colony');
+      for (let k = 0; k < n; k++) sim.addMinion(s, 'ant', life, B * 0.13 * (1 + sim.ab(s, 'formic')), false, k);
       return;
     }
     case 'leafshield': {
@@ -381,7 +381,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
         const k = aw ? 1.5 : 1;
         sim.fx('powder', s, ...head(s, 10), { angle: s.angle, r: 200 * R * k, half: 0.75 });
         const [zx, zy] = head(s, 110 * R * k);
-        sim.addZone({ x: zx, y: zy, r: 105 * R * k, kind: 'powder', life: 3, owner: s.id, dps: B * 0.28, mul: 1.5 + sim.ab(s, 'scales') });
+        sim.addZone({ x: zx, y: zy, r: 105 * R * k, kind: 'powder', life: 3, owner: s.id, dps: B * 0.45, mul: 1.5 + sim.ab(s, 'scales') });
       });
       return;
     }
@@ -481,7 +481,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
         const [hx, hy] = head(s, 10);
         sim.fx('hairs', s, hx, hy, { angle: s.angle, r: 190 * R, half: 0.6 });
         sim.cone(s, hx, hy, s.angle, 190 * R, 0.6, (o, x, y) => {
-          sim.deal(s, o, B * 0.5, 'skill', x, y);
+          sim.deal(s, o, B * 0.7, 'skill', x, y);
           sim.itch(o, 4, B * 0.18, s);
           hitFx(sim, x, y, 'itch');
         });
@@ -555,7 +555,7 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
       sim.fx('warhorn', s, s.x, s.y, { r: 130 });
       const n = (aw ? 18 : 12) + sim.tm(s, 'minion');
       for (let k = 0; k < n; k++) {
-        sim.addMinion(s, 'soldier', 6 + sim.ab(s, 'colony'), B * 0.45 * (1 + sim.ab(s, 'formic')), false, k);
+        sim.addMinion(s, 'soldier', 6 + sim.ab(s, 'colony'), B * 0.28 * (1 + sim.ab(s, 'formic')), false, k);
         sim.minions[sim.minions.length - 1].ult = cap;
       }
       return;
@@ -566,7 +566,7 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
       const r = 220;
       sim.telegraph(s, { shape: 'circle', x: cx, y: cy, r, angle: 0, len: 0, w: 0 }, () => {
         sim.fx('bstorm', s, cx, cy, { r });
-        const z = sim.addZone({ x: cx, y: cy, r, kind: 'bstorm', life: 4, owner: s.id, dps: B * 0.35, mul: 1.5 + sim.ab(s, 'scales'), follow: aw });
+        const z = sim.addZone({ x: cx, y: cy, r, kind: 'bstorm', life: 4, owner: s.id, dps: B * 0.45, mul: 1.5 + sim.ab(s, 'scales'), follow: aw });
         z.ult = cap;
       });
       return;
@@ -671,7 +671,7 @@ export function workerMove(sim: Simulation, m: Minion, owner: Snake, dt: number)
   }
 }
 
-/** 주인이 물면 일개미들이 함께 문다(한 마리당 물기의 20%) */
+/** 주인이 물면 일개미들이 함께 문다(한 마리당 물기의 10%) */
 export function workersBite(sim: Simulation, a: Snake, b: Snake, dealt: number) {
   if (dealt <= 0) return;
   let n = 0;
@@ -682,5 +682,5 @@ export function workersBite(sim: Simulation, a: Snake, b: Snake, dealt: number) 
     m.acc = 0;
     m.bite = 0;
   }
-  if (n > 0) sim.deal(a, b, dealt * 0.2 * n * (1 + sim.ab(a, 'formic')) * sim.tm(a, 'minionDmg'), 'minion', b.x, b.y, 'bite', null, false);
+  if (n > 0) sim.deal(a, b, dealt * 0.1 * n * (1 + sim.ab(a, 'formic')) * sim.tm(a, 'minionDmg'), 'minion', b.x, b.y, 'bite', null, false);
 }
