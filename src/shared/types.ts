@@ -35,7 +35,7 @@ export type FxKind =
   | 'camo' | 'hop' | 'escape' | 'curl' | 'heal' | 'chirp' | 'decoy' | 'roll' | 'backstep' | 'playdead' | 'backplate' | 'bitter' | 'fang' | 'alarm'
   // 3판 새 기술(도감 연출)
   // 모션 신호: 기술 예고(windup), 들려 날아감(lifted)
-  | 'windup' | 'lifted' | 'trizone' | 'baitset' | 'aimline' | 'legwhip' | 'stain' | 'antrun' | 'spiderlings'
+  | 'windup' | 'lifted' | 'trizone' | 'baitset' | 'aimline' | 'legwhip' | 'stain' | 'antrun' | 'spiderlings' | 'warhorn'
   | 'fangstab' | 'coil' | 'vortex' | 'acid' | 'burrow' | 'antcall' | 'antriver' | 'leafwall' | 'nest' | 'buzz' | 'mudpot' | 'powder' | 'flutter' | 'charm' | 'bstorm' | 'eyespot' | 'morpho' | 'hairs';
 
 export type GameEvent =
@@ -134,6 +134,8 @@ export interface SnakeView {
   whirl: boolean; // 사마귀 천 개의 낫
   feast: boolean;
   yuck: boolean;
+  /** 상태 아이콘: [상태 번호(STATUSES), 남은 초(-1 = 시간 없음)]를 나란히 */
+  st: number[];
   ultReady: boolean;
   buff: boolean; // 다음 공격 강화
 }
@@ -224,7 +226,9 @@ export interface MinionView {
   y: number;
   angle: number;
   owner: number;
-  kind: 'bee' | 'wasp';
+  kind: 'bee' | 'wasp' | 'ant' | 'soldier';
+  bite: number; // 문 뒤 지난 시간
+  life: number;
 }
 
 /** 기술 예고(바닥 범위) */

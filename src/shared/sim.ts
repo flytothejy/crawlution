@@ -1,6 +1,7 @@
 // 게임 로직(시뮬레이션). DOM·화면을 전혀 모른다 → Web Worker, 서버(Node), 테스트에서 그대로 돈다.
 // 2판: 크롤러 하나를 골라 판 안에서 레벨(1~16)·진화(3단계)·능력 카드(4칸)로 키운다.
 // 싸움은 체력 방식: 머리로 상대 몸을 물면 피해. 기술 2개(주·보조) + 본능 + 필살기.
+import { packStatus } from './status';
 import { CONFIG, evoOf, nutNeed, radiusFor } from './config';
 import { Rng } from './rng';
 import { botThink, bossThink, botPickCard } from './bot';
@@ -109,6 +110,9 @@ export interface Snake {
   markT: number;
   fearT: number;
   hiddenT: number; // 위장·숨기
+  confuseT: number; // 혼란(나비)
+  charmT: number; // 매혹(나비)
+  itchT: number; // 가려움(독나방)
   ghostT: number; // 몸 충돌 없음(땅속·뒷걸음)
   flyT: number;
   dashT: number;
@@ -272,7 +276,9 @@ export interface Minion {
   dps: number;
   speed: number;
   target: number;
-  kind: 'bee' | 'wasp';
+  kind: 'bee' | 'wasp' | 'ant' | 'soldier';
+  slot: number; // 호위 자리(군대개미): 몸 옆 줄
+  bite: number; // 마지막으로 문 뒤 지난 시간(그리기용)
   acc: number;
   heat: boolean;
   ult: Map<number, number> | null;
@@ -449,7 +455,7 @@ export class Simulation {
       kills: 0, killsAll: 0, deaths: 0, st: emptyStats(), dmgBins: [], castT: -99, castOpen: false, lifeStart: 0, hitBy: new Map(), crushes: 0, score: 0, ultUses: 0, respawnT: 0, loopCd: 0,
       hp: 1, maxHp: 1, hurtT: 99, biteCd: 0, invulnT: 0, wallCd: 0, dropAcc: 0, poisonT: 0, poisonDps: 0, poisonBy: -1, poisonAcc: 0, lives: 1, ult: 0, netT: 0, feastT: 0, yuckT: 0,
       lastSkillSeq: 0, lastSubSeq: 0, lastCardSeq: 0, lastRerollSeq: 0, skillCd: 0, subCd: 0,
-      stunT: 0, slowT: 0, slowMul: 1, rootT: 0, silenceT: 0, blindT: 0, markT: 0, fearT: 0, hiddenT: 0, ghostT: 0, flyT: 0,
+      stunT: 0, slowT: 0, slowMul: 1, rootT: 0, silenceT: 0, blindT: 0, markT: 0, fearT: 0, hiddenT: 0, confuseT: 0, charmT: 0, itchT: 0, ghostT: 0, flyT: 0,
       dashT: 0, dashMul: 1, dashKind: '', dashHits: new Set(), dashDmg: 0, dashAngle: NaN,
       reduceT: 0, reduceMul: 1, backT: 0, bitterT: 0, curlT: 0, deadT: 0, escapeT: 0,
       grabT: 0, grabTarget: -1, grabKind: '', grabbedBy: -1, kvx: 0, kvy: 0, slideT: 0, slideVx: 0, slideVy: 0,
@@ -574,7 +580,7 @@ export class Simulation {
   }
 
   private clearStatus(s: Snake) {
-    s.stunT = s.slowT = s.rootT = s.silenceT = s.blindT = s.markT = s.fearT = s.hiddenT = s.ghostT = s.flyT = s.dashT = 0;
+    s.stunT = s.slowT = s.rootT = s.silenceT = s.blindT = s.markT = s.fearT = s.confuseT = s.charmT = s.itchT = s.hiddenT = s.ghostT = s.flyT = s.dashT = 0;
     s.reduceT = s.backT = s.bitterT = s.curlT = s.deadT = s.escapeT = s.feastT = s.yuckT = 0;
     s.chanT = s.whirlT = s.skyT = s.ambushT = s.trailT = s.lanternT = s.compoundT = s.decoyT = 0;
     s.slowMul = s.reduceMul = 1;
@@ -1200,10 +1206,10 @@ export class Simulation {
     this.projs.push({ dmg: 0, pierce: 1, hits: new Set(), ...p });
   }
 
-  addMinion(owner: Snake, kind: 'bee' | 'wasp', life: number, dps: number, heat = false) {
+  addMinion(owner: Snake, kind: 'bee' | 'wasp' | 'ant' | 'soldier', life: number, dps: number, heat = false, slot = 0) {
     dps *= this.tm(owner, 'minionDmg');
     const a = this.rng.range(0, Math.PI * 2);
-    this.minions.push({ x: owner.x + Math.cos(a) * 30, y: owner.y + Math.sin(a) * 30, angle: a, owner: owner.id, life, hp: owner.maxHp * 0.08, dps, speed: 330, target: -1, kind, acc: 0, heat, ult: null });
+    this.minions.push({ x: owner.x + Math.cos(a) * 30, y: owner.y + Math.sin(a) * 30, angle: a, owner: owner.id, life, hp: owner.maxHp * 0.08, dps, speed: kind === 'ant' ? 260 : kind === 'soldier' ? 300 : 330, target: -1, kind, slot, bite: 9, acc: 0, heat, ult: null });
   }
 
   /** 범위 안 상대마다 '처음 닿은 마디'로 한 번씩 */
@@ -1553,6 +1559,9 @@ export class Simulation {
     s.blindT = dec(s.blindT);
     s.markT = dec(s.markT);
     s.fearT = dec(s.fearT);
+    s.confuseT = dec(s.confuseT);
+    s.charmT = dec(s.charmT);
+    s.itchT = dec(s.itchT);
     s.hiddenT = dec(s.hiddenT);
     s.chaseT = dec(s.chaseT);
     // 매복 자세·빛 끄기: 웅크린 채 1.5초
@@ -2255,7 +2264,7 @@ export class Simulation {
       fly: s.flyT > 0, shield: s.reduceT > 0 || s.curlT > 0 || s.backT > 0 || s.bitterT > 0, stun: s.stunT > 0, slow: s.slowT > 0, root: s.rootT > 0,
       mark: s.markT > 0, blind: s.blindT > 0, fear: s.fearT > 0, silence: s.silenceT > 0,
       hidden: s.ambushT > 0 ? 1 : s.hiddenT > 0 ? 0.8 : 0, grabbed: s.grabbedBy >= 0, dash: s.dashT > 0, whirl: s.whirlT > 0,
-      feast: s.feastT > 0, yuck: s.yuckT > 0, ultReady: s.ult >= CONFIG.ultMax, buff: s.prayArmed || s.critNext > 0 || s.nextMul > 1 || s.fangT > 0,
+      feast: s.feastT > 0, yuck: s.yuckT > 0, st: packStatus(s), ultReady: s.ult >= CONFIG.ultMax, buff: s.prayArmed || s.critNext > 0 || s.nextMul > 1 || s.fangT > 0,
     }));
     const foods = new Float32Array(this.foods.length * 5);
     for (let i = 0; i < this.foods.length; i++) {
@@ -2276,7 +2285,7 @@ export class Simulation {
     if (p.lastAct === 'sub' && p.sub?.id === 'waggle' && this.time - p.lastActT < 6) {
       for (const f of this.foods) if (f.kind === 3 || (f.kind === 4 && taste(p.fam.id, f.sub) > 0)) marks.push({ x: f.x, y: f.y });
     }
-    const minions: MinionView[] = this.minions.map((m) => ({ x: m.x, y: m.y, angle: m.angle, owner: m.owner, kind: m.kind }));
+    const minions: MinionView[] = this.minions.map((m) => ({ x: m.x, y: m.y, angle: m.angle, owner: m.owner, kind: m.kind, bite: m.bite, life: m.life }));
     return {
       tick: this.tick, time: this.time, snakes, foods, rings,
       zones: this.zones.map((z) => ({ x: z.x, y: z.y, r: z.r, kind: z.kind, life: z.life, max: z.max, owner: z.owner })),

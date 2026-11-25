@@ -1,7 +1,7 @@
 // 기술 구현: 계열별 주 기술(형태 3가지) · 보조 기술 · 필살기 · 장판 · 부른 벌 · 본능 일부.
 // 수치는 기획서 '기술 수치표' 탭. B = 기준 피해, R = 범위 배율.
 import { CONFIG } from './config';
-import type { Simulation, Snake, Zone } from './sim';
+import type { Minion, Simulation, Snake, Zone } from './sim';
 
 const PI = Math.PI;
 
@@ -311,7 +311,7 @@ export function castMain(sim: Simulation, s: Snake) {
         const t = nearestEnemy(sim, s, 200 * R);
         sim.fx('lifted', s, s.x, s.y, { angle: s.angle, wk: 'heat', dur: 0.6 });
         if (t) heatBall(sim, s, t, raw * 0.4, 3 * (sim.inst(s, 'heat') ? 2 : 1), aw);
-        else sim.fx('heat', s, ...head(s, 120), { r: 50 });
+        else sim.fx('heat', s, ...head(s, 120), { r: 50, x1: s.x, y1: s.y, wk: 'miss', angle: s.angle });
       }
       return;
     }
@@ -1246,6 +1246,39 @@ export function updateZones(sim: Simulation, dt: number) {
 
 // ---------- 부른 벌 ----------
 
+/** 군대개미 호위병: 주인 몸 양옆에 줄지어 따라 걷다가, 닿은 적을 문다 */
+function soldierTick(sim: Simulation, m: Minion, owner: Snake, dt: number) {
+  const side = m.slot % 2 ? 1 : -1, row = Math.floor(m.slot / 2);
+  const i = Math.min(owner.segN - 1, 1 + row * 2);
+  const sx = owner.segs[i * 2], sy = owner.segs[i * 2 + 1];
+  const j = Math.max(0, i - 1);
+  const dir = Math.atan2(owner.segs[j * 2 + 1] - sy, owner.segs[j * 2] - sx);
+  const off = owner.r * 1.9 + 14;
+  let tx = sx - Math.sin(dir) * off * side, ty = sy + Math.cos(dir) * off * side;
+  m.acc -= dt;
+  // 가까이 온 적에게는 자리에서 뛰쳐나가 문다
+  let foe: Snake | null = null, fd = 70;
+  for (const o of sim.snakes) {
+    if (o.id === m.owner || !sim.hittable(o)) continue;
+    for (let q = 0; q < o.segN; q += 2) {
+      const d = dist(o.segs[q * 2], o.segs[q * 2 + 1], m.x, m.y);
+      if (d < fd) ((fd = d), (foe = o), (tx = o.segs[q * 2]), (ty = o.segs[q * 2 + 1]));
+    }
+  }
+  const a = Math.atan2(ty - m.y, tx - m.x);
+  const d = dist(tx, ty, m.x, m.y);
+  const v = Math.min(d, Math.max(m.speed, sim.speedOf(owner) * 1.3) * dt);
+  m.x += Math.cos(a) * v;
+  m.y += Math.sin(a) * v;
+  m.angle = d > 3 ? a : dir;
+  if (foe && fd < foe.r + 16 && m.acc <= 0) {
+    m.acc = 0.35;
+    m.bite = 0;
+    sim.deal(owner, foe, m.dps * 0.35, m.ult ? 'ult' : 'minion', m.x, m.y, 'skill', m.ult, false);
+    sim.slow(foe, 0.4, 0.8);
+  }
+}
+
 export function updateMinions(sim: Simulation, dt: number) {
   for (let k = sim.minions.length - 1; k >= 0; k--) {
     const m = sim.minions[k];
@@ -1255,6 +1288,11 @@ export function updateMinions(sim: Simulation, dt: number) {
     if (!owner.alive || m.life <= 0 || m.hp <= 0) {
       const idx = sim.minions.indexOf(m);
       if (idx >= 0) sim.minions.splice(idx, 1);
+      continue;
+    }
+    m.bite += dt;
+    if (m.kind === 'soldier') {
+      soldierTick(sim, m, owner, dt);
       continue;
     }
     // 표적: 0.5초마다 주인 근처의 가까운 적. 벌 떼는 여러 적을 나눠 쫓는다
@@ -1288,6 +1326,7 @@ export function updateMinions(sim: Simulation, dt: number) {
         m.acc = 0.25;
         sim.deal(owner, t, m.dps * 0.25, m.ult ? 'ult' : 'minion', m.x, m.y, 'skill', m.ult, false);
         if (m.heat) sim.slow(t, 0.3, 0.7);
+        m.bite = 0;
       }
       // 적이 머리로 벌을 물면 벌이 다친다
       m.hp -= dt * 4;

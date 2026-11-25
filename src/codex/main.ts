@@ -1,5 +1,6 @@
 // 크롤러 도감: 게임 데이터(species·cards·config)를 그대로 읽어 보여 주고,
 // 실제 시뮬레이션 + 게임 렌더러로 물기·기술·보조 기술·필살기 모션을 재생한다.
+import { STATUSES } from '../shared/status';
 import '../client/fonts.css';
 import { CONFIG, evoOf, radiusFor } from '../shared/config';
 import { COMMON_SUBS, FAMILIES, FAMILY, ROLE_LIST, ROLES, SPECIAL_FOODS, SPECIES_BY_ID, formsOf, type Family, type FamilyId, type SubDef } from '../shared/species';
@@ -12,7 +13,7 @@ import measured from './measured.json';
 import { themeOf } from '../client/fxtheme';
 import { startDash } from '../shared/skills';
 import { fxSound, MOTION_FX, Sfx } from '../client/sfx';
-import { SLOT_LV, SLOT_NAME, V3_BY_ID, V3_FAMILIES, V3_FAMILY, v3Kit, type V3FamId, type V3Family, type V3Play, type V3React, type V3Skill, type V3Slot, type V3Species } from '../shared/v3';
+import { SLOT_LV, SLOT_NAME, V3_BY_ID, V3_FAMILIES, V3_FAMILY, V3_SPECIES, v3Kit, type V3FamId, type V3Family, type V3Play, type V3React, type V3Skill, type V3Slot, type V3Species } from '../shared/v3';
 import type { FxKind } from '../shared/types';
 
 type Meas = { dmg: number; fx: string[] };
@@ -202,7 +203,7 @@ function stepScene() {
   if (circleT > sceneT) cmd.angle = me.angle + 0.16;
   if (cast && sceneT < 1.6 && d0 < 150) cmd.sneak = true; // 기술을 쓴 뒤에는 천천히: 물기가 섞여 모션이 안 보이지 않게
   // 근접 기술은 닿는 거리까지 다가간 뒤에 쓴다(헛손질 방지)
-  const near = act.kind === 'main' && MELEE.includes(act.form) ? 115 : 1e9;
+  const near = act.kind === 'main' && MELEE.includes(act.form) ? 115 : act.kind === 'main' && act.form === 'heatball' ? 170 : 1e9;
   if (!cast && sceneT > 0.35 && (d0 < near || sceneT > 1.6)) {
     cast = true;
     if (act.kind === 'main') ((me.skillCd = 0), (me.ult = 0), (cmd.skillSeq = me.lastSkillSeq + 1));
@@ -329,6 +330,12 @@ function moveScript(p: V3Play, dist: number) {
 
 function runScriptRest(p: V3Play, tgt: Snake, T: number) {
   const S = sim!;
+  if (p.minions) {
+    const mi = p.minions;
+    S.later(mi.delay ?? 0.1, () => {
+      for (let k = 0; k < mi.n; k++) S.addMinion(me, mi.kind, mi.life, S.B(me) * 1.2, false, k);
+    });
+  }
   // 내 몸 상태
   const st = p.selfT ?? 1;
   for (const k of p.self ?? []) {
@@ -376,9 +383,9 @@ function react(d: Snake, r: V3React, T: number) {
     case 'push': for (let k = 0; k < 6; k++) S.later(k * 0.03, () => S.shove(d, away, 14)); hitFx('push'); break;
     case 'pull': for (let k = 0; k < 10; k++) S.later(k * 0.05, () => S.shove(d, Math.atan2(me.y - d.y, me.x - d.x), 9)); hitFx('grab'); break;
     case 'cut': hitFx('cut'); break;
-    case 'confuse': confused.set(d, sceneT + T); break;
-    case 'charm': charmed.set(d, sceneT + T); break;
-    case 'itch': itchy.set(d, sceneT + T); hitFx('poison'); break;
+    case 'confuse': confused.set(d, sceneT + T); d.confuseT = T; break;
+    case 'charm': charmed.set(d, sceneT + T); d.charmT = T; break;
+    case 'itch': itchy.set(d, sceneT + T); d.itchT = T; hitFx('poison'); break;
   }
 }
 
@@ -471,6 +478,35 @@ function drawV3Tables() {
     }).join(''),
   ).join('')}</table>`;
   $('v3spTable').querySelectorAll<HTMLElement>('tr[data-s]').forEach((tr) => (tr.onclick = () => (pickV3Sp(tr.dataset.s!), window.scrollTo({ top: 0, behavior: 'smooth' }))));
+  drawStatusTable();
+}
+
+/** 상태 정리 표: 각 상태를 주는 기술을 40종의 기술 설명·반응에서 찾아 모은다 */
+function drawStatusTable() {
+  const srcOf = (d: (typeof STATUSES)[number]) => {
+    const hits = new Map<string, string>();
+    for (const sp of V3_SPECIES) {
+      const kit = v3Kit(sp);
+      for (const sl of ['atk', 'def', 'spc', 'ult'] as V3Slot[]) {
+        const k = kit[sl];
+        const text = k.name + ' ' + k.desc + ' ' + (k.awake ?? '') + ' ' + (k.play?.react ?? []).join(' ') + ' ' + (k.play?.self ?? []).join(' ');
+        if (!d.keys.some((w) => text.includes(w))) continue;
+        const fam = V3_FAMILY[sp.fam];
+        hits.set(fam.icon + ' ' + k.name, fam.name);
+      }
+      const ins = sp.instinct.desc;
+      if (d.keys.some((w) => ins.includes(w))) hits.set('🧬 ' + sp.instinct.name, sp.name);
+    }
+    for (const f of V3_FAMILIES) if (d.keys.some((w) => f.trait.desc.includes(w))) hits.set(f.icon + ' ' + f.trait.name + '(특성)', f.name);
+    return [...hits.keys()];
+  };
+  const row = (d: (typeof STATUSES)[number]) => {
+    const src = srcOf(d);
+    return `<tr><td class="nm"><img src="${renderer.statusIcon(d.id)}" alt="" style="width:26px;height:26px">${d.name}</td><td class="fm">${d.desc}</td><td class="fm"><small>${src.length ? src.slice(0, 14).join(' · ') + (src.length > 14 ? ` 외 ${src.length - 14}` : '') : '—'}</small></td></tr>`;
+  };
+  $('v3stTable').innerHTML = `<table class="cmp v3t"><tr><th>상태</th><th>효과</th><th>주는 기술 · 본능</th></tr>
+    <tr class="grp"><td colspan="3" style="color:#ff8a7a">⬇️ 상태 이상 (${STATUSES.filter((d) => d.kind === 'debuff').length})</td></tr>${STATUSES.filter((d) => d.kind === 'debuff').map(row).join('')}
+    <tr class="grp"><td colspan="3" style="color:#8ae87a">⬆️ 상태 강화 (${STATUSES.filter((d) => d.kind === 'buff').length})</td></tr>${STATUSES.filter((d) => d.kind === 'buff').map(row).join('')}</table>`;
 }
 
 // ---------- 크롤러 탭 ----------

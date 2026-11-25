@@ -5,6 +5,7 @@ import { relation } from '../shared/combat';
 import { V3_BY_ID } from '../shared/v3';
 import { ShockwaveFilter } from 'pixi-filters/shockwave';
 import { Motion, PROGS, type Pose } from './motion';
+import { STATUSES } from '../shared/status';
 import { themeOf, type FxBit, type FxTheme } from './fxtheme';
 import { FAMILY, likerOf, SPECIAL_FOODS, SPECIES_BY_ID, taste, type FamilyId, type Look } from '../shared/species';
 import type { EnemyView, FxKind, GameEvent, MapTheme, MapView, MinionView, ProjView, RingView, SnakeView, TeleView, ZoneView } from '../shared/types';
@@ -217,6 +218,11 @@ export class GameRenderer {
   private mapKey = '';
   private combos = new Map<number, Combo>();
   private hpGfx = new Graphics();
+  private iconLayer = new Container();
+  private iconGfx = new Graphics();
+  private iconPool = new SpritePool(this.iconLayer);
+  /** 상태 아이콘 시계: 곤충·상태마다 처음 걸린 길이(다시 걸리면 갱신) */
+  private stMax = new Map<string, { max: number; last: number }>();
   private labelLayer = new Container();
   private popupLayer = new Container();
   private tex: Record<string, Texture> = {};
@@ -302,7 +308,7 @@ export class GameRenderer {
     this.world.addChild(
       this.bg, mask, this.deco, border, this.mapLayer, this.decalLayer, this.zoneGfx, this.teleGfx, this.foodBackLayer, this.foodLayer, this.ringGfx, this.markGfx,
       this.shadowLayer, this.glowLayer, this.legLayer, this.bodyLayer, this.ghostLayer, this.headLayer, this.minionGfx, this.statusGfx, this.shapeGfx,
-      this.fxSpriteLayer, this.fxLayer, this.enemyGfx, this.hpGfx, this.labelLayer, this.popupLayer,
+      this.fxSpriteLayer, this.fxLayer, this.enemyGfx, this.hpGfx, this.iconLayer, this.iconGfx, this.labelLayer, this.popupLayer,
     );
     this.fxSpriteLayer.blendMode = 'add';
     this.app.stage.addChild(this.world, this.screenGfx, this.screenFx);
@@ -440,6 +446,16 @@ export class GameRenderer {
       g.circle(16, 16, 3).fill(0xffffff);
     });
     mk('ember', (g) => g.circle(8, 8, 8).fill({ color: 0xffffff, alpha: 0.35 }).circle(8, 8, 4).fill(0xffffff));
+    // 상태 아이콘(글자 없이 그림만): 동그란 바탕 + 테두리(이상=빨강, 강화=초록) + 그림
+    for (const d of STATUSES) {
+      const g = new Graphics();
+      const C0 = 32, R = 28;
+      g.circle(C0, C0, R + 3).fill(d.kind === 'debuff' ? 0xe8402a : 0x3ab84a);
+      g.circle(C0, C0, R).fill(d.color).stroke({ width: 2, color: INK });
+      g.ellipse(C0 - 8, C0 - 12, 12, 6).fill({ color: 0xffffff, alpha: 0.35 });
+      drawStatusGlyph(g, d.id, C0, C0);
+      this.tex['st_' + d.id] = r.generateTexture({ target: g, resolution: 2, frame: new Rectangle(0, 0, 64, 64) });
+    }
     mk('sand', (g) => g.rect(0, 0, 6, 6).fill(0xffffff));
     mk('silk', (g) => g.moveTo(0, 2).bezierCurveTo(12, -2, 24, 6, 40, 2).stroke({ width: 2, color: 0xffffff }));
     mk('star', (g) => g.poly([16, 0, 19, 13, 32, 16, 19, 19, 16, 32, 13, 19, 0, 16, 13, 13]).fill(0xffffff));
@@ -1505,6 +1521,16 @@ export class GameRenderer {
         this.motion.play(id, 'dive', e.dur ?? 0.35, now);
         return true; // 길을 미리 긋던 직선은 없앤다(몸이 직접 날아간다)
       }
+      case 'warhorn': {
+        // 군단 진군: 붉은 깃발 고리 두 겹 + 땅이 울리며 붉은 흙먼지
+        if (!near) return true;
+        const c1 = 0xd84a2a;
+        this.ringFx(e.x, e.y, r, c1);
+        this.afterMs(() => this.ringFx(e.x, e.y, r * 0.7, 0xffb060), 120);
+        this.dustRing(e.x, e.y, r * 0.6, 0xc87a5a, 20);
+        this.shake = Math.max(this.shake, 6);
+        return true;
+      }
       case 'antrun': {
         // 불려 나온 개미들이 내 둘레에서 표적까지 줄지어 달려간다
         if (!near) return true;
@@ -1570,6 +1596,11 @@ export class GameRenderer {
         // 열 공: 작은 벌들이 내게서 날아가 적을 공처럼 감싼다(감싼 모습은 장판 그리기에서)
         if (!near) return true;
         const x0 = e.x1 ?? e.x, y0 = e.y1 ?? e.y;
+        if (e.wk === 'miss') {
+          // 표적 없음: 벌들이 앞으로 날아갔다 흩어진다
+          for (let i = 0; i < 8; i++) this.spawnBit('mote', x0, y0, 0xffc21a, 200 + rnd() * 80, 0.5, 0.6, a + (rnd() - 0.5) * 0.8, 0.2);
+          return true;
+        }
         const list = Array.from({ length: 14 }, (_, i) => ({ o: rnd() * 0.25, a: (i / 14) * Math.PI * 2, sw: (rnd() - 0.5) * 80 }));
         this.addShape((g, q) => {
           const p = 1 - q;
@@ -1984,6 +2015,25 @@ export class GameRenderer {
         // 부채꼴로 퍼져 천천히 가라앉는 반짝이 가루
         const c = P(0, 0xffe066);
         this.coneFx(e.x, e.y, a, r, Math.min(half, 1.4), c, false);
+        // 3초 남는 가루 구름: 부채꼴 안에 몽글몽글한 반짝이 구름 덩이들이 천천히 부풀며 일렁인다
+        const puffs = Array.from({ length: half > 2 ? 16 : 14 }, () => {
+          const aa = a + (rnd() - 0.5) * Math.min(half, 3.1) * 1.8, d = r * (0.25 + rnd() * 0.7);
+          return { x: e.x + cos(aa) * d, y: e.y + sin(aa) * d, R: r * (0.22 + rnd() * 0.14), ph: rnd() * 6, col: [c, P(1, 0xff9ad8), 0xffc8f0][Math.floor(rnd() * 3)] };
+        });
+        this.addShape((g, q) => {
+          const p = 1 - q, grow = Math.min(1, p * 6);
+          const al = Math.min(1, q * 4);
+          for (const f of puffs) {
+            const R = f.R * (0.5 + 0.5 * grow) * (1 + 0.06 * Math.sin(this.time * 3 + f.ph));
+            const ox = Math.sin(this.time * 1.3 + f.ph) * 6;
+            g.circle(f.x + ox, f.y, R).fill({ color: f.col, alpha: 0.3 * al }).stroke({ width: 2, color: 0xffffff, alpha: 0.35 * al });
+            g.circle(f.x + ox, f.y, R * 0.6).fill({ color: f.col, alpha: 0.35 * al });
+            for (let j = 0; j < 3; j++) {
+              const tw = Math.sin(this.time * 9 + f.ph + j * 2.1);
+              if (tw > 0.4) g.star(f.x + ox + Math.cos(f.ph + j * 2) * R * 0.6, f.y + Math.sin(f.ph + j * 2) * R * 0.6, 4, 3 + 3 * tw, 1.2).fill({ color: 0xffffff, alpha: 0.9 * al });
+            }
+          }
+        }, 3);
         for (let i = 0; i < 80; i++) {
           const aa = a + (rnd() - 0.5) * half * 2, d = r * (0.15 + rnd() * 0.85);
           later(rnd() * 0.35, () => this.spawnBit('scale', e.x + cos(aa) * d * 0.3, e.y + sin(aa) * d * 0.3, [c, P(1, 0xff9ad8), P(2, 0xffffff)][i % 3], d * 1.4, 1.6 + rnd() * 1.2, 0.8 + rnd() * 0.5, aa, 0.2));
@@ -2024,6 +2074,27 @@ export class GameRenderer {
         // 색색 나비 떼 회오리
         const pal = [P(0, 0xffe066), P(1, 0xff9ad8), P(2, 0xffffff), 0x7ad8ff];
         this.ringFx(e.x, e.y, r, pal[0]);
+        // 색색 나비 서른여섯 마리가 세 겹 회오리로 4초 동안 돈다(바깥은 느리게, 안은 빠르게)
+        const flock = Array.from({ length: 36 }, (_, i) => ({ lane: i % 3, a0: rnd() * Math.PI * 2, col: [0xffe066, 0xff9ad8, 0x7ad8ff, 0xffa04a, 0xb88aff][i % 5], s: 12 + rnd() * 5, ph: rnd() * 6 }));
+        this.addShape((g, q) => {
+          const p = 1 - q, al = Math.min(1, q * 5, p * 6);
+          g.circle(e.x, e.y, r).fill({ color: 0xffffff, alpha: 0.08 * al }).stroke({ width: 3, color: 0xff9ad8, alpha: 0.4 * al });
+          for (const b of flock) {
+            const rr = r * [0.95, 0.68, 0.4][b.lane], sp = [2.2, 3.2, 4.4][b.lane];
+            const aa = b.a0 + this.time * sp;
+            const x = e.x + Math.cos(aa) * rr, y = e.y + Math.sin(aa) * rr * 0.92;
+            const dir = aa + Math.PI / 2;
+            const flap = 0.35 + 0.65 * Math.abs(Math.sin(this.time * 18 + b.ph));
+            const cc = Math.cos(dir), ss = Math.sin(dir);
+            for (const sd of [-1, 1]) {
+              // 앞날개·뒷날개
+              const wx = x - ss * sd * b.s * 0.7 * flap, wy = y + cc * sd * b.s * 0.7 * flap;
+              g.ellipse(wx + cc * 2, wy + ss * 2, b.s * 0.75 * flap + 1, b.s * 0.55).fill({ color: b.col, alpha: 0.95 * al }).stroke({ width: 1, color: INK, alpha: 0.7 * al });
+              g.ellipse(wx - cc * 3, wy - ss * 3, b.s * 0.5 * flap + 1, b.s * 0.4).fill({ color: b.col, alpha: 0.8 * al });
+            }
+            g.moveTo(x - cc * 5, y - ss * 5).lineTo(x + cc * 5, y + ss * 5).stroke({ width: 2, color: INK, alpha: al });
+          }
+        }, 4);
         for (let k = 0; k < 16; k++)
           later(k * 0.24, () => {
             for (let i = 0; i < 7; i++) {
@@ -2063,11 +2134,30 @@ export class GameRenderer {
         break;
       }
       case 'hairs': {
-        // 바늘처럼 날아가는 독털
-        const c = P(0, 0xfff0b0);
-        this.coneFx(e.x, e.y, a, r, half, c, false);
-        for (let i = 0; i < 60; i++) later(rnd() * 0.25, () => this.spawnBit('hair', e.x, e.y, i % 3 ? c : P(1, 0xd8b870), r * (1.6 + rnd() * 1.4), 0.5, 0.8, a, half * 2));
-        hit(5, 0.02);
+        // 굵은 독털 바늘이 부채꼴로 휙: 크림색 털 끝이 초록 독으로 빛나고, 지나간 자리에 초록 독 안개
+        const c = P(0, 0xfff0b0), g1 = 0x6ae84a, g2 = 0xb8ff7a;
+        const needles = Array.from({ length: 22 }, () => ({ aa: a + (rnd() - 0.5) * half * 2, sp: r * (0.8 + rnd() * 0.5), o: rnd() * 0.12 }));
+        this.addShape((g, q) => {
+          const p = 1 - q;
+          for (const nd of needles) {
+            const t = Math.min(1, Math.max(0, (p - nd.o) / 0.5));
+            if (t <= 0) continue;
+            const d = nd.sp * (1 - (1 - t) * (1 - t));
+            const x = e.x + Math.cos(nd.aa) * d, y = e.y + Math.sin(nd.aa) * d;
+            const bx = x - Math.cos(nd.aa) * 18, by = y - Math.sin(nd.aa) * 18;
+            g.moveTo(bx, by).lineTo(x, y).stroke({ width: 5.5, color: c, alpha: Math.min(1, q * 2), cap: 'round' });
+            g.moveTo(x - Math.cos(nd.aa) * 7, y - Math.sin(nd.aa) * 7).lineTo(x, y).stroke({ width: 5.5, color: g1, alpha: Math.min(1, q * 2), cap: 'round' });
+            g.circle(x, y, 4).fill({ color: g1, alpha: Math.min(1, q * 2) });
+          }
+        }, 0.6);
+        for (let k = 0; k < 4; k++)
+          later(0.1 + k * 0.1, () => {
+            for (let i = 0; i < 6; i++) {
+              const aa = a + (rnd() - 0.5) * half * 2, d = r * (0.3 + rnd() * 0.7);
+              this.spawnBit('puff', e.x + cos(aa) * d, e.y + sin(aa) * d, i % 2 ? g1 : g2, 15, 1.2, 0.9 + rnd() * 0.4, -Math.PI / 2, 0.6);
+            }
+          });
+        hit(6, 0.02);
         break;
       }
     }
@@ -2515,6 +2605,18 @@ export class GameRenderer {
     return t;
   }
 
+  /** 상태 아이콘 그림(도감 표용 이미지 주소) */
+  statusIcon(id: string): string {
+    const k = 'st:' + id;
+    const hit = this.portraits.get(k);
+    if (hit) return hit;
+    const sp = new Sprite(this.tex['st_' + id]);
+    const url = (this.app.renderer.extract.canvas({ target: sp, resolution: 1 }) as HTMLCanvasElement).toDataURL();
+    sp.destroy();
+    this.portraits.set(k, url);
+    return url;
+  }
+
   portrait(key: string): string {
     if (!key.includes('@') && key !== 'boss') key = `${key}@2`;
     const cached = this.portraits.get(key);
@@ -2709,13 +2811,15 @@ export class GameRenderer {
 
     this.statusGfx.clear();
     this.hpGfx.clear();
+    this.iconGfx.clear();
+    this.iconPool.begin();
     const seen = new Set<number>();
     for (const pool of [this.shadowPool, this.glowPool, this.legPool, this.bodyPool]) pool.begin();
     for (const s of frame.snakes) {
       seen.add(s.id);
       this.drawSnake(s, player);
     }
-    for (const pool of [this.shadowPool, this.glowPool, this.legPool, this.bodyPool]) pool.end();
+    for (const pool of [this.shadowPool, this.glowPool, this.legPool, this.bodyPool, this.iconPool]) pool.end();
     for (const [id, g] of this.snakes) {
       if (seen.has(id)) continue;
       g.head.visible = g.label.visible = false;
@@ -2956,6 +3060,10 @@ export class GameRenderer {
     for (const m of minions) {
       if (!this.isNear(m.x, m.y)) continue;
       const c = Math.cos(m.angle), s = Math.sin(m.angle);
+      if (m.kind === 'ant' || m.kind === 'soldier') {
+        this.drawAnt(g, m.x, m.y, m.angle, m.kind === 'soldier', m.bite, Math.min(1, m.life / 0.4));
+        continue;
+      }
       const wasp = m.kind === 'wasp';
       const L = wasp ? 13 : 10;
       g.ellipse(m.x + 3, m.y + 5, L, L * 0.6).fill({ color: 0x000000, alpha: 0.18 });
@@ -2967,6 +3075,49 @@ export class GameRenderer {
       g.ellipse(m.x, m.y, L, L * 0.62).fill(wasp ? 0xf2c230 : 0xf6c94a).stroke({ width: 2, color: INK });
       for (let k = -1; k <= 1; k += 2) g.moveTo(m.x + c * k * 3 - s * 5, m.y + s * k * 3 + c * 5).lineTo(m.x + c * k * 3 + s * 5, m.y + s * k * 3 - c * 5).stroke({ width: 2.5, color: 0x2a1e10 });
       g.circle(m.x + c * L * 0.8, m.y + s * L * 0.8, 4).fill(0x2a1e10);
+    }
+  }
+
+  /** 개미 한 마리(일개미·군대개미 병정): 머리·가슴·배 세 마디, 다리 여섯, 더듬이, 큰턱. 물 때 큰턱이 쩍 */
+  private drawAnt(g: Graphics, x: number, y: number, ang: number, soldier: boolean, bite: number, alpha: number) {
+    const S = soldier ? 1.45 : 1;
+    const c = Math.cos(ang), sn = Math.sin(ang);
+    const P2 = (u: number, v: number): [number, number] => [x + (c * u - sn * v) * S, y + (sn * u + c * v) * S];
+    const body = soldier ? 0x8a2a14 : 0x2a1a10, edge = soldier ? 0x3a0e06 : 0x000000;
+    const walk = Math.sin(this.time * 26 + x * 0.1);
+    // 그림자
+    g.ellipse(x + 3, y + 5, 16 * S, 7 * S).fill({ color: 0x000000, alpha: 0.18 * alpha });
+    // 다리 여섯(번갈아 걷기)
+    for (let l = 0; l < 3; l++)
+      for (const sd of [-1, 1]) {
+        const ph = (l % 2 ? 1 : -1) * sd * walk * 3;
+        const [bx, by] = P2(1 - l * 3, 0), [kx, ky] = P2(3 - l * 4 + ph, sd * 7), [fx, fy] = P2(5 - l * 6 + ph * 1.5, sd * 12);
+        g.moveTo(bx, by).lineTo(kx, ky).lineTo(fx, fy).stroke({ width: 1.6 * S, color: edge, alpha });
+      }
+    // 배 · 가슴 · 머리
+    const [ax, ay] = P2(-9, 0), [tx, ty] = P2(0, 0), [hx, hy] = P2(8, 0);
+    g.ellipse(ax, ay, 0, 0);
+    g.circle(ax, ay, 6.5 * S).fill({ color: body, alpha }).stroke({ width: 1.4, color: edge, alpha });
+    g.circle(tx, ty, 3.6 * S).fill({ color: body, alpha }).stroke({ width: 1.2, color: edge, alpha });
+    g.circle(hx, hy, (soldier ? 5.4 : 4.4) * S).fill({ color: body, alpha }).stroke({ width: 1.4, color: edge, alpha });
+    g.circle(...P2(-10.5, -2.5), 1.8 * S).fill({ color: 0xffffff, alpha: 0.35 * alpha });
+    // 더듬이(꺾인)
+    for (const sd of [-1, 1]) {
+      const [e1x, e1y] = P2(10, sd * 2), [e2x, e2y] = P2(14, sd * 6), [e3x, e3y] = P2(18, sd * 4 + Math.sin(this.time * 9 + sd) * 1.5);
+      g.moveTo(e1x, e1y).lineTo(e2x, e2y).lineTo(e3x, e3y).stroke({ width: 1.1 * S, color: edge, alpha });
+    }
+    // 큰턱: 평소 살짝, 물 때 쩍 벌렸다 닫음
+    const open = bite < 0.18 ? Math.sin((bite / 0.18) * Math.PI) : 0.15;
+    const jl = soldier ? 7 : 4.5;
+    for (const sd of [-1, 1]) {
+      const [m0x, m0y] = P2(11, sd * 2), [m1x, m1y] = P2(11 + jl, sd * (2 + open * 6));
+      g.moveTo(m0x, m0y).lineTo(m1x, m1y).stroke({ width: (soldier ? 2.4 : 1.6) * S, color: soldier ? 0xffb060 : 0x5a3a20, alpha, cap: 'round' });
+    }
+    if (soldier) g.circle(hx, hy, 9 * S).stroke({ width: 1.5, color: 0xff7a3a, alpha: 0.35 * alpha });
+    if (bite < 0.15) {
+      // 문 순간: 큰턱 앞에서 흰 '딱' 별과 작은 피해 조각
+      const [px, py] = P2(16 + jl, 0);
+      g.star(px, py, 4, 7 * S * (1 - bite / 0.15) + 2, 2.5).fill({ color: 0xffffff, alpha: alpha * (1 - bite / 0.15) });
     }
   }
 
@@ -3684,6 +3835,42 @@ export class GameRenderer {
       if (k > 0) hp.rect(hx - barW / 2, barY, barW * k, barH * 0.35).fill({ color: 0xffffff, alpha: 0.35 });
     }
 
+    // 상태 아이콘: 이름표 위에 한 줄. 이상(빨간 테) 먼저, 강화(초록 테) 다음. 지속시간만큼 어두운 시계 덮개가 걷힌다
+    if (s.st && s.st.length && this.isNear(hx, hy) && !(s.hidden > 0 && !s.isPlayer)) {
+      const items: { i: number; t: number }[] = [];
+      for (let q = 0; q < s.st.length; q += 2) items.push({ i: s.st[q], t: s.st[q + 1] });
+      items.sort((a, b) => (STATUSES[a.i].kind === STATUSES[b.i].kind ? 0 : STATUSES[a.i].kind === 'debuff' ? -1 : 1));
+      const show = items.slice(0, 6);
+      const sz = 17 * iz, gap = 3 * iz;
+      const rowW = show.length * sz + (show.length - 1) * gap;
+      const iy = barY - (this.opts.labels ? 20 * iz : 4 * iz) - sz / 2 - 2 * iz;
+      show.forEach((it, k) => {
+        const d = STATUSES[it.i];
+        const cx = hx - rowW / 2 + sz / 2 + k * (sz + gap);
+        const sp = this.iconPool.take(this.tex['st_' + d.id]);
+        sp.position.set(cx, iy);
+        sp.scale.set(sz / 64);
+        // 시계 덮개: 남은 비율만큼 밝게 남기고, 지난 만큼 어둡게(12시부터 시계 방향)
+        const key = s.id + ':' + d.id;
+        const rec = this.stMax.get(key);
+        if (it.t === -1) {
+          this.stMax.delete(key);
+          sp.alpha = 0.85 + 0.15 * Math.sin(this.time * 6);
+          return;
+        }
+        let max = it.t;
+        if (rec && it.t <= rec.last + 0.06) max = rec.max;
+        this.stMax.set(key, { max, last: it.t });
+        const frac = Math.max(0, Math.min(1, 1 - it.t / Math.max(0.05, max)));
+        if (frac > 0.01) {
+          const R = sz / 2 + 0.5 * iz;
+          const a0 = -Math.PI / 2;
+          this.iconGfx.moveTo(cx, iy).arc(cx, iy, R, a0, a0 + frac * Math.PI * 2).lineTo(cx, iy).fill({ color: 0x000000, alpha: 0.55 });
+        }
+        // 곧 끝남: 깜빡
+        if (it.t < 0.5) sp.alpha = 0.55 + 0.45 * Math.abs(Math.sin(this.time * 14));
+      });
+    }
     // 상태 표시
     const st = this.statusGfx;
     if (s.sneaking) {
@@ -4149,4 +4336,127 @@ function mix(a: number, b: number, t: number) {
   const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
   const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
   return (Math.round(ar + (br - ar) * t) << 16) | (Math.round(ag + (bg - ag) * t) << 8) | Math.round(ab + (bb - ab) * t);
+}
+
+/** 상태 아이콘 그림(64칸 텍스처 가운데 cx, cy 기준, 반지름 약 20 안) */
+function drawStatusGlyph(g: Graphics, id: string, cx: number, cy: number) {
+  const ink = { width: 3, color: INK, join: 'round' as const, cap: 'round' as const };
+  switch (id) {
+    case 'stun':
+      for (let k = 0; k < 3; k++) {
+        const a = -Math.PI / 2 + (k * Math.PI * 2) / 3;
+        g.star(cx + Math.cos(a) * 10, cy + Math.sin(a) * 10, 5, 8, 3.5).fill(0xffffff).stroke({ width: 1.8, color: INK });
+      }
+      break;
+    case 'root':
+      for (const sd of [-1, 0, 1]) g.moveTo(cx + sd * 9, cy - 16).bezierCurveTo(cx + sd * 9 + 8, cy - 4, cx + sd * 9 - 8, cy + 4, cx + sd * 9, cy + 16).stroke({ width: 4, color: 0x2a4a1a, cap: 'round' });
+      g.moveTo(cx - 18, cy + 16).lineTo(cx + 18, cy + 16).stroke({ width: 4, color: 0x4a2a10, cap: 'round' });
+      break;
+    case 'slow':
+      // 달팽이
+      g.circle(cx + 2, cy - 2, 12).fill(0xffffff).stroke(ink);
+      g.moveTo(cx + 2, cy - 2).arc(cx + 2, cy - 2, 6, 0, Math.PI * 1.5).stroke({ width: 2.5, color: INK });
+      g.moveTo(cx - 18, cy + 12).lineTo(cx + 16, cy + 12).quadraticCurveTo(cx + 22, cy + 6, cx + 18, cy).stroke(ink);
+      g.moveTo(cx + 18, cy).lineTo(cx + 20, cy - 8).stroke({ width: 2, color: INK });
+      break;
+    case 'silence':
+      g.roundRect(cx - 17, cy - 14, 34, 24, 8).fill(0xffffff).stroke(ink);
+      g.moveTo(cx - 6, cy + 10).lineTo(cx - 10, cy + 18).lineTo(cx + 2, cy + 10).fill(0xffffff);
+      g.moveTo(cx - 7, cy - 8).lineTo(cx + 7, cy + 4).moveTo(cx + 7, cy - 8).lineTo(cx - 7, cy + 4).stroke({ width: 4, color: 0xe8402a, cap: 'round' });
+      break;
+    case 'fear':
+      // 겁먹은 얼굴: 파르르 떨리는 입
+      g.circle(cx, cy, 15).fill(0xffffff).stroke(ink);
+      g.circle(cx - 6, cy - 4, 3).fill(INK).circle(cx + 6, cy - 4, 3).fill(INK);
+      g.moveTo(cx - 8, cy + 7).lineTo(cx - 4, cy + 4).lineTo(cx, cy + 7).lineTo(cx + 4, cy + 4).lineTo(cx + 8, cy + 7).stroke({ width: 2.5, color: INK });
+      g.moveTo(cx + 15, cy - 14).lineTo(cx + 18, cy - 6).stroke({ width: 2.5, color: 0x5ab0ff, cap: 'round' });
+      break;
+    case 'blind':
+      g.moveTo(cx - 18, cy).quadraticCurveTo(cx, cy - 16, cx + 18, cy).quadraticCurveTo(cx, cy + 16, cx - 18, cy).fill(0xffffff).stroke(ink);
+      g.circle(cx, cy, 6).fill(INK);
+      g.moveTo(cx - 16, cy + 14).lineTo(cx + 16, cy - 14).stroke({ width: 4, color: 0xe8402a, cap: 'round' });
+      break;
+    case 'confuse':
+      g.moveTo(cx, cy);
+      for (let k = 0; k <= 40; k++) {
+        const t = k / 40, a = t * Math.PI * 4, r = 2 + t * 15;
+        g.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      }
+      g.stroke({ width: 3.5, color: INK, cap: 'round' });
+      break;
+    case 'charm':
+      g.moveTo(cx, cy + 15).bezierCurveTo(cx - 22, cy, cx - 12, cy - 18, cx, cy - 7).bezierCurveTo(cx + 12, cy - 18, cx + 22, cy, cx, cy + 15).fill(0xffffff).stroke(ink);
+      break;
+    case 'mark':
+      g.circle(cx, cy, 14).stroke({ width: 3.5, color: INK }).circle(cx, cy, 5).fill(INK);
+      for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) g.moveTo(cx + dx * 9, cy + dy * 9).lineTo(cx + dx * 19, cy + dy * 19).stroke({ width: 3.5, color: INK, cap: 'round' });
+      break;
+    case 'poison':
+      g.moveTo(cx, cy - 17).quadraticCurveTo(cx + 15, cy + 2, cx, cy + 15).quadraticCurveTo(cx - 15, cy + 2, cx, cy - 17).fill(0x2a8a1a).stroke(ink);
+      g.circle(cx - 4, cy + 3, 3).fill({ color: 0xffffff, alpha: 0.7 });
+      break;
+    case 'itch':
+      for (let k = 0; k < 5; k++) {
+        const x = cx - 14 + k * 7;
+        g.moveTo(x, cy + 14).lineTo(x + (k % 2 ? 4 : -4), cy - 12).stroke({ width: 3, color: 0xfff6d0, cap: 'round' });
+        g.circle(x + (k % 2 ? 4 : -4), cy - 13, 2.5).fill(0x3ac83a);
+      }
+      g.moveTo(cx - 18, cy + 14).lineTo(cx + 18, cy + 14).stroke({ width: 3, color: INK, cap: 'round' });
+      break;
+    case 'grabbed':
+      for (const sd of [-1, 1]) g.moveTo(cx + sd * 16, cy + 14).quadraticCurveTo(cx + sd * 18, cy - 14, cx - sd * 2, cy - 12).stroke({ width: 6, color: INK, cap: 'round' });
+      g.circle(cx, cy + 4, 6).fill(0xffffff).stroke({ width: 2, color: INK });
+      break;
+    case 'captured':
+      for (let k = -2; k <= 2; k++) {
+        g.moveTo(cx + k * 7, cy - 16).lineTo(cx + k * 7, cy + 16);
+        g.moveTo(cx - 16, cy + k * 7).lineTo(cx + 16, cy + k * 7);
+      }
+      g.stroke({ width: 2.5, color: INK });
+      break;
+    case 'invuln':
+      g.moveTo(cx, cy - 17).lineTo(cx + 15, cy - 10).lineTo(cx + 13, cy + 6).lineTo(cx, cy + 17).lineTo(cx - 13, cy + 6).lineTo(cx - 15, cy - 10).closePath().fill(0xffffff).stroke(ink);
+      g.star(cx, cy, 5, 8, 3.5).fill(0xffc21a);
+      break;
+    case 'shield':
+      g.moveTo(cx, cy - 17).lineTo(cx + 15, cy - 10).lineTo(cx + 13, cy + 6).lineTo(cx, cy + 17).lineTo(cx - 13, cy + 6).lineTo(cx - 15, cy - 10).closePath().fill(0xffffff).stroke(ink);
+      g.moveTo(cx, cy - 12).lineTo(cx, cy + 12).stroke({ width: 3, color: 0x5aa8e8 });
+      break;
+    case 'bitter':
+      g.moveTo(cx, cy - 16).quadraticCurveTo(cx + 13, cy + 2, cx, cy + 13).quadraticCurveTo(cx - 13, cy + 2, cx, cy - 16).fill(0xffffff).stroke(ink);
+      g.moveTo(cx - 16, cy - 4).arc(cx, cy, 16, Math.PI, Math.PI * 1.5).stroke({ width: 3, color: INK, cap: 'round' });
+      g.moveTo(cx - 2, cy - 21).lineTo(cx + 2, cy - 16).lineTo(cx - 4, cy - 14).stroke({ width: 2.5, color: INK, cap: 'round' });
+      break;
+    case 'hidden':
+      g.moveTo(cx - 14, cy + 14).quadraticCurveTo(cx - 16, cy - 14, cx + 14, cy - 14).quadraticCurveTo(cx + 16, cy + 14, cx - 14, cy + 14).fill(0x2a8a1a).stroke(ink);
+      g.moveTo(cx - 14, cy + 14).lineTo(cx + 12, cy - 12).stroke({ width: 2, color: 0xd8ffa0 });
+      break;
+    case 'fly':
+      for (const sd of [-1, 1]) g.ellipse(cx + sd * 10, cy - 2, 10, 15).fill({ color: 0xffffff, alpha: 0.95 }).stroke({ width: 2.5, color: INK });
+      g.roundRect(cx - 3, cy - 12, 6, 26, 3).fill(INK);
+      break;
+    case 'ghost':
+      g.moveTo(cx - 13, cy + 15).lineTo(cx - 13, cy - 2).arc(cx, cy - 2, 13, Math.PI, 0).lineTo(cx + 13, cy + 15).lineTo(cx + 7, cy + 10).lineTo(cx, cy + 15).lineTo(cx - 7, cy + 10).closePath().fill({ color: 0xffffff, alpha: 0.9 }).stroke(ink);
+      g.circle(cx - 5, cy - 2, 2.5).fill(INK).circle(cx + 5, cy - 2, 2.5).fill(INK);
+      break;
+    case 'power':
+      g.moveTo(cx - 12, cy + 14).lineTo(cx + 12, cy - 12).stroke({ width: 6, color: 0xffffff, cap: 'round' });
+      g.moveTo(cx - 12, cy + 14).lineTo(cx + 12, cy - 12).stroke({ width: 2, color: INK, cap: 'round' });
+      g.moveTo(cx - 16, cy + 4).lineTo(cx - 4, cy + 16).stroke({ width: 4, color: INK, cap: 'round' });
+      g.moveTo(cx + 6, cy - 16).lineTo(cx + 14, cy - 16).lineTo(cx + 14, cy - 8).stroke({ width: 3, color: INK, cap: 'round' });
+      break;
+    case 'haste':
+      for (let k = 0; k < 2; k++) g.moveTo(cx - 14 + k * 12, cy - 13).lineTo(cx - 2 + k * 12, cy).lineTo(cx - 14 + k * 12, cy + 13).stroke({ width: 5, color: INK, cap: 'round', join: 'round' });
+      break;
+    case 'sight':
+      for (let k = 0; k < 7; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        const x = k === 6 ? cx : cx + Math.cos(a) * 10, y = k === 6 ? cy : cy + Math.sin(a) * 10;
+        g.regularPoly(x, y, 5.5, 6, Math.PI / 6).fill(0xffffff).stroke({ width: 1.8, color: INK });
+      }
+      break;
+    case 'feast':
+      g.star(cx, cy, 5, 16, 7).fill(0xffffff).stroke(ink);
+      break;
+  }
 }
