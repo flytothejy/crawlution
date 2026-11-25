@@ -111,6 +111,66 @@ const statusSeen = new Set<string>();
   check('기술로 상태 17종이 실제로 걸림', miss.length === 0, miss.length ? `안 걸림: ${miss.join(',')}` : `${statusSeen.size}종`);
 }
 
+// 2b) 계열 특성·본능
+{
+  const pair = (a: string, b: string) => {
+    const sim = new Simulation(99, '나', opts(a, { bots: 1, startLevel: 5 }));
+    sim.enemies.update = () => {};
+    const me = sim.snakes[0];
+    const o = sim.snakes[1];
+    o.isPlayer = true;
+    // 상대를 원하는 종으로 바꿔 끼운다
+    const other = new Simulation(5, 'x', opts(b, { bots: 0, startLevel: 5 })).snakes[0];
+    Object.assign(o, { sp: other.sp, fam: other.fam, kit: other.kit, v3fam: other.v3fam });
+    me.invulnT = o.invulnT = 0;
+    return { sim, me, o };
+  };
+  const bite = (sim: Simulation, a: Snake, b: Snake) => (sim as unknown as { bite: (a: Snake, b: Snake, x: number, y: number, i: number) => void }).bite(a, b, b.x, b.y, 3);
+  {
+    const { sim, me, o } = pair('v3:wangjine', 'rhino');
+    bite(sim, me, o);
+    check('지네 특성 독턱: 물면 중독', o.poisonT > 0);
+  }
+  {
+    const { sim, me, o } = pair('orbspider', 'rhino');
+    bite(sim, me, o);
+    check('거미 특성 독니: 물면 0.5초 마비', o.stunT > 0.3);
+  }
+  {
+    const { sim, me, o } = pair('rhino', 'v3:swallow');
+    bite(sim, me, o);
+    check('나비 특성 인분 날개: 나비를 물면 혼란', me.confuseT > 1);
+  }
+  {
+    const { sim, me, o } = pair('rhino', 'v3:tussock');
+    bite(sim, me, o);
+    check('독나방 본능 독털 몸: 문 적이 가려움', me.itchT > 1);
+  }
+  {
+    const { sim, me, o } = pair('rhino', 'mantis' as never);
+    void o;
+    me.kvx = me.kvy = 0;
+    sim.knock(me, 0, 100);
+    const beetle = Math.hypot(me.kvx, me.kvy);
+    const { sim: s2, me: m2 } = pair('kingmantis', 'rhino');
+    m2.kvx = m2.kvy = 0;
+    s2.knock(m2, 0, 100);
+    check('딱정벌레 특성 무거운 껍질: 밀려나는 거리 절반', beetle > 0 && beetle <= Math.hypot(m2.kvx, m2.kvy) * 0.55, `${beetle.toFixed(0)} vs ${Math.hypot(m2.kvx, m2.kvy).toFixed(0)}`);
+  }
+  {
+    const { sim, me } = pair('v3:wangant', 'rhino');
+    for (let t = 0; t < 60; t++) sim.step();
+    const n = sim.minions.filter((m) => m.owner === me.id && m.kind === 'worker').length;
+    check('개미 특성 일개미 행렬: 일본왕개미는 일개미 3마리가 따라다님', n === 3, `${n}마리`);
+  }
+  {
+    const { sim, me, o } = pair('v3:grima', 'rhino');
+    void o;
+    const { me: m2 } = pair('v3:wangjine', 'rhino');
+    check('그리마 본능 아주 빠른 발: 속도 +8%', sim.speedOf(me) > sim.speedOf(m2) * 1.05);
+  }
+}
+
 // 3) 한 판 통계
 {
   const allNames = new Set<string>();

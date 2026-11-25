@@ -2340,6 +2340,7 @@ export class Simulation {
         this.stun(b, 1);
         this.root(b, 1);
         this.silence(b, 1);
+        this.poison(a, b, 3, this.B(a) * 0.2); // 독니 깨물기: 강한 독
         this.events.push({ type: 'skillHit', x, y, kind: 'stun' });
       }
     }

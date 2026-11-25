@@ -134,7 +134,7 @@ export const FAMILIES: Family[] = [
     color: 0xb08a4a, color2: 0x5a3a1a, stages: ['애벌레', '성충', '각성'], skill: '큰턱 집기',
     forms: [
       { id: 'grab', name: '집어 조이기', icon: '🦀', desc: '앞의 적을 잡고 1.5초 조임. 잡힌 동안 둘 다 느림', awake: '조이기가 끝날 때 큰 피해', cd: 14, ai: 'melee', range: 70 },
-      { id: 'throw', name: '집어 던지기', icon: '🤾', desc: '잡아서 뒤로 던짐', awake: '던진 적이 다른 적과 부딪히면 둘 다 피해', cd: 12.5, ai: 'melee', range: 70 },
+      { id: 'throw', name: '집어 던지기', icon: '🤾', desc: '잡아서 뒤로 던짐(떨어진 적 0.5초 기절)', awake: '던진 적이 다른 적과 부딪히면 둘 다 피해', cd: 12.5, ai: 'melee', range: 70 },
       { id: 'scissor', name: '가위 닫기', icon: '✂️', desc: '앞쪽 넓은 범위를 순간적으로 물어 피해', awake: '두 번 연속', cd: 12.5, ai: 'cone', range: 110 },
     ],
     sub: { id: 'playdead', name: '죽은 척', icon: '💤', desc: '2초 동안 멈추고 무적, 적의 표적에서 빠짐', cd: 18, ai: 'defense', range: 0 },
@@ -202,7 +202,7 @@ export const FAMILIES: Family[] = [
       { id: 'silk', name: '줄 쏘기', icon: '🧵', desc: '줄을 쏘아 맞은 적을 끌어당김', awake: '두 번 연속', cd: 9, ai: 'proj', range: 340 },
       { id: 'trail', name: '덫줄', icon: '〰️', desc: '3초 동안 몸 뒤로 끈끈한 줄을 남겨 밟은 적이 느려짐', awake: '줄을 밟은 적이 묶임', cd: 11, ai: 'trail', range: 220 },
     ],
-    sub: { id: 'venomfang', name: '독니', icon: '🦷', desc: '다음 물기에 맞은 적이 1초 마비', cd: 14, ai: 'buff', range: 120 },
+    sub: { id: 'venomfang', name: '독니', icon: '🦷', desc: '다음 물기에 맞은 적이 1초 마비 + 강한 독', cd: 14, ai: 'buff', range: 120 },
     ult: { name: '거미줄 감옥', icon: '🔒', desc: '넓은 둥근 그물을 치고 안의 적을 모두 2초 묶음', awake: '묶인 적에게 독 피해', range: 200 },
     larva: 'derive', likes: 6, hates: 8, strong: '돌격', weak: '사격',
     species: ['orbspider', 'gardenspider', 'jumper', 'wolfspider', 'widow'],

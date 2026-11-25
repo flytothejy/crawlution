@@ -1077,7 +1077,7 @@ function grabTick(sim: Simulation, s: Snake, dt: number) {
     const B = s.grabDmg;
     // 머리 위로 넘겨 뒤로 던진다: 날아가는 동안은 몸에 부딪히지 않는다
     sim.deal(s, o, B * 0.8, 'skill', o.x, o.y);
-    sim.stun(o, 0.4);
+    sim.stun(o, 0.5);
     sim.knock(o, s.angle + PI, 260);
     o.flyT = Math.max(o.flyT, 0.5);
     sim.fx('throw', s, o.x, o.y, { angle: s.angle + PI, len: 260 });

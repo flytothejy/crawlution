@@ -2984,6 +2984,18 @@ export class GameRenderer {
           if (mine) g.circle(z.x, z.y, z.r).stroke({ width: 2, color: 0xe8dcc0, alpha: 0.35 * k });
           break;
         }
+        case 'firenest': {
+          // 불개미 둥지: 흙 둔덕 + 들끓는 붉은 개미 점 + 불씨
+          g.circle(z.x, z.y, z.r).fill({ color: 0x8a4a2a, alpha: 0.16 * k }).stroke({ width: 3, color: 0xff5a2a, alpha: 0.45 * k });
+          g.ellipse(z.x, z.y, z.r * 0.42, z.r * 0.32).fill({ color: 0xb07a4a, alpha: 0.85 * k }).stroke({ width: 2.5, color: 0x5a3a1a, alpha: k });
+          g.ellipse(z.x, z.y - 2, z.r * 0.12, z.r * 0.08).fill({ color: 0x2a1408, alpha: k });
+          for (let i = 0; i < 12; i++) {
+            const a = T * (i % 2 ? 1.6 : -1.3) + i * 0.9, rr = z.r * (0.3 + 0.55 * ((i * 37) % 10) / 10);
+            g.circle(z.x + Math.cos(a) * rr, z.y + Math.sin(a) * rr, 2.6).fill({ color: i % 3 ? 0xc83a1a : 0x2a1408, alpha: k });
+          }
+          if (Math.random() < 0.3 && this.isNear(z.x, z.y)) this.spawnBit('ember', z.x + (Math.random() - 0.5) * z.r, z.y + (Math.random() - 0.5) * z.r, 0xff7a2a, 30, 0.5, 0.6, -Math.PI / 2, 0.6);
+          break;
+        }
         case 'bait': {
           // 들판의 꽃과 똑같이 생긴 꽃(조금 더 진하게): 꽃잎이 살랑인다
           const n = 6, pr = 18;
@@ -3060,8 +3072,8 @@ export class GameRenderer {
     for (const m of minions) {
       if (!this.isNear(m.x, m.y)) continue;
       const c = Math.cos(m.angle), s = Math.sin(m.angle);
-      if (m.kind === 'ant' || m.kind === 'soldier') {
-        this.drawAnt(g, m.x, m.y, m.angle, m.kind === 'soldier', m.bite, Math.min(1, m.life / 0.4));
+      if (m.kind === 'ant' || m.kind === 'soldier' || m.kind === 'worker') {
+        this.drawAnt(g, m.x, m.y, m.angle, m.kind === 'soldier', m.bite, Math.min(1, m.life / 0.4), m.kind === 'worker' ? 0.85 : 1);
         continue;
       }
       const wasp = m.kind === 'wasp';
@@ -3079,8 +3091,8 @@ export class GameRenderer {
   }
 
   /** 개미 한 마리(일개미·군대개미 병정): 머리·가슴·배 세 마디, 다리 여섯, 더듬이, 큰턱. 물 때 큰턱이 쩍 */
-  private drawAnt(g: Graphics, x: number, y: number, ang: number, soldier: boolean, bite: number, alpha: number) {
-    const S = soldier ? 1.45 : 1;
+  private drawAnt(g: Graphics, x: number, y: number, ang: number, soldier: boolean, bite: number, alpha: number, size = 1) {
+    const S = (soldier ? 1.45 : 1) * size;
     const c = Math.cos(ang), sn = Math.sin(ang);
     const P2 = (u: number, v: number): [number, number] => [x + (c * u - sn * v) * S, y + (sn * u + c * v) * S];
     const body = soldier ? 0x8a2a14 : 0x2a1a10, edge = soldier ? 0x3a0e06 : 0x000000;
@@ -3208,6 +3220,16 @@ export class GameRenderer {
           g.circle(p.x, p.y, 9).fill(0xf6ffb0).stroke({ width: 2, color: 0xd8ff5a });
           if (Math.random() < 0.5) this.spawnParticle(p.x, p.y, 0xd8ff5a, 20, 0.4, 0.4);
           break;
+        case 'glob': {
+          // 빛 점액 덩이: 노랗게 빛나며 출렁인다
+          const w = 1 + 0.15 * Math.sin(this.time * 30);
+          g.circle(p.x, p.y, 18).fill({ color: 0xf6e86a, alpha: 0.25 });
+          g.ellipse(p.x, p.y, 11 * w, 9 / w).fill(0xf6e86a).stroke({ width: 2, color: 0x8a6a1a });
+          g.circle(p.x - 3, p.y - 3, 3).fill({ color: 0xffffff, alpha: 0.8 });
+          g.moveTo(p.x - c * 34, p.y - s * 34).lineTo(p.x, p.y).stroke({ width: 7, color: 0xf6e86a, alpha: 0.35 });
+          if (Math.random() < 0.4) this.spawnBit('drop', p.x, p.y, 0xf6e86a, 30, 0.4, 0.5, Math.PI / 2, 0.5);
+          break;
+        }
         case 'spit':
           g.circle(p.x, p.y, 9).fill({ color: 0x9ad0ff, alpha: 0.85 }).stroke({ width: 2, color: INK });
           g.moveTo(p.x - c * 30, p.y - s * 30).lineTo(p.x, p.y).stroke({ width: 6, color: 0x9ad0ff, alpha: 0.35 });

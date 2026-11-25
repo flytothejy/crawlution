@@ -1,6 +1,7 @@
 // 크롤러 도감: 게임 데이터(species·cards·config)를 그대로 읽어 보여 주고,
 // 실제 시뮬레이션 + 게임 렌더러로 물기·기술·보조 기술·필살기 모션을 재생한다.
 import { STATUSES } from '../shared/status';
+import { kitOf } from '../shared/kit';
 import '../client/fonts.css';
 import { CONFIG, evoOf, radiusFor } from '../shared/config';
 import { COMMON_SUBS, FAMILIES, FAMILY, ROLE_LIST, ROLES, SPECIAL_FOODS, SPECIES_BY_ID, formsOf, type Family, type FamilyId, type SubDef } from '../shared/species';
@@ -38,7 +39,7 @@ let fam: Family = FAMILY.mantis;
 let species = fam.species[0];
 let stage: 1 | 2 | 3 = 3;
 let roleFilter: string = 'all';
-type Action = { kind: 'bite' } | { kind: 'main'; form: string } | { kind: 'sub'; sub: SubDef } | { kind: 'ult' };
+type Action = { kind: 'bite' } | { kind: 'main'; form: string } | { kind: 'sub'; sub: SubDef } | { kind: 'ult' } | { kind: 'kit'; slot: V3Slot };
 let action: Action = { kind: 'main', form: fam.forms[0].id };
 let loop = true;
 let tab = 'v3';
@@ -53,9 +54,6 @@ const PROXY: Record<V3FamId, string> = { beetle: 'rhino', centipede: 'widow', ma
 let script: V3Play | null = null;
 let curAct: Action = { kind: 'bite' };
 let curLen = 4.2;
-const charmed = new Map<Snake, number>();
-const confused = new Map<Snake, number>();
-const itchy = new Map<Snake, number>();
 let circleT = 0;
 const MELEE = ['lift', 'grab', 'throw', 'scissor', 'sweep', 'combo', 'push', 'stab'];
 /** 재생 빠르기(느리게 보기): 1 → 0.5 → 0.25 */
@@ -109,6 +107,10 @@ function actionName(a: Action) {
   if (a.kind === 'bite') return { icon: '🦷', name: '물기', desc: '머리로 상대 몸을 물면 피해. 꼬리 끝은 급소' };
   if (a.kind === 'ult') return { icon: fam.ult.icon, name: fam.ult.name, desc: fam.ult.desc };
   if (a.kind === 'sub') return { icon: a.sub.icon, name: a.sub.name, desc: a.sub.desc };
+  if (a.kind === 'kit') {
+    const k = kitOf(v3s.id)![a.slot];
+    return { icon: k.icon, name: k.name, desc: k.desc };
+  }
   const fo = fam.forms.find((f) => f.id === a.form)!;
   const lip = fam.id === 'dragonfly' && stage === 1;
   return lip ? { icon: '👄', name: '아랫입술 발사', desc: '수채(어린 모습)일 때 주 기술: 아랫입술을 쏘아 낚아챔' } : { icon: fo.icon, name: fo.name, desc: fo.desc };
@@ -120,14 +122,8 @@ function sceneParams(): { sp: string; act: Action; level: number } {
     if (action.kind === 'main' && !formsOf(species).some((f) => f.id === (action as { form: string }).form)) action = { kind: 'main', form: formsOf(species)[0].id };
     return { sp: species, act: action, level: LV[stage - 1] };
   }
-  const sk = v3Kit(v3s)[v3slot];
-  const real = sk.play.real;
-  if (!real) {
-    script = sk.play;
-    return { sp: PROXY[v3f.id], act: { kind: 'bite' }, level: 10 };
-  }
-  const act: Action = real.kind === 'main' ? { kind: 'main', form: real.form! } : real.kind === 'ult' ? { kind: 'ult' } : { kind: 'sub', sub: findSub(real.sub!) };
-  return { sp: real.sp, act, level: 10 };
+  // 3판: 실제 게임 규칙(4칸 기술) 그대로 돌린다
+  return { sp: v3s.id, act: { kind: 'kit', slot: v3slot }, level: 9 };
 }
 
 function setupScene() {
@@ -137,12 +133,10 @@ function setupScene() {
   const form = curAct.kind === 'main' ? curAct.form : formsOf(spId)[0].id;
   const level = P.level;
   const spFam = SPECIES_BY_ID.get(spId)!.family;
-  curLen = script ? 4.6 : curAct.kind === 'ult' || spFam === 'bee' ? 6 : 4.2;
-  charmed.clear();
-  confused.clear();
-  itchy.clear();
+  const kitSk = curAct.kind === 'kit' ? kitOf(spId)![curAct.slot] : null;
+  curLen = curAct.kind === 'kit' ? (curAct.slot === 'ult' ? 6 : 4.6) : curAct.kind === 'ult' || spFam === 'bee' ? 6 : 4.2;
   circleT = 0;
-  sim = new Simulation(11, '나', { power: 1, bots: 3, map: 'grass', loadout: { species: spId, form, traits: [] }, startLevel: level });
+  sim = new Simulation(11, '나', { power: 1, bots: 3, map: 'grass', loadout: { species: spId, form, traits: [] }, startLevel: level, v3: mode === 'v3' });
   sim.enemies.next = 1e9;
   me = sim.snakes[0];
   me.abilities = [];
@@ -151,8 +145,8 @@ function setupScene() {
   me.pending = 0;
   me.subPending = false;
   me.lives = 99;
-  me.sub = curAct.kind === 'sub' ? curAct.sub : mode === 'old' && stage >= 2 ? fam.sub : null;
-  const melee = curAct.kind === 'main' && MELEE.includes(curAct.form);
+  if (!me.kit) me.sub = curAct.kind === 'sub' ? curAct.sub : mode === 'old' && stage >= 2 ? fam.sub : null;
+  const melee = (curAct.kind === 'main' && MELEE.includes(curAct.form)) || (!!kitSk && kitNear(kitSk) < 1e9);
   sim.spawnAt(me, mode === 'v3' && !melee ? -130 : -40, 0, 0, 26); // 3판 탭: 돌진·도약 거리가 보이게 조금 멀리서
   dummies = sim.snakes.slice(1, 4);
   dummies.forEach((d, i) => {
@@ -187,8 +181,6 @@ function stepScene() {
     const far = Math.hypot(dx, dy) > 34;
     let a = far ? Math.atan2(dy, dx) : Math.atan2(d.y - hy, d.x - hx) + Math.PI / 2;
     // 3판 연출: 매혹된 적은 나에게 천천히 걸어오고, 혼란된 적은 갈지자로 흔들린다
-    if ((charmed.get(d) ?? 0) > sceneT) a = Math.atan2(me.y - d.y, me.x - d.x);
-    if ((confused.get(d) ?? 0) > sceneT) a += Math.sin(sceneT * 11 + i) * 1.3;
     d.cmd = { ...d.cmd, angle: a, sneak: true, boost: false };
     if (d.hp < d.maxHp * 0.35) d.hp = d.maxHp;
     d.ult = 0;
@@ -204,16 +196,23 @@ function stepScene() {
   if (circleT > sceneT) cmd.angle = me.angle + 0.16;
   if (cast && sceneT < 1.6 && d0 < 150) cmd.sneak = true; // 기술을 쓴 뒤에는 천천히: 물기가 섞여 모션이 안 보이지 않게
   // 근접 기술은 닿는 거리까지 다가간 뒤에 쓴다(헛손질 방지)
-  const near = act.kind === 'main' && MELEE.includes(act.form) ? 115 : act.kind === 'main' && act.form === 'heatball' ? 170 : 1e9;
+  const near = act.kind === 'kit' ? kitNear(kitOf(me.sp.id)![act.slot]) : act.kind === 'main' && MELEE.includes(act.form) ? 115 : act.kind === 'main' && act.form === 'heatball' ? 170 : 1e9;
   if (!cast && sceneT > 0.35 && (d0 < near || sceneT > 1.6)) {
     cast = true;
     if (act.kind === 'main') ((me.skillCd = 0), (me.ult = 0), (cmd.skillSeq = me.lastSkillSeq + 1));
     if (act.kind === 'ult') ((me.ult = CONFIG.ultMax), (cmd.skillSeq = me.lastSkillSeq + 1));
     if (act.kind === 'sub') ((me.subCd = 0), (cmd.subSeq = me.lastSubSeq + 1));
+    if (act.kind === 'kit') {
+      me.skillCd = me.subCd = me.spcCd = 0;
+      if (act.slot === 'atk') cmd.skillSeq = me.lastSkillSeq + 1;
+      if (act.slot === 'def') cmd.subSeq = me.lastSubSeq + 1;
+      if (act.slot === 'spc') cmd.spcSeq = me.lastSpcSeq + 1;
+      if (act.slot === 'ult') ((me.ult = CONFIG.ultMax), (cmd.ultSeq = me.lastUltSeq + 1));
+    }
     if (act.kind === 'main' && act.form === 'ambush') sim.later(0.8, () => sim?.shove(tgt, Math.PI, 70));
     if (script) runScript(script, tgt);
   }
-  if (act.kind !== 'ult' && me.ult >= CONFIG.ultMax) me.ult = 0;
+  if (act.kind !== 'ult' && !(act.kind === 'kit' && act.slot === 'ult') && me.ult >= CONFIG.ultMax) me.ult = 0;
   sim.setCommand(me.id, cmd);
   sim.step();
   sceneT += sim.dt;
@@ -221,8 +220,12 @@ function stepScene() {
   puffT -= sim.dt;
   if (puffT <= 0) {
     puffT = 0.28;
-    for (const [m, kind] of [[confused, 'confuse'], [charmed, 'charm'], [itchy, 'itch']] as const)
-      for (const [d, t] of m) if (t > sceneT && d.alive) sim.events.push({ type: 'skillHit', x: d.x, y: d.y, kind });
+    for (const d of sim.snakes) {
+      if (!d.alive) continue;
+      if (d.confuseT > 0) sim.events.push({ type: 'skillHit', x: d.x, y: d.y, kind: 'confuse' });
+      if (d.charmT > 0) sim.events.push({ type: 'skillHit', x: d.x, y: d.y, kind: 'charm' });
+      if (d.itchT > 0) sim.events.push({ type: 'skillHit', x: d.x, y: d.y, kind: 'itch' });
+    }
   }
   snap = sim.snapshot();
   if (mode === 'v3') for (const e of snap.events) if (e.type === 'fx' && e.snake === me.id) e.sp = v3s.id;
@@ -384,14 +387,19 @@ function react(d: Snake, r: V3React, T: number) {
     case 'push': for (let k = 0; k < 6; k++) S.later(k * 0.03, () => S.shove(d, away, 14)); hitFx('push'); break;
     case 'pull': for (let k = 0; k < 10; k++) S.later(k * 0.05, () => S.shove(d, Math.atan2(me.y - d.y, me.x - d.x), 9)); hitFx('grab'); break;
     case 'cut': hitFx('cut'); break;
-    case 'confuse': confused.set(d, sceneT + T); d.confuseT = T; break;
-    case 'charm': charmed.set(d, sceneT + T); d.charmT = T; break;
-    case 'itch': itchy.set(d, sceneT + T); d.itchT = T; hitFx('poison'); break;
+    case 'confuse': d.confuseT = T; break;
+    case 'charm': d.charmT = T; d.charmBy = me.id; break;
+    case 'itch': d.itchT = T; hitFx('poison'); break;
   }
 }
 
 // ---------- 3판 탭 ----------
 const SLOT_CLS: Record<V3Slot, string> = { atk: 'atk', def: 'def', spc: 'spc', ult: 'ult' };
+/** 3판 기술을 쓰기 전에 다가갈 거리(근접·부채꼴·주변 기술만) */
+function kitNear(k: { ai: string; range: number }) {
+  return k.ai === 'melee' || k.ai === 'cone' || k.ai === 'aoe' ? Math.max(100, Math.min(170, k.range * 0.85)) : k.ai === 'target' || k.ai === 'summon' ? 220 : 1e9;
+}
+
 function playV3(slot: V3Slot) {
   v3slot = slot;
   setupScene();
@@ -684,7 +692,7 @@ function drawTraits() {
 }
 function drawCards() {
   const fams = new Map(FAMILIES.map((f) => [f.id, f]));
-  const one = (a: (typeof ABILITIES)[number]) => `<div class="ab"><div class="hd"><b>${a.icon} ${a.name}</b>${a.family ? `<span class="badge" style="background:${hex(fams.get(a.family)!.color)}">${fams.get(a.family)!.name}</span>` : ''}${a.roles ? a.roles.map((r) => `<span class="badge g">${ROLES[r].icon}</span>`).join('') : ''}${a.auto ? '<span class="badge g">자동</span>' : ''}</div><ol>${[1, 2, 3].map((l) => `<li>${a.desc(l)}</li>`).join('')}</ol></div>`;
+  const one = (a: (typeof ABILITIES)[number]) => `<div class="ab"><div class="hd"><b>${a.icon} ${a.name}</b>${a.family ? `<span class="badge" style="background:${hex(FAMILY[a.family].color)}">${FAMILY[a.family].name}</span>` : ''}${a.roles ? a.roles.map((r) => `<span class="badge g">${ROLES[r].icon}</span>`).join('') : ''}${a.auto ? '<span class="badge g">자동</span>' : ''}</div><ol>${[1, 2, 3].map((l) => `<li>${a.desc(l)}</li>`).join('')}</ol></div>`;
   $('cardsBox').innerHTML = `<p class="note">레벨업마다 3장 중 1장. 능력 칸 4개 × 3레벨. 계열 전용 카드는 2배, 역할에 맞는 카드는 1.5배 잘 나온다.</p><section><h3>공용 카드</h3><div class="abgrid">${ABILITIES.filter((a) => !a.family).map(one).join('')}</div></section><section><h3>계열 전용 카드</h3><div class="abgrid">${ABILITIES.filter((a) => a.family).map(one).join('')}</div></section>`;
 }
 function drawSubs() {

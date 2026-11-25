@@ -384,6 +384,36 @@
       #subBtn .key { position: absolute; top: 3px; right: 10px; z-index: 2; font-size: 10px; }
       body:not(.touch) #subBtn { bottom: calc(22px + env(safe-area-inset-bottom)); right: calc(112px + env(safe-area-inset-right)); }
       body.lefty #subBtn { right: auto; left: calc(112px + env(safe-area-inset-left)); }
+      /* 3판 고르기: 기술 4칸 */
+      .kitlist { display: flex; flex-direction: column; gap: 8px; }
+      .kitrow { display: flex; gap: 10px; align-items: flex-start; padding: 9px 11px; border-radius: 14px; background: #fffdf3; border: 3px solid var(--ink); box-shadow: inset 6px 0 0 var(--k); }
+      .kitrow .ki { font-size: 26px; width: 34px; text-align: center; flex: none; }
+      .kitrow .kt { display: flex; flex-direction: column; gap: 2px; text-align: left; }
+      .kitrow b { font-size: 15px; color: #2a1e10; }
+      .kitrow b em { font-style: normal; font-size: 11px; background: var(--k); color: #fff; border-radius: 6px; padding: 1px 5px; margin-left: 4px; }
+      .kitrow small { font-size: 12px; line-height: 1.35; color: #4a3a2a; }
+      .kitrow .ks { color: var(--k); font-weight: 700; }
+      .kitrow .aw { color: #b0702a; }
+      /* 3판: 특수·필살기 버튼(보조 기술 버튼과 같은 모양) */
+      .kbtn { position: fixed; display: none; flex-direction: column; align-items: center; justify-content: center; width: 64px; height: 64px; border-radius: 50%; color: #fff; touch-action: none; cursor: pointer; overflow: hidden; zoom: var(--bz, 1);
+        background: radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--c, #888) 45%, #fff), var(--c, #888) 70%); border: 3.5px solid var(--ink); box-shadow: 0 5px 0 var(--ink), inset 0 4px 0 rgba(255, 255, 255, 0.45); }
+      body.playing .kbtn { display: flex; }
+      .kbtn::before { content: ''; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(rgba(10, 15, 8, 0.7) var(--cd, 0deg), transparent 0); }
+      .kbtn > * { position: relative; z-index: 1; }
+      .kbtn .ic { font-size: 21px; line-height: 1.05; }
+      .kbtn .sn { font-size: 9.5px; line-height: 1.1; text-align: center; padding: 0 4px; }
+      .kbtn .cd { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--title); font-size: 22px; z-index: 2; }
+      .kbtn.cooling .ic, .kbtn.cooling .sn { opacity: 0.35; }
+      .kbtn.locked { filter: grayscale(0.85); opacity: 0.75; }
+      .kbtn .key { position: absolute; top: 3px; right: 10px; z-index: 2; font-size: 10px; }
+      #spcBtn { right: calc(34px + env(safe-area-inset-right)); bottom: calc(222px + env(safe-area-inset-bottom)); }
+      #ultBtn { right: calc(116px + env(safe-area-inset-right)); bottom: calc(196px + env(safe-area-inset-bottom)); }
+      #ultBtn::after { content: ''; position: absolute; inset: -1px; border-radius: 50%; padding: 4px; background: conic-gradient(#ffd23f var(--ult, 0deg), rgba(0, 0, 0, 0.35) 0); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; z-index: 3; }
+      #ultBtn.ult { animation: ultGlow 0.8s ease-in-out infinite alternate; filter: none; opacity: 1; }
+      body:not(.touch) #spcBtn { bottom: calc(22px + env(safe-area-inset-bottom)); right: calc(190px + env(safe-area-inset-right)); }
+      body:not(.touch) #ultBtn { bottom: calc(22px + env(safe-area-inset-bottom)); right: calc(264px + env(safe-area-inset-right)); }
+      body.lefty #spcBtn { right: auto; left: calc(34px + env(safe-area-inset-left)); }
+      body.lefty #ultBtn { right: auto; left: calc(116px + env(safe-area-inset-left)); }
 
       /* 레벨업 카드(위쪽 가로, 게임은 멈추지 않음) */
       #cards .ctop { display: flex; justify-content: center; align-items: center; gap: 6px; margin-bottom: 4px; }
@@ -584,6 +614,8 @@
     <div id="joy"><div id="knob"></div></div>
     <div id="skillBtn" class="none"></div>
     <div id="subBtn" class="locked"></div>
+    <div id="spcBtn" class="kbtn locked"></div>
+    <div id="ultBtn" class="kbtn locked"></div>
     <div id="sneakBtn" class="rbtn"><span class="ic">🛡️</span><span class="t ol-thin">웅크리기</span></div>
     <div id="boostBtn" class="rbtn"><span class="ic">⚡</span><span class="t ol-thin">질주</span></div>
     <button id="setBtnG" class="hidden" aria-label="설정">⚙️</button>
@@ -592,10 +624,10 @@
     <div id="start" class="overlay">
       <div class="rays"></div>
       <div class="logo">크롤<span>루션</span></div>
-      <div class="tag">곤충 진화 스네이크 · 2판 시험판</div>
+      <div class="tag">곤충 진화 스네이크 · 3판 시험판</div>
       <div class="lineup" id="lineup"></div>
       <div class="box">
-        <div class="goal"><b>10계열 40종</b> 곤충 중 하나로<br />키우고 싸워 <b>1등</b>을 노리세요!</div>
+        <div class="goal"><b>8계열 40종</b> 곤충 중 하나로<br />키우고 싸워 <b>1등</b>을 노리세요!</div>
         <div class="modes">
           <button class="mode adv" id="advBtn"><span class="mi">🗺️</span><span class="mt"><b class="ol">모험</b><small>혼자 지역을 넘으며 보스를 잡고 크롤러를 모아요</small></span><em>준비 중</em></button>
           <button class="mode arena pulse" id="arenaBtn"><span class="mi">⚔️</span><span class="mt"><b class="ol">아레나</b><small>5분 동안 곤충 20마리와 겨뤄요</small></span></button>

@@ -74,10 +74,10 @@ export interface LevelCard {
 }
 
 export const MAIN_UPS = [
-  { id: 'main1', name: '주 기술 강화', icon: '⬆️', desc: '주 기술 피해 +15%' },
-  { id: 'main2', name: '주 기술 숙달', icon: '⏩', desc: '주 기술 재사용 시간 −15%' },
+  { id: 'main1', name: '기술 강화', icon: '⬆️', desc: '기술 피해 +15%' },
+  { id: 'main2', name: '공격 기술 숙달', icon: '⏩', desc: '공격(주) 기술 재사용 시간 −15%' },
 ];
-export const SUB_UP = { id: 'sub', name: '보조 기술 강화', icon: '⬆️', desc: '보조 기술 지속·범위 +30%' };
+export const SUB_UP = { id: 'sub', name: '방어·특수 기술 강화', icon: '⬆️', desc: '방어·특수(보조) 기술 지속·범위 +30%' };
 export const BONUS_CARDS = [
   { id: 'heal', name: '체력 회복', icon: '❤️', desc: '체력 30% 회복' },
   { id: 'ult', name: '필살기 충전', icon: '⚡', desc: '필살기 게이지 +40' },

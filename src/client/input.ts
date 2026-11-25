@@ -1,5 +1,5 @@
 // 조작 → 명령. PC: 마우스 방향 + 왼쪽 클릭/스페이스(질주) + Shift(웅크리기)
-// 주 기술: E 또는 오른쪽 클릭 / 보조 기술: Q / 카드: 1·2·3·4 키 또는 카드 누르기 / 다시 뽑기: R
+// 3판: 공격 E(또는 오른쪽 클릭) · 방어 Q · 특수 W · 필살기 F / 카드: 1·2·3·4 키 또는 카드 누르기 / 다시 뽑기: R
 // 모바일: 화면 아무 곳이나 끌기(가상 조이스틱) + 질주·웅크리기·주 기술·보조 기술 버튼
 import type { Command } from '../shared/types';
 
@@ -19,6 +19,8 @@ export class Input {
   private joy: { id: number; ox: number; oy: number } | null = null;
   private skillSeq = 0;
   private subSeq = 0;
+  private spcSeq = 0;
+  private ultSeq = 0;
   private cardSeq = 0;
   private cardChoice = 0;
   private rerollSeq = 0;
@@ -30,6 +32,14 @@ export class Input {
 
   sub() {
     this.subSeq++;
+  }
+
+  spc() {
+    this.spcSeq++;
+  }
+
+  ult() {
+    this.ultSeq++;
   }
 
   card(choice: number) {
@@ -49,6 +59,8 @@ export class Input {
     private knobEl: HTMLElement,
     skillBtn: HTMLElement,
     subBtn: HTMLElement,
+    spcBtn?: HTMLElement,
+    ultBtn?: HTMLElement,
   ) {
     this.touch = 'ontouchstart' in window || matchMedia('(pointer: coarse)').matches;
     canvas.style.touchAction = 'none';
@@ -103,6 +115,8 @@ export class Input {
       if (e.repeat) return;
       if (e.code === 'KeyE') this.skill();
       if (e.code === 'KeyQ') this.sub();
+      if (e.code === 'KeyW') this.spc();
+      if (e.code === 'KeyF') this.ult();
       if (e.code === 'KeyR') this.reroll();
       if (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4') this.onCardKey(Number(e.key) - 1);
     });
@@ -142,6 +156,16 @@ export class Input {
       e.stopPropagation();
       this.sub();
     });
+    spcBtn?.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.spc();
+    });
+    ultBtn?.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.ult();
+    });
   }
 
   /** headX, headY: 화면에서 내 머리 위치 */
@@ -152,11 +176,11 @@ export class Input {
     }
     this.sneak = this.keySneak || this.btnSneak;
     this.boost = !this.sneak && (this.mouseBoost || this.keyBoost || this.btnBoost);
-    return { angle: this.angle, boost: this.boost, sneak: this.sneak, skillSeq: this.skillSeq, subSeq: this.subSeq, cardSeq: this.cardSeq, cardChoice: this.cardChoice, rerollSeq: this.rerollSeq };
+    return { angle: this.angle, boost: this.boost, sneak: this.sneak, skillSeq: this.skillSeq, subSeq: this.subSeq, spcSeq: this.spcSeq, ultSeq: this.ultSeq, cardSeq: this.cardSeq, cardChoice: this.cardChoice, rerollSeq: this.rerollSeq };
   }
 
   resetSeq() {
-    this.skillSeq = this.subSeq = this.cardSeq = this.rerollSeq = 0;
+    this.skillSeq = this.subSeq = this.spcSeq = this.ultSeq = this.cardSeq = this.rerollSeq = 0;
   }
 
   resetHolds() {
