@@ -23,9 +23,13 @@ export interface Pose {
   armR: number; // 오른쪽 낫
   armScale: number; // 낫 크게 보이기(0~1)
   wingBig: number; // 날개를 옆으로 활짝·크게 펼침(0~1, 위협)
+  coil: number; // 몸을 똬리로 말기(0~1)
+  wrap: number; // 몸 앞쪽으로 적을 휘감기(0~1)
+  legWhip: number; // 다리를 길게 늘여 휘두름(0~1)
+  legWave: number; // 다리 물결 위상
 }
 
-export const REST: Pose = { z: 0, headZ: 0, stretch: 1, width: 1, lean: 0, headScale: 1, jitter: 0, wingRate: 0, wingSpread: 0, legSpread: 0, ghost: 0, tilt: 0, jaw: 0, wingFold: 0, roll: 0, horn: 0, armL: 0, armR: 0, armScale: 0, wingBig: 0 };
+export const REST: Pose = { z: 0, headZ: 0, stretch: 1, width: 1, lean: 0, headScale: 1, jitter: 0, wingRate: 0, wingSpread: 0, legSpread: 0, ghost: 0, tilt: 0, jaw: 0, wingFold: 0, roll: 0, horn: 0, armL: 0, armR: 0, armScale: 0, wingBig: 0, coil: 0, wrap: 0, legWhip: 0, legWave: 0 };
 
 type Prog = (k: number, t: number, d: number) => Partial<Pose>;
 
@@ -111,25 +115,77 @@ export const PROGS: Record<string, Prog> = {
   camo: (k) => ({ stretch: 1 - 0.06 * Math.min(1, k * 8), legSpread: 0 }),
   playdead: (k) => ({ stretch: 1 - 0.1 * Math.min(1, k * 6), width: 1 + 0.08 * Math.min(1, k * 6), tilt: 0 }),
 
+  // ---- 벌 ----
+  // 떠서 버티기(연사·저격 동안): 몸이 살짝 떠 있고 날개가 아주 빠르다
+  hover: (k) => ({ z: 18 * Math.min(1, k * 8) * Math.min(1, (1 - k) * 8), wingRate: 4, wingSpread: 1 }),
+  // 한 발마다 반동: 머리가 뒤로 튕기고 몸이 움찔
+  shot: (k) => ({ lean: -9 * bump(k), stretch: 1 - 0.06 * bump(k), headScale: 1 + 0.06 * bump(k) }),
+  // 저격 조준: 꼼짝 않고 머리를 앞으로 내밀어 겨눔
+  'windup:snipe': (k) => ({ lean: 6 * outQ(k), stretch: 1 - 0.1 * k, wingRate: 5, jitter: 0.6 * k, headScale: 1 + 0.06 * k }),
+  bigshot: (k) => ({ lean: -24 * bump(Math.min(1, k * 1.5)), stretch: 1 - 0.15 * bump(k), headScale: 1 + 0.12 * bump(k), jitter: 2 * (1 - k) }),
+  // 꿀 나누기: 떠올라 몸을 흔들며 꿀을 떨어뜨림
+  drip: (k) => ({ z: 26 * bump(k), wingRate: 3, wingSpread: 1, width: 1 + 0.08 * Math.sin(k * 30), tilt: 0.15 * Math.sin(k * 18) }),
+  // 열 공: 날개 근육을 떨어 열을 낸다(부르르)
+  heat: (k) => ({ jitter: 2.5 * bump(k), wingRate: 5, width: 1 + 0.1 * bump(k), headScale: 1 + 0.06 * bump(k) }),
+  // 경보: 머리를 치켜들고 날개를 세차게
+  alarm: (k) => ({ headZ: 20 * bump(k), wingRate: 5, wingSpread: 1, wingBig: 0.35 * bump(k), jitter: 1.5 * bump(k), headScale: 1 + 0.12 * bump(k) }),
+  // 붕붕 진동: 온몸이 빠르게 떨고 두께가 맥박치듯
+  buzz: (k, t) => {
+    const on = Math.min(1, t / 0.08) * Math.min(1, (1 - k) / 0.08);
+    return { jitter: 3.5 * on, width: 1 + 0.15 * on * Math.abs(Math.sin(t * 40)), wingRate: 6, wingSpread: on, headScale: 1 + 0.05 * on };
+  },
+  // 진흙 던지기: 머리를 뒤로 젖혔다가 앞으로 휙
+  lob: (k) => ({ headZ: 26 * bump(Math.min(1, k * 1.4)), lean: k < 0.45 ? -12 * outQ(k / 0.45) : -12 + 30 * outQ((k - 0.45) / 0.55) - 18 * clamp((k - 0.8) / 0.2), headScale: 1 + 0.1 * bump(k) }),
+
+  // ---- 지네 ----
+  // 독턱 찌르기 예고: 앞쪽 몸을 S자로 움츠리고 독턱을 활짝
+  'windup:fang': (k) => ({ stretch: 1 - 0.3 * outQ(k), lean: -14 * outQ(k), jaw: 1.1 * outB(k), horn: outB(k), headZ: 10 * k, jitter: 1.5 * k, legSpread: k }),
+  // 찌르기: 머리가 화살처럼 튀어나가며 독턱을 꽉
+  fang: (k) => ({ stretch: 1 + 0.35 * bump(Math.min(1, k * 1.4)), lean: 30 * bump(Math.min(1, k * 1.5)), jaw: k < 0.3 ? 1.1 - 1.7 * outQ(k / 0.3) : -0.6 * (1 - k), horn: 1 - inQ(clamp((k - 0.4) / 0.6)), ghost: 0.8 * (1 - k) }),
+  // 몸 말기: 똬리를 틀고 다리를 바깥으로 가시처럼 세운다
+  curl: (k, t, d) => {
+    const on = outQ(Math.min(1, t / 0.25)) * Math.min(1, (d - t) / 0.2);
+    return { coil: on, legSpread: on, width: 1 + 0.1 * on, headScale: 1 + 0.05 * on };
+  },
+  // 휘감기: 몸 앞쪽으로 적을 감아 조인다(감는 자리 = 렌더러가 기억)
+  wrap: (k, t, d) => ({ wrap: outQ(Math.min(1, t / 0.3)) * Math.min(1, (d - t) / 0.2), jitter: 0.8, legSpread: 1 }),
+  // 긴 다리 채찍: 다리가 길게 늘어나 물결치듯 앞쪽으로 후려침
+  whip: (k) => ({ legWhip: bump(Math.min(1, k * 1.1)), legWave: k * 14, lean: 10 * bump(k), headScale: 1 + 0.05 * bump(k) }),
+  // 치켜들어 덮치기 예고: 앞쪽 몸을 높이 치켜든다(코브라처럼)
+  'windup:rear': (k) => ({ headZ: 78 * outB(k), headScale: 1 + 0.15 * k, horn: outQ(k), jaw: 1 * k, legSpread: 1, stretch: 1 - 0.12 * k, jitter: k }),
+  // 덮치기: 높이 든 머리를 앞으로 내리꽂는다
+  pounce: (k) => ({ headZ: 78 * (1 - outQ(Math.min(1, k * 1.6))), lean: 24 * bump(k), jaw: k < 0.4 ? 1 - 1.5 * outQ(k / 0.4) : -0.5, horn: 1 - k, stretch: 1 + 0.25 * bump(k), ghost: 0.8 }),
+  // 노린내: 몸을 말고 마디마다 액체를 뿜는다
+  spray: (k, t, d) => {
+    const on = outQ(Math.min(1, t / 0.2)) * Math.min(1, (d - t) / 0.2);
+    return { coil: 0.85 * on, width: 1 + 0.12 * on * (0.5 + 0.5 * Math.sin(t * 30)), jitter: 1 * on };
+  },
+  // 빛 점액: 머리를 들고 몸을 움츠렸다가 앞으로 뱉는다
+  spit: (k) => ({ headZ: 16 * bump(k), lean: k < 0.4 ? -12 * outQ(k / 0.4) : 18 * bump((k - 0.4) / 0.6), stretch: 1 - 0.15 * bump(k), jaw: 0.8 * bump(k), headScale: 1 + 0.1 * bump(k) }),
+
   // ---- 잠자리 ----
   // 급강하 예고: 제자리에서 날개를 세차게 치며 떠오른다
-  'windup:dive': (k) => ({ z: 34 * outQ(k), wingRate: 3, wingSpread: 1, stretch: 1 - 0.1 * k, headScale: 1 + 0.06 * k }),
+  // 급강하 예고: 큰 날개를 활짝 펴고 한 번에 하늘 높이 솟구친다
+  'windup:dive': (k) => ({ z: 150 * outB(k), wingRate: 3.5, wingSpread: 1, wingBig: 0.7 * outQ(k), stretch: 1 - 0.12 * k, headScale: 1 + 0.08 * k, ghost: 0.6 }),
   // 급강하: 조금 더 솟았다가 앞으로 내리꽂힘
   dive: (k) => {
-    const z = k < 0.35 ? 34 + 30 * outQ(k / 0.35) : 64 * (1 - inQ((k - 0.35) / 0.65));
-    // 솟는 동안은 날개를 활짝, 내리꽂을 때는 날개를 뒤로 바짝 접는다(매가 내리꽂듯)
-    const fold = k < 0.3 ? 0 : clamp((k - 0.3) / 0.15);
-    return { z, stretch: 1 + 0.3 * clamp(k * 2), ghost: 1, wingRate: fold > 0.5 ? 0.01 : 2.5, wingSpread: 1 - fold, wingFold: fold, lean: 8, headScale: 1 + z / 400 };
+    // 꼭대기에서 잠깐 멈칫(날개 활짝) → 날개를 바짝 접고 땅으로 내리꽂힘
+    const z = k < 0.2 ? 150 + 12 * bump(k / 0.2) : 150 * (1 - inQ((k - 0.2) / 0.8));
+    const fold = k < 0.18 ? 0 : clamp((k - 0.18) / 0.12);
+    return { z, stretch: 1 + 0.35 * clamp(k * 2), ghost: 1, wingRate: fold > 0.5 ? 0.01 : 3, wingSpread: 1 - fold, wingBig: 0.7 * (1 - fold), wingFold: fold, lean: 8, headScale: 1 + z / 500 };
   },
   // 낚아채기 예고: 다리를 앞으로 바구니처럼 모으고 몸을 낮춤
-  'windup:snatch': (k) => ({ z: 8 * k, stretch: 1 - 0.15 * k, legSpread: k, wingRate: 2, headScale: 1 - 0.05 * k }),
+  // 낚아채기 예고: 제자리에 떠서 몸을 뒤로 젖히고 다리를 앞으로 쭉 내민다(줄을 겨눔)
+  'windup:snatch': (k) => ({ z: 16 * outQ(k), lean: -8 * k, stretch: 1 - 0.12 * k, legSpread: 1, wingRate: 2.5, wingSpread: 1, headScale: 1 + 0.08 * k, jitter: k }),
+  // 끌어오기: 다리를 오므리며 몸을 확 뒤로 당긴다
+  'snatch:pull': (k) => ({ z: 16 * (1 - k), lean: -22 * bump(Math.min(1, k * 1.6)), legSpread: 1 - k, wingRate: 3.5, wingSpread: 1, stretch: 1 - 0.2 * bump(k), headScale: 1 + 0.12 * bump(k) }),
   // 낚아채기: 낮게 미끄러지듯 스쳐 지나감(끝에서 다리를 오므림)
   snatch: (k) => ({ z: 14 * (1 - k * 0.6), stretch: 1 + 0.4 * bump(k * 1.2), ghost: 1, wingRate: 2.5, wingSpread: 1, legSpread: 1, lean: 10 }),
   // 낚아챈 순간: 다리를 오므리며 몸을 뒤로 당긴다(끌어오는 반동)
   'snatch:grab': (k) => ({ lean: -14 * bump(k), legSpread: 1 - k, wingRate: 3, wingSpread: 1, stretch: 1 - 0.15 * bump(k), headScale: 1 + 0.1 * bump(k) }),
   // 짧은 비행(회피): 휙 떠서 옆으로 비껴 날아감
   // 짧은 비행(회피): 휙 떠올라 옆으로 급선회. 몸이 꺾이는 쪽으로 기운다(tilt 부호는 렌더러가 방향에 맞춤)
-  flit: (k) => ({ z: 44 * bump(k), stretch: 1 + 0.25 * bump(k), ghost: 1, wingRate: 3.5, wingSpread: 1, tilt: 0.9 * bump(Math.min(1, k * 1.3)), headScale: 1 + 0.1 * bump(k) }),
+  flit: (k) => ({ z: 60 * bump(k), stretch: 1 + 0.35 * bump(k), ghost: 1, wingRate: 4, wingSpread: 1, wingBig: 0.4 * bump(k), tilt: 1.3 * bump(Math.min(1, k * 1.6)), headScale: 1 + 0.12 * bump(k) }),
   // 맴돌기: 날개를 활짝 펴고 8자로 돈다. 돌 때마다 안쪽으로 기운다
   circle: (k) => ({ z: 18, wingSpread: 1, wingRate: 3, ghost: 0.8, stretch: 1.1, tilt: (k < 0.5 ? 1 : -1) * 0.5 }),
   // 겹눈: 머리가 부풀며 눈이 빛난다
@@ -179,9 +235,11 @@ export class Motion {
     const keep: Active[] = [];
     for (const a of list) {
       const t = now - a.t0;
-      if (t > a.dur) continue;
+      // 예고 동작은 본 동작이 이어받을 때까지 끝 자세로 잠깐 버틴다(사이에 한 프레임 빠지지 않게)
+      const hold = a.name.startsWith('windup:') ? 0.12 : 0;
+      if (t > a.dur + hold) continue;
       keep.push(a);
-      const q = PROGS[a.name](t / a.dur, t, a.dur);
+      const q = PROGS[a.name](Math.min(1, t / a.dur), Math.min(t, a.dur), a.dur);
       p.z += q.z ?? 0;
       p.headZ += q.headZ ?? 0;
       p.stretch *= q.stretch ?? 1;
@@ -202,6 +260,10 @@ export class Motion {
       p.armR += q.armR ?? 0;
       p.armScale = Math.max(p.armScale, q.armScale ?? 0);
       p.wingBig = Math.max(p.wingBig, q.wingBig ?? 0);
+      p.coil = Math.max(p.coil, q.coil ?? 0);
+      p.wrap = Math.max(p.wrap, q.wrap ?? 0);
+      p.legWhip = Math.max(p.legWhip, q.legWhip ?? 0);
+      p.legWave += q.legWave ?? 0;
     }
     if (keep.length) this.act.set(id, keep);
     else this.act.delete(id);

@@ -129,6 +129,9 @@ export interface Snake {
   grabKind: string;
   grabbedBy: number;
   kvx: number;
+  slideT: number; // 몸 전체가 옆으로 미끄러짐(구르기)
+  slideVx: number;
+  slideVy: number;
   kvy: number;
   // 다음 공격 강화
   nextMul: number;
@@ -449,7 +452,7 @@ export class Simulation {
       stunT: 0, slowT: 0, slowMul: 1, rootT: 0, silenceT: 0, blindT: 0, markT: 0, fearT: 0, hiddenT: 0, ghostT: 0, flyT: 0,
       dashT: 0, dashMul: 1, dashKind: '', dashHits: new Set(), dashDmg: 0, dashAngle: NaN,
       reduceT: 0, reduceMul: 1, backT: 0, bitterT: 0, curlT: 0, deadT: 0, escapeT: 0,
-      grabT: 0, grabTarget: -1, grabKind: '', grabbedBy: -1, kvx: 0, kvy: 0,
+      grabT: 0, grabTarget: -1, grabKind: '', grabbedBy: -1, kvx: 0, kvy: 0, slideT: 0, slideVx: 0, slideVy: 0,
       nextMul: 1, nextBite: 1, nextBiteT: 0, fangT: 0, critNext: 0,
       chanT: 0, chanKind: '', chanAcc: 0, chanN: 0, chanHits: new Map(), chanDmg: 0, chanAcc2: 0, grabDmg: 0, grabAcc: 0, ultMap: null, trailHits: new Set(), pushedBy: -1, pushedT: 0, autoCd: 0, whirlT: 0, skyT: 0, ambushT: 0, trailT: 0, trailAwake: false, lanternT: 0, compoundT: 0,
       decoyT: 0, decoyX: 0, decoyY: 0,
@@ -580,6 +583,7 @@ export class Simulation {
     s.dashAngle = NaN;
     this.releaseGrab(s);
     s.kvx = s.kvy = 0;
+    s.slideT = 0;
     s.skillCd = s.subCd = 0;
     s.poisonT = 0;
     s.biteCd = 0;
@@ -1741,6 +1745,16 @@ export class Simulation {
       s.x += mx;
       s.y += my;
       s.path.push(s.x, s.y);
+    }
+    if (s.slideT > 0) {
+      // 구르기: 머리부터 꼬리까지 몸 전체가 옆으로 함께 비켜난다
+      const k = Math.min(dt, s.slideT);
+      const ox = s.slideVx * k, oy = s.slideVy * k;
+      const p = s.path;
+      for (let i = 0; i < p.length; i += 2) ((p[i] += ox), (p[i + 1] += oy));
+      s.x += ox;
+      s.y += oy;
+      s.slideT -= dt;
     }
     this.rebuildSegs(s);
   }

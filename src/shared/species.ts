@@ -158,7 +158,7 @@ export const FAMILIES: Family[] = [
     color: 0x4ab8f0, color2: 0xb8f0ff, stages: ['수채', '성충', '각성'], skill: '공중 강하',
     forms: [
       { id: 'dive', name: '급강하', icon: '🪂', desc: '빠르게 날아가 내려앉는 자리에 피해(날 때 몸 충돌 없음)', awake: '내려앉은 뒤 한 번 더', cd: 8, ai: 'dash', range: 300 },
-      { id: 'snatch', name: '낚아채기', icon: '🪝', desc: '지나가며 길 위의 적을 낚아 피해, 작은 먹이는 바로 먹음', awake: '낚은 적을 끌고 감', cd: 8, ai: 'dash', range: 260 },
+      { id: 'snatch', name: '낚아채기', icon: '🪝', desc: '앞으로 줄을 그어 줄 위의 적과 먹이를 내 앞으로 끌어옴', awake: '끌려온 적 기절이 길어짐', cd: 8, ai: 'dash', range: 260 },
       { id: 'circle', name: '맴돌기', icon: '🌀', desc: '주변을 빠르게 원을 그리며 연속 타격', awake: '원 안의 적이 느려짐', cd: 10, ai: 'aoe', range: 110 },
     ],
     sub: { id: 'compound', name: '겹눈', icon: '👁️', desc: '3초 동안 주변 적의 위치와 기술 예고를 보여 주고 피해 +15%', cd: 15, ai: 'buff', range: 400 },

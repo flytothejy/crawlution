@@ -69,6 +69,18 @@ const opts = (species: string, form: string, extra: Partial<GameOpts> = {}): Gam
   check('좌표·체력이 NaN이 되지 않음', !nan);
   check('레벨업·진화가 일어남', levelUps > 100 && evolves > 20, `레벨업 ${levelUps}, 진화 ${evolves}, 최고 Lv${maxLv}`);
   check('필살기를 씀', ults > 10, `${ults}번`);
+  // 한 판에서 드물게 나오는 계열(개미지옥 등)은 다른 씨앗의 판을 더 돌려 확인한다
+  for (const seed of [777, 2024]) {
+    if (FAMILIES.every((f) => (casts.get(f.id) ?? 0) > 0)) break;
+    const s2 = new Simulation(seed, '나', opts('kingmantis', 'sweep', { bots: 20 }));
+    const p2 = s2.snakes[0];
+    p2.lives = 9999;
+    for (let t = 0; t < ticks; t++) {
+      s2.setCommand(0, botThink(s2, p2, s2.dt));
+      s2.step();
+      for (const e of s2.snapshot().events) if (e.type === 'skill' && e.slot === 'main') casts.set(e.fam, (casts.get(e.fam) ?? 0) + 1);
+    }
+  }
   check('10계열 모두 주 기술을 씀', FAMILIES.every((f) => (casts.get(f.id) ?? 0) > 0), [...casts].map(([k, v]) => `${k}:${v}`).join(' '));
   check('쓰러짐·압착이 일어남', deaths > 20, `쓰러짐 ${deaths}, 압착 ${crushes}`);
   check('틱당 3ms 이하', ms / ticks < 3, `${(ms / ticks).toFixed(2)}ms`);

@@ -286,7 +286,14 @@ function runScript(p: V3Play, tgt: Snake) {
   const S = sim!;
   const T = p.reactT ?? 1;
   const dist = p.dist ?? 120;
-  // 내 몸 움직임
+  // 내 몸 움직임(예고 동작이 있으면 그 뒤에)
+  if (p.moveDelay) S.later(p.moveDelay, () => moveScript(p, dist));
+  else moveScript(p, dist);
+  runScriptRest(p, tgt, T);
+}
+
+function moveScript(p: V3Play, dist: number) {
+  const S = sim!;
   if (p.move === 'dash') startDash(S, me, '', dist, 3.2);
   if (p.move === 'hop') startDash(S, me, '', dist, 3, true);
   if (p.move === 'back') {
@@ -318,6 +325,10 @@ function runScript(p: V3Play, tgt: Snake) {
     circleT = sceneT + 1.1;
     startDash(S, me, '', 300, 2.2);
   }
+}
+
+function runScriptRest(p: V3Play, tgt: Snake, T: number) {
+  const S = sim!;
   // 내 몸 상태
   const st = p.selfT ?? 1;
   for (const k of p.self ?? []) {
@@ -337,7 +348,7 @@ function runScript(p: V3Play, tgt: Snake) {
       if (f.at === 'front') ((x = x0 + Math.cos(a) * (f.d ?? 100)), (y = y0 + Math.sin(a) * (f.d ?? 100))); // 쓴 자리 기준(도약 착지점 등)
       if (f.at === 'tgt') ((x = tgt.x), (y = tgt.y));
       if (f.at === undefined || f.at === 'head') ((x += Math.cos(a) * 14), (y += Math.sin(a) * 14));
-      S.fx(f.kind as FxKind, me, x, y, { r: f.r, len: f.len, half: f.half, angle: a, x1: me.x, y1: me.y });
+      S.fx(f.kind as FxKind, f.on === 'tgt' ? tgt : me, x, y, { r: f.r, len: f.len, half: f.half, angle: a, x1: me.x, y1: me.y, wk: f.wk, dur: f.dur });
     });
   }
   // 맞은 쪽 반응
