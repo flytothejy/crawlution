@@ -163,6 +163,57 @@ export const PROGS: Record<string, Prog> = {
   // 빛 점액: 머리를 들고 몸을 움츠렸다가 앞으로 뱉는다
   spit: (k) => ({ headZ: 16 * bump(k), lean: k < 0.4 ? -12 * outQ(k / 0.4) : 18 * bump((k - 0.4) / 0.6), stretch: 1 - 0.15 * bump(k), jaw: 0.8 * bump(k), headScale: 1 + 0.1 * bump(k) }),
 
+  // 백족 소용돌이: 백 개의 다리를 길게 펴고 물결치듯 내달린다
+  stampede: (k, t) => ({ legWhip: 0.75 * Math.min(1, t / 0.15) * Math.min(1, (1 - k) / 0.1), legWave: t * 40, width: 1.08, ghost: 0.5 }),
+
+  // ---- 개미 ----
+  // 개미산: 몸을 움츠려 배를 앞으로 말아 겨눴다가(예고) 칙 쏘며 반동
+  'windup:acid': (k) => ({ stretch: 1 - 0.22 * outQ(k), lean: -8 * k, width: 1 + 0.1 * k, jitter: 1.2 * k, headZ: 8 * k }),
+  acidshot: (k) => ({ lean: -14 * bump(k), stretch: 1 - 0.1 * bump(k), headScale: 1 + 0.08 * bump(k), jitter: 1.5 * (1 - k) }),
+  // 굴 파기: 머리부터 땅속으로 파고든다(작아지고 납작) → 튀어나옴
+  dig: (k, t, d) => {
+    const inn = outQ(Math.min(1, t / 0.2));
+    return { headScale: 1 - 0.45 * inn, width: 1 - 0.45 * inn, stretch: 1 - 0.35 * inn, headZ: -10 * inn, jitter: 1.5 * inn };
+  },
+  emerge: (k) => ({ headZ: 34 * bump(k), headScale: 1 + 0.25 * bump(k), stretch: 1 + 0.2 * bump(k), width: 1 + 0.1 * bump(k) }),
+  // 개미 부르기: 머리를 들고 더듬이로 신호(부르르)
+  call: (k) => ({ headZ: 18 * bump(k), headScale: 1 + 0.12 * bump(k), jitter: 1.2 * bump(k), legSpread: bump(k) }),
+  // 잎 방패: 큰 잎을 머리 위로 들고 버틴다(잎 그림은 렌더러)
+  leafshield: (k, t, d) => {
+    const on = outB(Math.min(1, t / 0.2)) * Math.min(1, (d - t) / 0.15);
+    return { headZ: 8 * on, lean: 4 * on, legSpread: on, width: 1 + 0.08 * on };
+  },
+  // 불개미 둥지: 머리를 박고 흙을 파 뒤로 튀긴다
+  digpile: (k) => ({ headZ: -6 * bump(k), lean: -5 * bump(k), jitter: 2 * bump(k), legSpread: 1, headScale: 1 - 0.08 * bump(k) }),
+
+  // ---- 거미 ----
+  silkshot: (k) => ({ lean: -10 * bump(k), legSpread: 1, headScale: 1 + 0.06 * bump(k) }),
+  // 실 감아 당기기: 다리로 실을 잡아 몸을 뒤로 당긴다
+  reel: (k) => ({ lean: -20 * bump(k), legSpread: 1, stretch: 1 - 0.15 * bump(k), jitter: 1.2 * bump(k) }),
+  // 그물 짓기: 다리를 벌리고 몸을 좌우로 돌리며 실을 뽑는다
+  weave: (k) => ({ legSpread: 1, tilt: 0.3 * Math.sin(k * 18), headZ: 6 * bump(k), width: 1 + 0.06 * Math.sin(k * 30) }),
+  spin: (k) => ({ legSpread: bump(k), width: 1 + 0.08 * Math.sin(k * 40) }),
+  // 줄 타고 빠지기: 앞에 실을 붙이고 뒤로 튕겨 미끄러진다
+  recoil: (k) => ({ lean: -22 * (1 - outQ(k)), stretch: 1 - 0.2 * bump(k), legSpread: 1, ghost: 0.6 * (1 - k) }),
+  // 새끼 흩기: 몸을 부르르 털어 등의 새끼를 흩뿌린다
+  shake: (k) => ({ jitter: 3 * bump(k), width: 1 + 0.15 * bump(k), headScale: 1 + 0.05 * bump(k) }),
+  // 독니: 송곳니를 크게 드러낸 채 다음 물기를 기다린다
+  venom: (k, t, d) => {
+    const on = Math.min(1, t / 0.2) * Math.min(1, (d - t) / 0.2);
+    return { horn: 0.7 * on, headScale: 1 + 0.06 * on, jaw: 0.4 * on };
+  },
+
+  // ---- 나비 ----
+  // 날개를 한 번 꽉 접었다가 크게 확 펼친다
+  flapbig: (k) => ({ wingFold: k < 0.3 ? outQ(k / 0.3) : 0, wingBig: k < 0.3 ? 0 : bump((k - 0.3) / 0.7), z: 16 * bump(k), headScale: 1 + 0.05 * bump(k) }),
+  flutter: (k, t) => ({ z: 26 * Math.min(1, t / 0.15) * Math.min(1, (1 - k) / 0.1), tilt: 0.4 * Math.sin(t * 10), wingRate: 1.6, wingBig: 0.2, ghost: 0.7 }),
+  charmpose: (k) => ({ headZ: 10 * bump(k), wingRate: 0.5, wingBig: 0.3 * bump(k), headScale: 1 + 0.06 * bump(k) }),
+  bitterglow: (k, t, d) => ({ wingBig: 0.25 * Math.min(1, t / 0.2) * Math.min(1, (d - t) / 0.2), jitter: 0.4 }),
+  // 눈알 무늬: 날개를 순식간에 활짝·크게(눈알을 보여 줌)
+  eyeflash: (k) => ({ wingBig: outB(Math.min(1, k / 0.2)) * Math.min(1, (1 - k) / 0.25), wingRate: 0.01, headZ: 10 * bump(k), jitter: 1.5 * bump(Math.min(1, k * 3)) }),
+  // 푸른 섬광: 날개를 홱 펴서 빛을 반사
+  flashwing: (k) => ({ wingBig: 0.8 * bump(Math.min(1, k * 1.5)), wingRate: 0.01, z: 10 * bump(k) }),
+
   // ---- 잠자리 ----
   // 급강하 예고: 제자리에서 날개를 세차게 치며 떠오른다
   // 급강하 예고: 큰 날개를 활짝 펴고 한 번에 하늘 높이 솟구친다

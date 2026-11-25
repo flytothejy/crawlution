@@ -255,11 +255,13 @@ export function castMain(sim: Simulation, s: Snake) {
         const r = 90 * R * (golden ? 1.5 : 1);
         sim.addZone({ x: zx, y: zy, r, kind: 'web', life: 12, owner: s.id, dps: B * (aw ? 1.0 : 0.5), awake: aw });
         sim.fx('web', s, zx, zy, { r });
+        sim.fx('lifted', s, s.x, s.y, { angle: s.angle, wk: 'weave', dur: 0.6 });
       } else if (form === 'silk') {
         silk(sim, s, B);
         if (aw) sim.later(0.25, () => s.alive && silk(sim, s, B));
       } else {
         s.trailT = 3;
+        sim.fx('lifted', s, s.x, s.y, { angle: s.angle, wk: 'spin', dur: 0.5 });
         s.trailAwake = aw;
         s.chanAcc = 0;
         s.trailHits = new Set();
@@ -398,12 +400,16 @@ function sting(sim: Simulation, s: Snake, a: number, dmg: number, range: number,
 function silk(sim: Simulation, s: Snake, B: number) {
   const R = sim.rangeMul(s);
   sim.fx('silk', s, s.x, s.y, { angle: s.angle });
+  sim.fx('lifted', s, s.x, s.y, { angle: s.angle, wk: 'silkshot', dur: 0.2 });
   sim.addProj({
     x: s.x, y: s.y, vx: Math.cos(s.angle) * 800, vy: Math.sin(s.angle) * 800, life: (340 * R) / 800, owner: s.id, kind: 'silk',
     onHit: (o, x, y) => {
       sim.deal(s, o, B * 0.75, 'skill', x, y);
       sim.pullTo(o, s.x, s.y, 160);
       sim.events.push({ type: 'skillHit', x, y, kind: 'grab' });
+      // 실을 감아 당긴다: 내 몸은 뒤로 버티고, 맞은 적은 살짝 들려 끌려온다
+      sim.fx('lifted', s, s.x, s.y, { angle: s.angle, wk: 'reel', dur: 0.4 });
+      sim.fx('lifted', o, o.x, o.y, { angle: s.angle + PI, wk: 'yank', dur: 0.35, x1: s.x, y1: s.y });
       if (sim.inst(s, 'pounce')) pounce(sim, s, o);
     },
   });
@@ -422,7 +428,7 @@ function backJet(sim: Simulation, s: Snake, dmg: number, range: number, slowT: n
 
 function heatBall(sim: Simulation, s: Snake, t: Snake, dps: number, dur: number, root: boolean, ult: Map<number, number> | null = null) {
   sim.addZone({ x: t.x, y: t.y, r: 60, kind: 'heat', life: dur, owner: s.id, dps, target: t.id, awake: root, ult });
-  sim.fx('heat', s, t.x, t.y, { r: 60 });
+  sim.fx('heat', s, t.x, t.y, { r: 60, x1: s.x, y1: s.y });
 }
 
 function forestMul(sim: Simulation, s: Snake) {
@@ -474,7 +480,7 @@ export function castSub(sim: Simulation, s: Snake) {
       return;
     case 'venomfang':
       s.fangT = 5 * D;
-      sim.fx('fang', s, s.x, s.y);
+      sim.fx('fang', s, s.x, s.y, { dur: s.fangT });
       return;
     case 'backstep':
       s.dashAngle = s.angle + PI;
