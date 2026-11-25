@@ -5,7 +5,39 @@ export type SoundName =
   | 'eat' | 'eatBig' | 'gem' | 'like' | 'yuck'
   | 'hit' | 'hitBig' | 'crit' | 'hurt' | 'hurtBig' | 'block'
   | 'skill' | 'molt' | 'kill' | 'crush' | 'ring'
-  | 'warn' | 'lifeLost' | 'respawn' | 'captured' | 'win' | 'lose' | 'click' | 'ready';
+  | 'warn' | 'lifeLost' | 'respawn' | 'captured' | 'win' | 'lose' | 'click' | 'ready'
+  // 기술 모션 소리(예고 → 발동 → 타격)
+  | 'windup' | 'windupWing' | 'dash' | 'wingDash' | 'heave' | 'slam' | 'land' | 'brace' | 'flit' | 'impact';
+
+/** 기술 이펙트 → 모션 소리. 없으면 null(일반 기술 소리) */
+export function fxSound(kind: string, wk?: string): SoundName | null {
+  switch (kind) {
+    case 'windup':
+      return wk === 'dive' || wk === 'snatch' ? 'windupWing' : 'windup';
+    case 'charge':
+      return 'dash';
+    case 'dive':
+      return wk === 'sky' ? 'wingDash' : 'wingDash';
+    case 'snatch':
+      return 'wingDash';
+    case 'lift':
+      return 'heave';
+    case 'thud':
+      return 'slam';
+    case 'land':
+      return 'land';
+    case 'push':
+      return 'brace';
+    case 'hop':
+      return wk === 'jump' ? 'wingDash' : 'flit';
+    case 'lifted':
+      return 'impact';
+    default:
+      return null;
+  }
+}
+/** 예고가 있는 기술: 시전 순간의 일반 기술 소리를 내지 않는다 */
+export const MOTION_FX = new Set(['windup', 'push', 'hop']);
 
 const KEY_SND = 'crawlution.sound';
 const KEY_VIB = 'crawlution.vibe';
@@ -189,6 +221,48 @@ export class Sfx {
         this.noise(0.4, { vol: v(0.35), freq: 400, to: 3200, q: 1.4 });
         this.tone(330, 0.35, { type: 'sawtooth', vol: v(0.07), to: 990 });
         this.tone(90, 0.3, { type: 'sine', vol: v(0.25), to: 45, at: 0.05 });
+        break;
+      case 'windup':
+        // 낮게 으르렁 + 땅 긁는 소리
+        this.tone(70, 0.22, { type: 'sawtooth', vol: v(0.12), to: 140, attack: 0.05 });
+        this.noise(0.18, { vol: v(0.18), freq: 500, to: 1400, q: 0.8 });
+        break;
+      case 'windupWing':
+        // 날개 붕― 하고 빨라짐
+        this.tone(110, 0.2, { type: 'sawtooth', vol: v(0.08), to: 260, attack: 0.03 });
+        this.noise(0.2, { vol: v(0.12), freq: 2500, to: 5000, q: 2.5 });
+        break;
+      case 'dash':
+        this.noise(0.32, { vol: v(0.38), freq: 300, to: 2200, q: 0.9 });
+        this.tone(95, 0.3, { type: 'sine', vol: v(0.28), to: 55 });
+        break;
+      case 'wingDash':
+        this.noise(0.3, { vol: v(0.3), freq: 1800, to: 600, q: 1.6 });
+        this.tone(180, 0.25, { type: 'sawtooth', vol: v(0.05), to: 90 });
+        break;
+      case 'heave':
+        this.noise(0.22, { vol: v(0.3), freq: 400, to: 2600, q: 1.2 });
+        this.tone(120, 0.2, { type: 'square', vol: v(0.1), to: 260 });
+        break;
+      case 'slam':
+        this.tone(55, 0.55, { type: 'sine', vol: v(0.55), to: 28 });
+        this.noise(0.4, { vol: v(0.55), freq: 900, to: 120, q: 0.6 });
+        this.noise(0.15, { vol: v(0.25), freq: 3000, q: 0.8, at: 0.02 });
+        break;
+      case 'land':
+        this.tone(80, 0.3, { type: 'sine', vol: v(0.35), to: 40 });
+        this.noise(0.25, { vol: v(0.35), freq: 1400, to: 300, q: 0.7 });
+        break;
+      case 'brace':
+        this.tone(65, 0.5, { type: 'sawtooth', vol: v(0.1), to: 80, attack: 0.04 });
+        this.noise(0.45, { vol: v(0.2), freq: 300, to: 700, q: 0.7 });
+        break;
+      case 'flit':
+        this.noise(0.18, { vol: v(0.22), freq: 3000, to: 1200, q: 2 });
+        break;
+      case 'impact':
+        this.tone(70, 0.3, { type: 'sine', vol: v(0.3), to: 35, at: 0.25 });
+        this.noise(0.2, { vol: v(0.3), freq: 1000, to: 250, q: 0.8, at: 0.25 });
         break;
       case 'molt':
         [392, 494, 587, 784].forEach((f, i) => this.tone(f, 0.5, { type: 'triangle', vol: v(0.1), at: i * 0.08, attack: 0.03 }));

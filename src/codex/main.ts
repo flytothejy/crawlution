@@ -11,6 +11,7 @@ import { GameRenderer, type Frame, type FrameSnake } from '../client/renderer';
 import measured from './measured.json';
 import { themeOf } from '../client/fxtheme';
 import { startDash } from '../shared/skills';
+import { fxSound, MOTION_FX, Sfx } from '../client/sfx';
 import { SLOT_LV, SLOT_NAME, V3_BY_ID, V3_FAMILIES, V3_FAMILY, v3Kit, type V3FamId, type V3Family, type V3Play, type V3React, type V3Skill, type V3Slot, type V3Species } from '../shared/v3';
 import type { FxKind } from '../shared/types';
 
@@ -55,6 +56,16 @@ const charmed = new Map<Snake, number>();
 const confused = new Map<Snake, number>();
 const itchy = new Map<Snake, number>();
 let circleT = 0;
+const MELEE = ['lift', 'grab', 'throw', 'scissor', 'sweep', 'combo', 'push', 'stab'];
+/** 재생 빠르기(느리게 보기): 1 → 0.5 → 0.25 */
+let speed = 1;
+const sfx = new Sfx();
+window.addEventListener('pointerdown', () => sfx.unlock(), { capture: true });
+const SPEEDS = [1, 0.5, 0.25];
+const speedChip = () => `<button class="chip tog${speed < 1 ? ' on' : ''}" data-speed="1">🐢 ${speed === 1 ? '보통' : speed + '배'}</button>`;
+function bindSpeed(root: HTMLElement, redraw: () => void) {
+  root.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach((b) => (b.onclick = () => ((speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]), redraw())));
+}
 let puffT = 0;
 function findSub(id: string): SubDef {
   return FAMILIES.find((f) => f.sub.id === id)?.sub ?? COMMON_SUBS.find((c) => c.id === id)!;
@@ -140,7 +151,8 @@ function setupScene() {
   me.subPending = false;
   me.lives = 99;
   me.sub = curAct.kind === 'sub' ? curAct.sub : mode === 'old' && stage >= 2 ? fam.sub : null;
-  sim.spawnAt(me, -40, 0, 0, 26);
+  const melee = curAct.kind === 'main' && MELEE.includes(curAct.form);
+  sim.spawnAt(me, mode === 'v3' && !melee ? -130 : -40, 0, 0, 26); // 3판 탭: 돌진·도약 거리가 보이게 조금 멀리서
   dummies = sim.snakes.slice(1, 4);
   dummies.forEach((d, i) => {
     d.isPlayer = true; // 봇 생각 끄기(그릴 때는 남으로 보이게 되돌린다)
@@ -188,8 +200,10 @@ function stepScene() {
   const back = act.kind === 'main' && act.form === 'backjet';
   const cmd = { ...me.cmd, angle: back && sceneT > 0.15 ? ta + Math.PI : ta, sneak: false, boost: false };
   if (circleT > sceneT) cmd.angle = me.angle + 0.16;
-  if (script && cast && sceneT < 1.2 && d0 < 120) cmd.sneak = true; // 연출 중에는 표적에 너무 붙지 않게
-  if (!cast && sceneT > 0.35) {
+  if (cast && sceneT < 1.6 && d0 < 150) cmd.sneak = true; // 기술을 쓴 뒤에는 천천히: 물기가 섞여 모션이 안 보이지 않게
+  // 근접 기술은 닿는 거리까지 다가간 뒤에 쓴다(헛손질 방지)
+  const near = act.kind === 'main' && MELEE.includes(act.form) ? 115 : 1e9;
+  if (!cast && sceneT > 0.35 && (d0 < near || sceneT > 1.6)) {
     cast = true;
     if (act.kind === 'main') ((me.skillCd = 0), (me.ult = 0), (cmd.skillSeq = me.lastSkillSeq + 1));
     if (act.kind === 'ult') ((me.ult = CONFIG.ultMax), (cmd.skillSeq = me.lastSkillSeq + 1));
@@ -212,6 +226,16 @@ function stepScene() {
   if (mode === 'v3') for (const e of snap.events) if (e.type === 'fx' && e.snake === me.id) e.sp = v3s.id;
   const byId = new Map<number, SnakeView>(snap.snakes.map((s) => [s.id, s]));
   renderer.handleEvents(snap.events, byId, snap.playerId);
+  // 소리: 내 기술의 모션 소리(예고·발동·착지)와 타격음
+  const quiet = new Set<number>();
+  for (const e of snap.events) if (e.type === 'fx' && MOTION_FX.has(e.kind)) quiet.add(e.snake);
+  for (const e of snap.events) {
+    if (e.type === 'fx' && e.snake === me.id) {
+      const nm = fxSound(e.kind, e.wk);
+      if (nm) sfx.play(nm);
+    } else if (e.type === 'skill' && e.snake === me.id && !quiet.has(e.snake)) sfx.play(e.slot === 'ult' ? 'molt' : 'skill', 0.8);
+    else if (e.type === 'hit' && e.by === me.id && e.dmg > 0) sfx.play(e.dmg > 60 ? 'hitBig' : 'hit', 0.8);
+  }
   if (!me.alive || (loop && sceneT > curLen)) setupScene();
 }
 
@@ -222,7 +246,22 @@ async function initStage() {
   renderer.opts.zoomMul = 0.72; // 기술 범위가 다 보이게 조금 멀리서
   renderer.app.ticker.add((tk) => {
     if (tab !== 'crawler' && tab !== 'v3') return;
-    acc += Math.min(0.1, tk.deltaMS / 1000);
+    if (manual) return;
+    frameOut(Math.min(0.1, tk.deltaMS / 1000) * speed);
+  });
+}
+
+/** 한 장씩 넘기기(필름 띠 만들기용): 시뮬레이션을 sec만큼 돌리고 한 장 그린다 */
+let manual = false;
+function advance(sec: number) {
+  manual = true;
+  frameOut(sec);
+  renderer.app.render();
+}
+
+function frameOut(dtIn: number) {
+  {
+    acc += dtIn;
     if (!sim) setupScene();
     while (sim && acc >= sim.dt) {
       acc -= sim.dt;
@@ -232,8 +271,8 @@ async function initStage() {
     renderer.reveal = snap.player.reveal;
     const snakes = snap.snakes.map((s) => (s.id === snap!.playerId ? (mode === 'v3' ? { ...s, species: v3s.id, stage: v3stage } : s) : { ...s, isPlayer: false })) as FrameSnake[];
     const frame: Frame = { snakes, foods: snap.foods, rings: snap.rings, zones: snap.zones, projs: snap.projs, minions: snap.minions, teles: snap.teles, enemy: null, map: snap.map, playerId: snap.playerId };
-    renderer.render(frame, Math.min(0.05, tk.deltaMS / 1000));
-  });
+    renderer.render(frame, dtIn);
+  }
 }
 
 function play(a: Action) {
@@ -360,10 +399,11 @@ function drawV3Controls() {
   $('v3acts').querySelectorAll<HTMLButtonElement>('[data-slot]').forEach((b) => (b.onclick = () => playV3(b.dataset.slot as V3Slot)));
   $('v3stages').innerHTML =
     [1, 3].map((st) => `<button class="chip${v3stage === st ? ' on' : ''}" data-st="${st}">${st === 1 ? v3f.stages[0] : v3f.stages[1]} 모습</button>`).join('') +
-    `<button class="chip tog${loop ? ' on' : ''}" id="v3loop">🔁 반복</button><button class="chip tog${renderer.opts.numbers ? ' on' : ''}" id="v3num">🔢 숫자</button>`;
+    `<button class="chip tog${loop ? ' on' : ''}" id="v3loop">🔁 반복</button><button class="chip tog${renderer.opts.numbers ? ' on' : ''}" id="v3num">🔢 숫자</button>${speedChip()}`;
   $('v3stages').querySelectorAll<HTMLButtonElement>('[data-st]').forEach((b) => (b.onclick = () => ((v3stage = Number(b.dataset.st) as 1 | 3), drawV3())));
   $('v3loop').onclick = () => ((loop = !loop), drawV3Controls(), loop || setupScene());
   $('v3num').onclick = () => ((renderer.opts.numbers = !renderer.opts.numbers), drawV3Controls());
+  bindSpeed($('v3stages'), drawV3Controls);
 }
 
 function drawV3() {
@@ -441,10 +481,11 @@ function drawControls() {
   $('now').innerHTML = `<b>${an.icon} ${an.name}</b><small>${an.desc}</small>`;
   $('stages').innerHTML = fam.stages
     .map((n, i) => `<button class="chip${stage === i + 1 ? ' on' : ''}" data-st="${i + 1}">Lv${LV[i]} ${n}</button>`)
-    .join('') + `<button class="chip tog${loop ? ' on' : ''}" id="loopBtn">🔁 반복</button><button class="chip tog${renderer.opts.numbers ? ' on' : ''}" id="numBtn">🔢 숫자</button>`;
+    .join('') + `<button class="chip tog${loop ? ' on' : ''}" id="loopBtn">🔁 반복</button><button class="chip tog${renderer.opts.numbers ? ' on' : ''}" id="numBtn">🔢 숫자</button>${speedChip()}`;
   $('stages').querySelectorAll<HTMLButtonElement>('[data-st]').forEach((b) => (b.onclick = () => ((stage = Number(b.dataset.st) as 1 | 2 | 3), setupScene(), drawControls(), drawInfo())));
   $('loopBtn').onclick = () => ((loop = !loop), drawControls(), loop || setupScene());
   $('numBtn').onclick = () => ((renderer.opts.numbers = !renderer.opts.numbers), drawControls());
+  bindSpeed($('stages'), drawControls);
   $('sps').innerHTML = fam.species
     .map((id) => `<button class="chip sp${id === species ? ' on' : ''}" data-s="${id}"><img src="${renderer.portrait(id + '@' + stage)}" alt="">${SPECIES_BY_ID.get(id)!.name}</button>`)
     .join('');
@@ -624,6 +665,6 @@ async function boot() {
   drawV3Tables();
   showTab('v3');
   setupScene();
-  (globalThis as { __codex?: unknown }).__codex = { pickFam, play, pickV3Fam, pickV3Sp, playV3, showTab, get sim() { return sim; } };
+  (globalThis as { __codex?: unknown }).__codex = { pickFam, play, pickV3Fam, pickV3Sp, playV3, showTab, setSpeed: (v: number) => (speed = v), advance, setManual: (v: boolean) => (manual = v), renderer, get sim() { return sim; }, get sceneT() { return sceneT; } };
 }
 void boot();

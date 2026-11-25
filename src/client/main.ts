@@ -8,7 +8,7 @@ import type { CardView, EnemyKind, EnemyView, GameOpts, Loadout, Snapshot, Snake
 import { createHost, type SimHost } from './host';
 import { Input } from './input';
 import { famColor, GameRenderer, lookKey, type Frame, type FrameSnake } from './renderer';
-import { Sfx } from './sfx';
+import { fxSound, MOTION_FX, Sfx } from './sfx';
 import { loadSettings, saveSettings, SECTIONS, SON_POWER, type Settings } from './settings';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -209,6 +209,8 @@ function playSounds(s: Snapshot, byId: Map<number, SnakeView>) {
   const cam = renderer.camera;
   const W = renderer.app.screen.width / cam.zoom, H = renderer.app.screen.height / cam.zoom;
   const near = (x: number, y: number) => Math.abs(x - cam.x) < W * 0.6 && Math.abs(y - cam.y) < H * 0.6;
+  const motionIds = new Set<number>();
+  for (const e of s.events) if (e.type === 'fx' && MOTION_FX.has(e.kind)) motionIds.add(e.snake);
   for (const e of s.events) {
     switch (e.type) {
       case 'eat':
@@ -236,12 +238,22 @@ function playSounds(s: Snapshot, byId: Map<number, SnakeView>) {
         }
         break;
       }
-      case 'skill':
+      case 'skill': {
+        const quiet = motionIds.has(e.snake); // 예고 동작이 있는 기술은 모션 소리가 대신한다
         if (e.snake === me) {
           if (e.slot === 'ult') (sfx.play('molt'), sfx.buzz([40, 30, 120]));
-          else (sfx.play('skill'), sfx.buzz(30));
-        } else if (near(e.x, e.y)) sfx.play('skill', e.slot === 'ult' ? 0.6 : 0.25);
+          else (quiet || sfx.play('skill'), sfx.buzz(30));
+        } else if (near(e.x, e.y) && !quiet) sfx.play('skill', e.slot === 'ult' ? 0.6 : 0.25);
         break;
+      }
+      case 'fx': {
+        const nm = fxSound(e.kind, e.wk);
+        if (!nm) break;
+        if (e.snake === me) sfx.play(nm);
+        else if (near(e.x, e.y)) sfx.play(nm, 0.35);
+        if (e.snake === me && (nm === 'slam' || nm === 'land')) sfx.buzz(45);
+        break;
+      }
       case 'levelUp':
         if (e.snake === me) (sfx.play('ready'), sfx.buzz(20));
         break;

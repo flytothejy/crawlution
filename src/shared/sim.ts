@@ -787,6 +787,11 @@ export class Simulation {
       this.tick++;
       return;
     }
+    if (this.freezeT > 0) {
+      this.freezeT -= dt;
+      this.tick++;
+      return;
+    }
     // 0) 외톨이·싸움꾼 기질: 가까운(450) 다른 곤충 수를 0.25초마다 센다
     if (this.tick % 15 === 0)
       for (const s of this.snakes) {
@@ -1144,6 +1149,12 @@ export class Simulation {
 
   fx(kind: FxKind, s: Snake | null, x: number, y: number, extra: Partial<Extract<GameEvent, { type: 'fx' }>> = {}) {
     this.events.push({ type: 'fx', kind, snake: s ? s.id : -1, fam: s && !s.isBoss ? s.fam.id : null, sp: s && !s.isBoss ? s.sp.id : undefined, x, y, ...extra });
+  }
+
+  /** 히트스톱: 플레이어가 낀 큰 타격에서 세상을 아주 잠깐 멈춘다(손맛) */
+  freezeT = 0;
+  hitstop(a: Snake | null, b: Snake | null, t: number) {
+    if ((a && a.isPlayer) || (b && b.isPlayer)) this.freezeT = Math.max(this.freezeT, t * CONFIG.hitstopMul);
   }
 
   later(t: number, fn: () => void) {

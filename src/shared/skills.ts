@@ -26,6 +26,14 @@ export function nearestEnemy(sim: Simulation, s: Snake, range: number, x = s.x, 
   return best;
 }
 
+/** 예고 동작 뒤에 발동: 힘을 모으는 모습(windup)을 보여 준 뒤 t초 후 실제 기술 */
+function windup(sim: Simulation, s: Snake, t: number, kind: string, fn: () => void) {
+  sim.fx('windup', s, s.x, s.y, { angle: s.angle, wk: kind, dur: t });
+  sim.later(t, () => {
+    if (s.alive && s.stunT <= 0 && s.grabbedBy < 0 && s.netT <= 0) fn();
+  });
+}
+
 export function startDash(sim: Simulation, s: Snake, kind: string, len: number, mul: number, fly = false, dmg = 0) {
   const sp = Math.max(60, sim.speedOf(s) * mul);
   s.dashT = len / sp;
@@ -58,9 +66,15 @@ export function castMain(sim: Simulation, s: Snake) {
     case 'rhino': {
       const heavy = 1 + sim.ab(s, 'heavy');
       if (form === 'charge') {
-        startDash(sim, s, 'charge', 260 * R * heavy, 3, false, B * 0.85);
-        sim.fx('charge', s, hx, hy, { angle: s.angle, len: 260 * R * heavy });
+        // 뒷발로 땅을 긁으며 몸을 낮췄다가 튀어 나간다
+        windup(sim, s, 0.16, 'charge', () => {
+          startDash(sim, s, 'charge', 260 * R * heavy, 3, false, B * 0.85);
+          sim.fx('charge', s, s.x, s.y, { angle: s.angle, len: 260 * R * heavy, dur: s.dashT });
+        });
       } else if (form === 'lift') {
+        // 뿔을 땅에 박듯 머리를 숙였다가 위로 퍼 올린다
+        windup(sim, s, 0.2, 'lift', () => {
+        const [hx, hy] = [s.x, s.y];
         sim.fx('lift', s, hx, hy, { angle: s.angle, r: 90 * R });
         let n = 0;
         sim.cone(s, hx, hy, s.angle, 90 * R, 0.8, (o, x, y) => {
@@ -68,13 +82,17 @@ export function castMain(sim: Simulation, s: Snake) {
           sim.deal(s, o, B * 0.7, 'skill', x, y);
           sim.stun(o, 0.5 + (sim.inst(s, 'pincer') ? 0.6 : 0));
           const bx = s.x - Math.cos(s.angle) * 150 * heavy, by = s.y - Math.sin(s.angle) * 150 * heavy;
+          const fly = Math.hypot(bx - o.x, by - o.y) / (320 * heavy);
           sim.pullTo(o, bx, by, 320 * heavy);
+          sim.fx('lifted', o, o.x, o.y, { angle: s.angle + Math.PI, dur: Math.max(0.35, fly), x1: bx, y1: by });
+          sim.hitstop(s, o, 0.07);
           sim.events.push({ type: 'skillHit', x, y, kind: 'push' });
           if (aw) sim.later(0.35, () => {
             if (!o.alive) return;
             sim.fx('shock', s, o.x, o.y, { r: 70 });
             sim.circle(s, o.x, o.y, 70, (p, px, py) => sim.deal(s, p, B * 0.5, 'skill', px, py));
           });
+        });
         });
       } else {
         // 버티고 밀기: 2초 채널
@@ -85,7 +103,7 @@ export function castMain(sim: Simulation, s: Snake) {
         s.chanHits.clear();
         s.reduceT = 2;
         s.reduceMul = 0.7;
-        sim.fx('push', s, hx, hy, { angle: s.angle, r: 100 * R });
+        sim.fx('push', s, hx, hy, { angle: s.angle, r: 100 * R, dur: 2 });
       }
       return;
     }
@@ -145,11 +163,18 @@ export function castMain(sim: Simulation, s: Snake) {
     }
     case 'dragonfly': {
       if (form === 'dive') {
-        startDash(sim, s, 'dive', 300 * R, 3.2, true, B);
-        sim.fx('dive', s, hx, hy, { angle: s.angle, len: 300 * R });
+        // 날개를 세차게 치며 떠올랐다가 내리꽂는다
+        s.flyT = Math.max(s.flyT, 0.16);
+        windup(sim, s, 0.16, 'dive', () => {
+          startDash(sim, s, 'dive', 300 * R, 3.2, true, B);
+          sim.fx('dive', s, s.x, s.y, { angle: s.angle, len: 300 * R, dur: s.dashT });
+        });
       } else if (form === 'snatch') {
-        startDash(sim, s, 'snatch', 260 * R, 3, true, B);
-        sim.fx('snatch', s, hx, hy, { angle: s.angle, len: 260 * R });
+        // 다리를 바구니처럼 벌리고 낮게 스쳐 지나가며 낚는다
+        windup(sim, s, 0.1, 'snatch', () => {
+          startDash(sim, s, 'snatch', 260 * R, 3, true, B);
+          sim.fx('snatch', s, s.x, s.y, { angle: s.angle, len: 260 * R, dur: s.dashT });
+        });
       } else {
         s.chanT = 1.5;
         s.chanKind = 'circle';
@@ -392,9 +417,12 @@ export function castSub(sim: Simulation, s: Snake) {
   switch (sub.id) {
     // 계열 전용
     case 'thud':
-      startDash(sim, s, 'thud', 70, 1.2, true);
-      s.flyT = Math.max(s.flyT, 0.45);
-      sim.fx('hop', s, s.x, s.y);
+      // 몸을 웅크렸다가 높이 날아올라 0.45초 떠 있다가 내리찍는다
+      windup(sim, s, 0.12, 'thud', () => {
+        startDash(sim, s, 'thud', sim.speedOf(s) * 0.7 * 0.45, 0.7, true);
+        s.flyT = Math.max(s.flyT, s.dashT + 0.02);
+        sim.fx('hop', s, s.x, s.y, { angle: s.angle, wk: 'jump', dur: s.dashT });
+      });
       return;
     case 'playdead':
       s.deadT = 2 * D;
@@ -451,7 +479,7 @@ export function castSub(sim: Simulation, s: Snake) {
       return;
     case 'hop':
       startDash(sim, s, 'hop', 220 * R, 2.6, true);
-      sim.fx('hop', s, s.x, s.y, { angle: s.angle });
+      sim.fx('hop', s, s.x, s.y, { angle: s.angle, wk: 'flit', dur: s.dashT });
       return;
     case 'escape':
       sim.cleanse(s);
@@ -522,7 +550,7 @@ export function castUlt(sim: Simulation, s: Snake) {
       const len = 520 * (1 + sim.ab(s, 'heavy'));
       sim.telegraph(s, { shape: 'line', x: s.x, y: s.y, r: 0, angle: s.angle, len, w: s.r * 4 }, () => {
         startDash(sim, s, 'ultcharge', len, 3.4, false, B * 2.5);
-        sim.fx('charge', s, s.x, s.y, { angle: s.angle, len, awake: true });
+        sim.fx('charge', s, s.x, s.y, { angle: s.angle, len, awake: true, dur: s.dashT });
       });
       return;
     }
@@ -553,7 +581,7 @@ export function castUlt(sim: Simulation, s: Snake) {
       s.skyT = gap * n + 0.3;
       s.flyT = Math.max(s.flyT, s.skyT);
       s.invulnT = Math.max(s.invulnT, s.skyT);
-      sim.fx('dive', s, s.x, s.y, { angle: s.angle, awake: true });
+      sim.fx('dive', s, s.x, s.y, { angle: s.angle, awake: true, wk: 'sky', dur: s.skyT });
       for (let k = 0; k < n; k++) {
         sim.later(gap * k, () => {
           if (!s.alive) return;
@@ -564,8 +592,8 @@ export function castUlt(sim: Simulation, s: Snake) {
             const d = dist(tx, ty, s.x, s.y);
             s.angle = a;
             sim.shove(s, a, d);
-            sim.fx('land', s, tx, ty, { r: 90, awake: true });
-            sim.circle(s, tx, ty, 90, (o, x, y) => sim.deal(s, o, B * 0.9, 'ult', x, y, 'ult', cap));
+            sim.fx('land', s, tx, ty, { r: 90, awake: true, wk: 'skydrop' });
+            sim.circle(s, tx, ty, 90, (o, x, y) => (sim.deal(s, o, B * 0.9, 'ult', x, y, 'ult', cap), sim.hitstop(s, o, 0.07)));
           }, 0.45);
         });
       }
@@ -645,6 +673,7 @@ export function onDashHit(sim: Simulation, a: Snake, b: Snake, x: number, y: num
       const side = Math.atan2(b.y - a.y, b.x - a.x);
       sim.knock(b, side * 0.5 + a.angle * 0.5, 120 * heavy);
       if (pincer) sim.stun(b, pincer);
+      sim.hitstop(a, b, 0.06);
       sim.events.push({ type: 'skillHit', x, y, kind: 'push' });
       break;
     }
@@ -653,6 +682,7 @@ export function onDashHit(sim: Simulation, a: Snake, b: Snake, x: number, y: num
       sim.stun(b, 1 + pincer);
       const side = Math.atan2(b.y - a.y, b.x - a.x);
       sim.knock(b, side, 160 * heavy);
+      sim.hitstop(a, b, 0.08);
       sim.events.push({ type: 'skillHit', x, y, kind: 'stun' });
       break;
     }
@@ -687,6 +717,7 @@ function onDashEnd(sim: Simulation, s: Snake, kind: string) {
       const R = sim.rangeMul(s, true);
       sim.fx('thud', s, s.x, s.y, { r: 140 * R });
       sim.circle(s, s.x, s.y, 140 * R, (o, x, y) => {
+        sim.hitstop(s, o, 0.08);
         sim.deal(s, o, B * 0.5, 'skill', x, y);
         sim.stun(o, 0.5 * sim.subDur(s));
         sim.knock(o, Math.atan2(o.y - s.y, o.x - s.x), 80);
@@ -702,6 +733,7 @@ function onDashEnd(sim: Simulation, s: Snake, kind: string) {
       sim.fx('land', s, s.x, s.y, { r: 90 * R });
       sim.circle(s, s.x, s.y, 90 * R, (o, x, y) => {
         sim.deal(s, o, s.dashDmg * mul, 'skill', x, y);
+        sim.hitstop(s, o, 0.06);
         hit = true;
       });
       s.acroT = 1;
