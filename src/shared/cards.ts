@@ -54,6 +54,13 @@ export const ABILITIES: AbilityDef[] = [
   A({ id: 'swarm', family: 'bee', name: '큰 무리', icon: '🐝', vals: [1, 2, 3], desc: (l) => `부른 벌 지속 +${[1, 2, 3][l - 1]}초` }),
   A({ id: 'busy', family: 'bee', name: '왕성한 일벌', icon: '💪', vals: [0.15, 0.3, 0.45], desc: (l) => `부른 벌의 피해 +${pct([0.15, 0.3, 0.45][l - 1])}` }),
   A({ id: 'bright', family: 'firefly', name: '밝은 빛', icon: '💡', vals: [0.3, 0.6, 0.9], desc: (l) => `섬광·표시 지속 +${[0.3, 0.6, 0.9][l - 1]}초` }),
+  // 3판 새 계열
+  A({ id: 'venomjaw', family: 'centipede', name: '진한 독턱', icon: '🦷', vals: [0.2, 0.4, 0.6], desc: (l) => `독턱 중독 피해 +${pct([0.2, 0.4, 0.6][l - 1])}` }),
+  A({ id: 'longbody', family: 'centipede', name: '긴 몸 조이기', icon: '➰', vals: [0.5, 1, 1.5], desc: (l) => `휘감기·묶기 지속 +${[0.5, 1, 1.5][l - 1]}초` }),
+  A({ id: 'colony', family: 'ant', name: '큰 군락', icon: '🐜', vals: [1, 2, 3], desc: (l) => `부른 개미 지속 +${[1, 2, 3][l - 1]}초` }),
+  A({ id: 'formic', family: 'ant', name: '진한 개미산', icon: '🧪', vals: [0.15, 0.3, 0.45], desc: (l) => `개미 피해 +${pct([0.15, 0.3, 0.45][l - 1])}` }),
+  A({ id: 'scales', family: 'butterfly', name: '짙은 인분', icon: '✨', vals: [0.3, 0.6, 0.9], desc: (l) => `혼란·매혹 지속 +${[0.3, 0.6, 0.9][l - 1]}초` }),
+  A({ id: 'glide', family: 'butterfly', name: '활공', icon: '🪽', vals: [0.1, 0.2, 0.3], desc: (l) => `질주 중 받는 피해 −${pct([0.1, 0.2, 0.3][l - 1])}` }),
   A({ id: 'blink', family: 'firefly', name: '깜빡깜빡', icon: '🔁', vals: [0.1, 0.2, 0.3], desc: (l) => `빛 기술 재사용 시간 −${pct([0.1, 0.2, 0.3][l - 1])}` }),
 ];
 
@@ -146,6 +153,18 @@ export const TRAITS: TraitDef[] = [
   T('brightlight', '🔆', '밝은 빛', 'firefly', '주 기술 범위 +20%', '주 기술 재사용 +20%', { range: 1.2, cd: 1.2 }),
   T('dark', '🌑', '빛 끄기', 'firefly', '웅크린 채 1.5초 지나면 숨음, 숨은 채 물면 피해 +40%', '이동 속도 −5%', { spd: 0.95 }, 'dark'),
   T('spark', '✨', '반짝 독', 'firefly', '물면 적을 2초 표시(받는 피해 +20%)', '최대 체력 −8%', { hp: 0.92 }, 'spark'),
+  // 지네
+  T('bigfang', '🦷', '큰 독턱', 'centipede', '물기 피해 +20%', '최대 체력 −8%', { bite: 1.2, hp: 0.92 }),
+  T('manylegs', '🦵', '백 개의 다리', 'centipede', '이동 속도 +8%', '받는 피해 +6%', { spd: 1.08, taken: 1.06 }),
+  T('constrict', '➰', '조이는 몸', 'centipede', '묶이거나 느려진 적에게 주는 피해 +25%', '이동 속도 −5%', { spd: 0.95 }, 'sticky'),
+  // 개미
+  T('swarmant', '🐜', '큰 무리', 'ant', '부르는 개미 +2마리', '개미 하나의 피해 −25%', { minion: 2, minionDmg: 0.75 }),
+  T('acidbody', '🧪', '산성 몸', 'ant', '기술 피해 +18%', '기술 재사용 +12%', { main: 1.18, cd: 1.12 }),
+  T('worker', '💪', '부지런한 일개미', 'ant', '개미 피해 +30%', '최대 체력 −8%', { minionDmg: 1.3, hp: 0.92 }),
+  // 나비
+  T('dust', '🌫️', '고운 가루', 'butterfly', '기술 범위 +25%', '기술 재사용 +10%', { range: 1.25, cd: 1.1 }),
+  T('flutterer', '🪽', '팔랑팔랑', 'butterfly', '이동 속도 +10%', '최대 체력 −6%', { spd: 1.1, hp: 0.94 }),
+  T('nectarlove', '🌸', '꿀 사랑', 'butterfly', '회복 효과 +50%', '기술 피해 −10%', { heal: 1.5, main: 0.9 }),
 ];
 export const COMMON_TRAITS = TRAITS.filter((t) => !t.family);
 export const familyTraits = (fam: FamilyId) => TRAITS.filter((t) => t.family === fam);

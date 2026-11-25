@@ -1,8 +1,10 @@
 // 2판 캐릭터 데이터: 역할 5 · 계열 10 · 종 40. 기획서 '10계열 · 종 목록', '기술 수치표' 탭을 그대로 옮긴다.
 // 계열 = 밸런스 단위(능력치 성격·주 기술·보조 기술·필살기), 종 = 본능 하나 + 외형.
 
+import { V3_BY_ID } from './v3';
+
 export type Role = 'tank' | 'charge' | 'shoot' | 'trap' | 'support';
-export type FamilyId = 'rhino' | 'stag' | 'mantis' | 'dragonfly' | 'wasp' | 'stinkbug' | 'spider' | 'antlion' | 'bee' | 'firefly';
+export type FamilyId = 'rhino' | 'stag' | 'mantis' | 'dragonfly' | 'wasp' | 'stinkbug' | 'spider' | 'antlion' | 'bee' | 'firefly' | 'centipede' | 'ant' | 'butterfly';
 
 export const ROLES: Record<Role, { name: string; icon: string; color: number }> = {
   tank: { name: '방어', icon: '🛡️', color: 0x5a8ad8 },
@@ -248,7 +250,32 @@ export const FAMILIES: Family[] = [
   },
 ];
 
-export const FAMILY = Object.fromEntries(FAMILIES.map((f) => [f.id, f])) as Record<FamilyId, Family>;
+/** 3판에서 새로 들어온 계열(엔진용). 기술은 4칸 기술(kit.ts)로만 쓰므로 형태·보조 기술은 자리표시 */
+const kitForm = (name: string, icon: string): FormDef[] => [{ id: 'kit', name, icon, desc: '', awake: '', cd: 8, ai: 'melee', range: 100 }];
+export const NEW_FAMILIES: Family[] = [
+  {
+    id: 'centipede', name: '지네', role: 'charge', hp: 1.15, atk: 1.1, spd: 1.0, cdMul: 1, knockTaken: 0.8,
+    color: 0xc8361e, color2: 0xffd23f, stages: ['어린 지네', '지네', '각성'], skill: '독턱', forms: kitForm('독턱 찌르기', '🗡️'),
+    sub: { id: 'v3def', name: '몸 말기', icon: '🌀', desc: '', cd: 12, ai: 'defense', range: 0 },
+    ult: { name: '백족 소용돌이', icon: '🌪️', desc: '큰 원을 그리며 질주해 안쪽 적들을 가운데로 끌어 모으고, 3초 동안 조여 지속 피해.', awake: '다 조이면 가운데에서 독 폭발', range: 300 },
+    larva: 'derive', likes: 4, hates: 8, strong: '나비·잠자리', weak: '딱정벌레·개미', species: ['v3:wangjine', 'v3:grima', 'v3:gigantea', 'v3:milli', 'v3:ttangjine'],
+  },
+  {
+    id: 'ant', name: '개미', role: 'support', hp: 1.0, atk: 0.95, spd: 1.0, cdMul: 1, knockTaken: 1,
+    color: 0x8a4a2a, color2: 0xe8a05a, stages: ['애벌레', '개미', '각성'], skill: '개미산', forms: kitForm('개미산 쏘기', '🧪'),
+    sub: { id: 'v3def', name: '굴 파기', icon: '🕳️', desc: '', cd: 12, ai: 'escape', range: 0 },
+    ult: { name: '개미 떼 행진', icon: '🌊', desc: '앞쪽 넓은 띠로 개미 강물이 3초 흘러가며 맞은 적을 밀어내고 지속 피해.', awake: '강물이 두 줄', range: 420 },
+    larva: GRUB(0xd8c8a8, 0xfaf4e6, 0xece2c8), likes: 8, hates: 5, strong: '지네·딱정벌레', weak: '거미·벌', species: ['v3:wangant', 'v3:armyant', 'v3:leafant', 'v3:bulldog', 'v3:fireant'],
+  },
+  {
+    id: 'butterfly', name: '나비', role: 'trap', hp: 0.85, atk: 0.9, spd: 1.08, cdMul: 1, knockTaken: 1.2,
+    color: 0xe07ad8, color2: 0x7ad8ff, stages: ['애벌레', '나비', '각성'], skill: '인분', forms: kitForm('인분 흩뿌리기', '🌫️'),
+    sub: { id: 'v3def', name: '팔랑 비행', icon: '🪽', desc: '', cd: 11, ai: 'move', range: 0 },
+    ult: { name: '나비 떼 폭풍', icon: '🌪️', desc: '넓은 범위에 나비 떼가 휘몰아쳐 4초 동안 지속 피해 + 혼란.', awake: '폭풍이 나를 따라다님', range: 300 },
+    larva: 'derive', likes: 8, hates: 4, strong: '거미·사마귀', weak: '잠자리·지네', species: ['v3:swallow', 'v3:monarch', 'v3:owlbf', 'v3:morpho', 'v3:tussock'],
+  },
+];
+export const FAMILY = Object.fromEntries([...FAMILIES, ...NEW_FAMILIES].map((f) => [f.id, f])) as Record<FamilyId, Family>;
 
 // ---------- 종 ----------
 const sp = (s: Species) => s;
@@ -348,7 +375,24 @@ export const SPECIES: Species[] = [
     look: { body: 0x8a7a4a, stripe: 0x6a5a34, head: 0xe8d080, shape: 'firefly', antenna: 'club', feats: ['wings', 'lamp'] }, fact: '다른 종의 빛 신호를 흉내 내 다른 반딧불이를 꾀어 잡아먹는다.' }),
 ];
 
-export const SPECIES_BY_ID = new Map(SPECIES.map((s) => [s.id, s]));
+/** 3판 새 종(엔진용): 모습·사실은 3판 표(v3.ts)에서. 본능 번호는 sim.ts에서 처리 */
+const NEW_INSTINCT: Record<string, string> = {
+  'v3:wangjine': 'segment', 'v3:grima': 'fastfeet', 'v3:gigantea': 'giant', 'v3:milli': 'autocurl', 'v3:ttangjine': 'rockslip',
+  'v3:calopteryx': 'waterdance',
+  'v3:wangant': 'bigworker', 'v3:armyant': 'raidline', 'v3:leafant': 'fungus', 'v3:bulldog': 'jumphunt', 'v3:fireant': 'raft',
+  'v3:swallow': 'osmeterium', 'v3:monarch': 'migrate', 'v3:owlbf': 'bigeye', 'v3:morpho': 'shimmer', 'v3:tussock': 'hairbody',
+};
+const NEW_FAM: Record<string, FamilyId> = { centipede: 'centipede', ant: 'ant', butterfly: 'butterfly', dragonfly: 'dragonfly' };
+export const NEW_SPECIES: Species[] = Object.keys(NEW_INSTINCT).map((id) => {
+  const v = V3_BY_ID.get(id)!;
+  return { id, family: NEW_FAM[v.fam], name: v.name, instinct: { id: NEW_INSTINCT[id], name: v.instinct.name, desc: v.instinct.desc }, look: v.look!, larva: v.larva, fact: v.fact };
+});
+// 3판에서 바뀐 본능: 늑대거미는 새끼 업기 대신 땅 사냥꾼(새끼는 '새끼 흩기' 기술로 옮겨 감)
+{
+  const w = SPECIES.find((x) => x.id === 'wolfspider');
+  if (w) w.instinct = { id: 'groundhunt', name: '땅 사냥꾼', desc: '그물 대신 질주 속도 +10%' };
+}
+export const SPECIES_BY_ID = new Map([...SPECIES, ...NEW_SPECIES].map((s) => [s.id, s]));
 
 /** 판 안 모습: 단계(1 어린 모습, 2 성충, 3 각성)마다 다른 모습 */
 export function lookFor(speciesId: string, stage: number): Look {

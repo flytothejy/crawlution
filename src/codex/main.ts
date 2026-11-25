@@ -192,6 +192,7 @@ function stepScene() {
     d.cmd = { ...d.cmd, angle: a, sneak: true, boost: false };
     if (d.hp < d.maxHp * 0.35) d.hp = d.maxHp;
     d.ult = 0;
+    d.biteCd = 99; // 허수아비는 물지 않는다(기술과 상관없는 독·상태 아이콘이 섞이지 않게)
   });
   if (me.hp < me.maxHp * 0.35) me.hp = me.maxHp;
   // 내 곤충: 표적을 바라보며 다가간다. 가까우면 웅크려 속도를 줄인다

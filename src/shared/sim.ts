@@ -8,8 +8,11 @@ import { botThink, bossThink, botPickCard } from './bot';
 import { baseB, biteOf, maxHpOf } from './combat';
 import { Enemies } from './enemies';
 import { ABILITIES, ABILITY_BY_ID, BONUS_CARDS, type LevelCard, traitMod, hasSpecial, COMMON_TRAITS, familyTraits } from './cards';
-import { COMMON_SUBS, FAMILIES, FAMILY, SPECIAL_FOODS, SPECIES, SPECIES_BY_ID, formsOf, taste, type Family, type FormDef, type Species, type SubDef } from './species';
+import { COMMON_SUBS, FAMILIES, FAMILY, SPECIAL_FOODS, SPECIES, SPECIES_BY_ID, SUBS_BY_ID, formsOf, taste, type Family, type FormDef, type Species, type SubDef } from './species';
 import * as SK from './skills';
+import * as SK3 from './skills3';
+import { KIT_SLOTS, KIT_UNLOCK, kitOf, V3_ROSTER, type Kit, type KitSlot } from './kit';
+import { V3_FAMILIES, type V3FamId } from './v3';
 import {
   defaultOpts, emptyCommand, emptyStats,
   type CardView, type Command, type DeathCause, type EnemyKind, type FxKind, type GameEvent, type GameOpts, type HitKind, type MapTheme, type MapView,
@@ -110,6 +113,35 @@ export interface Snake {
   markT: number;
   fearT: number;
   hiddenT: number; // 위장·숨기
+  // ---- 3판 ----
+  kit: Kit | null; // 4칸 기술(3판)
+  v3fam: V3FamId | null;
+  spcCd: number; // 특수 칸 재사용
+  lastSpcSeq: number;
+  lastUltSeq: number;
+  coilT: number; // 몸 말기·노린내(받는 피해 −40%, 못 움직임)
+  coilPoison: boolean; // 말린 동안 나를 문 적 중독
+  leafT: number; // 잎 방패(앞쪽 피해 막기)
+  leafHeal: boolean;
+  flutterT: number; // 팔랑 비행(기술 피해 절반)
+  bitterPoison: boolean; // 쓴 독 몸: 반사에 중독도
+  bitterMul: number; // 반사 비율
+  charmBy: number; // 매혹 건 곤충
+  itchBy: number;
+  itchDps: number;
+  itchAcc: number;
+  glowT: number; // 빛 점액: 숨지 못함
+  workerCd: number; // 일개미 행렬: 쓰러진 일개미가 다시 나오기까지
+  raidT: number; // 사냥 행렬: 덤 일개미 지속
+  raidN: number;
+  fungusT: number; // 버섯 농사: 먹은 뒤 회복
+  autoCurlCd: number;
+  osmCd: number;
+  bigeyeCd: number;
+  shimmerCd: number;
+  wasBoosting: boolean;
+  jumpT: number; // 점프 사냥: 질주를 멈춘 뒤 사거리 +30%
+  paraT: Map<number, number>; // 독니: 같은 적 3초에 한 번
   confuseT: number; // 혼란(나비)
   charmT: number; // 매혹(나비)
   itchT: number; // 가려움(독나방)
@@ -276,7 +308,7 @@ export interface Minion {
   dps: number;
   speed: number;
   target: number;
-  kind: 'bee' | 'wasp' | 'ant' | 'soldier';
+  kind: 'bee' | 'wasp' | 'ant' | 'soldier' | 'worker';
   slot: number; // 호위 자리(군대개미): 몸 옆 줄
   bite: number; // 마지막으로 문 뒤 지난 시간(그리기용)
   acc: number;
@@ -356,8 +388,10 @@ export class Simulation {
     this.enemies.reset();
     this.makeMap(theme ?? this.rng.pick(['grass', 'sand', 'forest'] as MapTheme[]));
     const lo = this.opts.loadout;
-    const sp = SPECIES_BY_ID.get(lo.species) ?? SPECIES[0];
-    const p = this.makeSnake(0, this.playerName, true, sp, lo.form, lo.traits);
+    const v3 = !!this.opts.v3;
+    const pid = v3 && !kitOf(lo.species) ? V3_ROSTER[0] : lo.species;
+    const sp = SPECIES_BY_ID.get(pid) ?? SPECIES[0];
+    const p = this.makeSnake(0, this.playerName, true, sp, lo.form, lo.traits, v3 ? kitOf(sp.id) : null);
     p.lives = CONFIG.lives;
     this.snakes.push(p);
     this.spawnAt(p, 0, 0, this.rng.range(0, Math.PI * 2), CONFIG.startSegments);
@@ -367,8 +401,21 @@ export class Simulation {
     this.fullHeal(p);
     // 봇: 계열을 고르게(같은 계열 최대 2마리)
     const n = Math.max(1, Math.min(40, Math.round(this.opts.bots)));
+    if (v3) {
+      // 3판: 8계열을 고르게(같은 계열 최대 3마리)
+      const cnt = new Map<string, number>([[p.v3fam!, 1]]);
+      for (let i = 0; i < n; i++) {
+        const min = Math.min(...V3_FAMILIES.map((f) => cnt.get(f.id) ?? 0));
+        const vf = this.rng.pick(V3_FAMILIES.filter((f) => (cnt.get(f.id) ?? 0) === min));
+        cnt.set(vf.id, (cnt.get(vf.id) ?? 0) + 1);
+        const bsp = SPECIES_BY_ID.get(this.rng.pick(vf.species))!;
+        const b = this.makeSnake(i + 1, BOT_NAMES[i % BOT_NAMES.length], false, bsp, formsOf(bsp.id)[0].id, this.botTraits(FAMILY[bsp.family]), kitOf(bsp.id));
+        this.snakes.push(b);
+        this.respawnBot(b, 1);
+      }
+    }
     const famCount = new Map<string, number>([[p.fam.id, 1]]);
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < (v3 ? 0 : n); i++) {
       const fam = this.pickBotFamily(famCount);
       famCount.set(fam.id, (famCount.get(fam.id) ?? 0) + 1);
       const bsp = SPECIES_BY_ID.get(this.rng.pick(fam.species))!;
@@ -428,12 +475,17 @@ export class Simulation {
     return this.onField(o) && o.flyT <= 0 && o.evolveT <= 0;
   }
 
+  /** 장판에 걸리는가(잠자리 계열 특성 '비행': 질주 중에는 장판·끈끈이를 무시) */
+  zoneHit(o: Snake) {
+    return this.hittable(o) && !(o.boosting && o.v3fam === 'dragonfly');
+  }
+
   rankOf(id: number): [number, number] {
     const list = this.snakes.filter((s) => !s.isBoss).sort((a, b) => b.score - a.score);
     return [list.findIndex((s) => s.id === id) + 1, list.length];
   }
 
-  private makeSnake(id: number, name: string, isPlayer: boolean, sp: Species, formId: string, traits: string[]): Snake {
+  private makeSnake(id: number, name: string, isPlayer: boolean, sp: Species, formId: string, traits: string[], kit: Kit | null = null): Snake {
     const fam = FAMILY[sp.family];
     const okForms = formsOf(sp.id);
     const form = okForms.find((f) => f.id === formId) ?? okForms[0];
@@ -455,6 +507,8 @@ export class Simulation {
       kills: 0, killsAll: 0, deaths: 0, st: emptyStats(), dmgBins: [], castT: -99, castOpen: false, lifeStart: 0, hitBy: new Map(), crushes: 0, score: 0, ultUses: 0, respawnT: 0, loopCd: 0,
       hp: 1, maxHp: 1, hurtT: 99, biteCd: 0, invulnT: 0, wallCd: 0, dropAcc: 0, poisonT: 0, poisonDps: 0, poisonBy: -1, poisonAcc: 0, lives: 1, ult: 0, netT: 0, feastT: 0, yuckT: 0,
       lastSkillSeq: 0, lastSubSeq: 0, lastCardSeq: 0, lastRerollSeq: 0, skillCd: 0, subCd: 0,
+      kit, v3fam: kit ? kit.v3fam : null, spcCd: 0, lastSpcSeq: 0, lastUltSeq: 0, coilT: 0, coilPoison: false, leafT: 0, leafHeal: false, flutterT: 0, bitterPoison: false, bitterMul: 0.5,
+      charmBy: -1, itchBy: -1, itchDps: 0, itchAcc: 0, glowT: 0, workerCd: 0, raidT: 0, raidN: 0, fungusT: 0, autoCurlCd: 0, osmCd: 0, bigeyeCd: 0, shimmerCd: 0, wasBoosting: false, jumpT: 0, paraT: new Map(),
       stunT: 0, slowT: 0, slowMul: 1, rootT: 0, silenceT: 0, blindT: 0, markT: 0, fearT: 0, hiddenT: 0, confuseT: 0, charmT: 0, itchT: 0, ghostT: 0, flyT: 0,
       dashT: 0, dashMul: 1, dashKind: '', dashHits: new Set(), dashDmg: 0, dashAngle: NaN,
       reduceT: 0, reduceMul: 1, backT: 0, bitterT: 0, curlT: 0, deadT: 0, escapeT: 0,
@@ -495,6 +549,7 @@ export class Simulation {
     return s.isBoss ? (k === 'minion' || k === 'respawn' ? 0 : 1) : traitMod(s.traits, k);
   }
   tsp(s: Snake, sp: Parameters<typeof hasSpecial>[1]) {
+    if (sp === 'poise' && s.v3fam === 'mantis') return true; // 사마귀 계열 특성 '매복'
     return !s.isBoss && hasSpecial(s.traits, sp);
   }
 
@@ -511,14 +566,46 @@ export class Simulation {
     if (s.isBoss) return CONFIG.bossSpeed;
     let v = (CONFIG.baseSpeed + CONFIG.speedPerLevel * (s.level - 1) + CONFIG.evoSpeed[s.evo]) * s.fam.spd * (1 + this.ab(s, 'light'));
     if (this.inst(s, 'slim')) v *= 1.06;
+    if (this.inst(s, 'fastfeet')) v *= 1.08;
+    if (this.inst(s, 'giant')) v *= 0.95;
     v *= this.tm(s, 'spd');
     if (s.chaseT > 0) v *= 1.2;
     return v;
   }
 
   /** 주 기술 재사용 시간 */
+  /** 3판 칸 재사용 시간 */
+  kitCdMax(s: Snake, slot: KitSlot) {
+    if (!s.kit) return 0;
+    let cd = s.kit[slot].cd;
+    cd *= this.tm(s, 'cd');
+    if (slot === 'atk') {
+      cd *= 1 - this.ab(s, 'focus');
+      if (s.mainLv >= 2) cd *= 0.85;
+    } else cd *= this.tm(s, 'subCd');
+    if (s.fam.id === 'firefly') cd *= 1 - this.ab(s, 'blink');
+    return cd;
+  }
+
+  /** 기술 재사용 줄이기: 그 기술 형태가 든 칸(3판) 또는 주 기술(2판) */
+  cutCd(s: Snake, formOrSub: string | null, mul: number) {
+    if (!s.kit) {
+      s.skillCd *= mul;
+      return;
+    }
+    for (const sl of KIT_SLOTS) {
+      const im = s.kit[sl].impl;
+      if (formOrSub === null ? sl === 'atk' : (im.k === 'main' && im.form === formOrSub) || (im.k === 'sub' && im.sub === formOrSub)) {
+        if (sl === 'atk') s.skillCd *= mul;
+        else if (sl === 'def') s.subCd *= mul;
+        else s.spcCd *= mul;
+      }
+    }
+  }
+
   skillCdMax(s: Snake) {
     if (s.isBoss) return 99;
+    if (s.kit) return this.kitCdMax(s, 'atk');
     let cd = this.larvaLip(s) ? 6 : s.form.cd;
     cd *= 1 - this.ab(s, 'focus');
     if (s.mainLv >= 2) cd *= 0.85;
@@ -527,6 +614,7 @@ export class Simulation {
   }
 
   subCdMax(s: Snake) {
+    if (s.kit) return this.kitCdMax(s, 'def');
     if (!s.sub) return 0;
     let cd = s.sub.cd;
     if (s.fam.id === 'firefly' && s.sub.id === s.fam.sub.id) cd *= 1 - this.ab(s, 'blink');
@@ -535,7 +623,7 @@ export class Simulation {
 
   /** 잠자리 수채 단계: 주 기술이 '아랫입술 발사' */
   larvaLip(s: Snake) {
-    return s.fam.id === 'dragonfly' && s.evo === 1;
+    return !s.kit && s.fam.id === 'dragonfly' && s.evo === 1;
   }
 
   /** 주 기술 피해 배율 */
@@ -553,6 +641,7 @@ export class Simulation {
     let m = 1 + this.ab(s, 'wide');
     if (sub && s.subLv >= 1) m *= 1.3;
     if (!sub) m *= this.tm(s, 'range');
+    if (s.jumpT > 0) m *= 1.3; // 불독개미: 점프 사냥
     return m;
   }
 
@@ -568,7 +657,8 @@ export class Simulation {
       return;
     }
     s.r = radiusFor(s.evo, s.segCount, this.inst(s, 'slim') ? 0.82 : 1);
-    s.maxHp = maxHpOf(this.fighter(s), s.segCount, (this.inst(s, 'slim') ? 0.9 : 1) * this.tm(s, 'hp'));
+    const hpI = (this.inst(s, 'slim') ? 0.9 : 1) * (this.inst(s, 'fastfeet') ? 0.9 : 1) * (this.inst(s, 'giant') ? 1.1 : 1);
+    s.maxHp = maxHpOf(this.fighter(s), s.segCount, hpI * this.tm(s, 'hp'));
     if (s.hp > s.maxHp) s.hp = s.maxHp;
   }
 
@@ -583,6 +673,8 @@ export class Simulation {
     s.stunT = s.slowT = s.rootT = s.silenceT = s.blindT = s.markT = s.fearT = s.confuseT = s.charmT = s.itchT = s.hiddenT = s.ghostT = s.flyT = s.dashT = 0;
     s.reduceT = s.backT = s.bitterT = s.curlT = s.deadT = s.escapeT = s.feastT = s.yuckT = 0;
     s.chanT = s.whirlT = s.skyT = s.ambushT = s.trailT = s.lanternT = s.compoundT = s.decoyT = 0;
+    s.coilT = s.leafT = s.flutterT = s.glowT = s.jumpT = s.spcCd = 0;
+    s.charmBy = s.itchBy = -1;
     s.slowMul = s.reduceMul = 1;
     s.dashKind = '';
     s.dashHits.clear();
@@ -685,7 +777,7 @@ export class Simulation {
       s.pending++;
       if (s.level === CONFIG.evoLevels[2] || s.level === CONFIG.evoLevels[3]) {
         s.evo = evoOf(s.level);
-        if (s.evo === 2) s.subPending = true;
+        if (s.evo === 2 && !s.kit) s.subPending = true;
       }
       while (s.subPending || s.pending > 0) {
         this.makeOffer(s);
@@ -827,7 +919,7 @@ export class Simulation {
       this.handleActions(s, dt);
       if (!s.alive) continue;
       this.tickStatus(s, dt);
-      if (s.alive) SK.tickSkills(this, s, dt);
+      if (s.alive) this.as(s, () => SK.tickSkills(this, s, dt));
       if (s.alive) {
         const x0 = s.x, y0 = s.y;
         this.moveSnake(s, dt);
@@ -839,8 +931,10 @@ export class Simulation {
     // 3) 먹기, 장판, 투사체, 부른 벌, 예고
     this.eatFoods(dt);
     SK.updateZones(this, dt);
+    this.actor = null;
     this.updateProjs(dt);
     SK.updateMinions(this, dt);
+    this.actor = null;
     this.updateTeles(dt);
     // 4) 충돌
     this.buildGrid();
@@ -911,6 +1005,8 @@ export class Simulation {
     if (heal) this.heal(s, ep * CONFIG.foodHeal * this.tm(s, 'heal') * (this.tsp(s, 'berserk') ? 0.5 : 1));
     // 양봉꿀벌: 먹이의 일부를 꿀로 저장(최대 체력의 30%까지)
     if (this.inst(s, 'store')) s.store = Math.min(s.maxHp * 0.3, s.store + ep * 0.6);
+    if (this.inst(s, 'fungus')) s.fungusT = 3; // 잎꾼개미: 버섯 농사
+    if (this.inst(s, 'raidline')) ((s.raidT = 5), (s.raidN = Math.min(3, s.raidN + 1))); // 군대개미: 사냥 행렬
     if (this.inst(s, 'trash')) s.pack = Math.min(1, s.pack + ep / 60);
     if (s.level >= CONFIG.maxLevel) return;
     s.nut += nut;
@@ -936,7 +1032,7 @@ export class Simulation {
 
   private finishEvolve(s: Snake) {
     s.evo = evoOf(s.level);
-    if (s.evo >= 2 && !s.sub) s.subPending = true;
+    if (s.evo >= 2 && !s.sub && !s.kit) s.subPending = true;
     this.fullHeal(s);
     this.rebuildSegs(s);
     s.offer = null; // 보조 기술 고르기가 먼저
@@ -982,7 +1078,7 @@ export class Simulation {
     }
     for (const a of s.abilities) if (a.lv < 3) cands.push({ c: { kind: 'up', id: a.id }, w: 1.6 });
     if (s.mainLv < 2) cands.push({ c: { kind: 'main', id: s.mainLv === 0 ? 'main1' : 'main2' }, w: 1.4 });
-    if (s.sub && s.subLv < 1) cands.push({ c: { kind: 'sub', id: 'sub' }, w: 1.2 });
+    if ((s.sub || (s.kit && s.level >= KIT_UNLOCK.def)) && s.subLv < 1) cands.push({ c: { kind: 'sub', id: 'sub' }, w: 1.2 });
     const out: LevelCard[] = [];
     // 처음 세 번은 새 능력이 적어도 1장
     if (s.newGiven < CONFIG.firstNewCards) {
@@ -1050,14 +1146,15 @@ export class Simulation {
   // ---------- 행동 ----------
 
   canAct(s: Snake) {
-    return s.stunT <= 0 && s.silenceT <= 0 && s.fearT <= 0 && s.blindT <= 0 && s.evolveT <= 0 && s.deadT <= 0 && s.grabbedBy < 0 && s.skyT <= 0 && s.whirlT <= 0;
+    return s.stunT <= 0 && s.silenceT <= 0 && s.fearT <= 0 && s.blindT <= 0 && s.charmT <= 0 && s.coilT <= 0 && s.evolveT <= 0 && s.deadT <= 0 && s.grabbedBy < 0 && s.skyT <= 0 && s.whirlT <= 0;
   }
 
   private handleActions(s: Snake, dt: number) {
     const c = s.cmd;
     if (s.isBoss) return;
+    if (s.kit) this.handleKit(s, dt);
     // 주 기술(게이지가 차 있으면 필살기)
-    if (c.skillSeq !== s.lastSkillSeq) {
+    if (!s.kit && c.skillSeq !== s.lastSkillSeq) {
       s.lastSkillSeq = c.skillSeq;
       if (s.ambushT > 0) SK.ambushStrike(this, s);
       else if (this.canAct(s)) {
@@ -1065,7 +1162,7 @@ export class Simulation {
         else if (s.skillCd <= 0 && s.chanT <= 0) this.castMain(s);
       }
     }
-    if (c.subSeq !== s.lastSubSeq) {
+    if (!s.kit && c.subSeq !== s.lastSubSeq) {
       s.lastSubSeq = c.subSeq;
       // 탈출 질주·다리 자르기 같은 탈출 기술은 묶여 있어도 쓸 수 있다
       const escape = s.sub && (s.sub.id === 'escape' || s.sub.id === 'molt' || s.sub.id === 'backstep');
@@ -1074,6 +1171,7 @@ export class Simulation {
     const tick = this.inst(s, 'perch') && s.sneaking ? 2 : 1; // 고추잠자리: 앉아서 쉬기
     s.skillCd = Math.max(0, s.skillCd - dt * tick);
     s.subCd = Math.max(0, s.subCd - dt * tick);
+    s.spcCd = Math.max(0, s.spcCd - dt * tick);
     // 카드
     if (!s.offer && s.evolveT <= 0 && (s.pending > 0 || s.subPending)) {
       this.makeOffer(s);
@@ -1103,6 +1201,73 @@ export class Simulation {
     }
     // 필살기 게이지: 저절로 초당 +0.3
     this.addUlt(s, CONFIG.ultPassive * dt);
+  }
+
+  /** 3판: 공격(E)·방어(Q)·특수(R)·필살기(F) */
+  private handleKit(s: Snake, dt: number) {
+    const c = s.cmd, kit = s.kit!;
+    void dt;
+    const free = s.chanT <= 0;
+    if (c.skillSeq !== s.lastSkillSeq) {
+      s.lastSkillSeq = c.skillSeq;
+      if (s.ambushT > 0) SK.ambushStrike(this, s);
+      else if (this.canAct(s) && free && s.skillCd <= 0) this.castKit(s, 'atk');
+    }
+    if (c.subSeq !== s.lastSubSeq) {
+      s.lastSubSeq = c.subSeq;
+      // 탈출 기술(굴 파기·팔랑 비행·줄 타고 빠지기)은 묶여 있어도 쓸 수 있다
+      const esc = kit.def.ai === 'escape';
+      if (s.level >= KIT_UNLOCK.def && s.subCd <= 0 && (this.canAct(s) || (esc && s.evolveT <= 0 && s.deadT <= 0 && s.stunT <= 0 && s.charmT <= 0))) this.castKit(s, 'def');
+    }
+    if (c.spcSeq !== s.lastSpcSeq) {
+      s.lastSpcSeq = c.spcSeq;
+      if (s.level >= KIT_UNLOCK.spc && s.spcCd <= 0 && this.canAct(s) && free) this.castKit(s, 'spc');
+    }
+    if (c.ultSeq !== s.lastUltSeq) {
+      s.lastUltSeq = c.ultSeq;
+      if (s.ult >= CONFIG.ultMax && this.canAct(s) && free) this.castUlt(s);
+    }
+  }
+
+  /** 지금 기술·효과를 일으키는 곤충(계열 특성 '무거운 껍질' 같은 것이 쓴다) */
+  actor: Snake | null = null;
+
+  private castKit(s: Snake, slot: KitSlot) {
+    const sk = s.kit![slot];
+    const cd = this.kitCdMax(s, slot);
+    if (slot === 'atk') s.skillCd = cd;
+    else if (slot === 'def') s.subCd = cd;
+    else s.spcCd = cd;
+    // 혼란: 기술 조준이 빗나간다
+    if (s.confuseT > 0) s.angle += this.rng.range(-0.6, 0.6);
+    this.events.push({ type: 'skill', snake: s.id, fam: s.fam.id, name: sk.name, icon: sk.icon, x: s.x, y: s.y, angle: s.angle, slot: slot === 'atk' ? 'main' : slot === 'def' ? 'sub' : 'spc' });
+    this.mark(s, slot === 'atk' ? 'main' : 'sub');
+    const prev = this.actor;
+    this.actor = s;
+    this.runImpl(s, sk.impl);
+    this.actor = prev;
+    s.st.casts++;
+    s.castT = this.time;
+    s.castOpen = true;
+    if (slot === 'atk') {
+      s.prayArmed = false;
+      s.poised = false;
+      s.poiseAcc = 0;
+    }
+  }
+
+  private runImpl(s: Snake, im: Kit['atk']['impl']) {
+    if (im.k === 'main') {
+      const keep = s.form;
+      s.form = FAMILY[im.fam].forms.find((f) => f.id === im.form) ?? keep;
+      SK.castMain(this, s, im.fam);
+      s.form = keep;
+    } else if (im.k === 'sub') {
+      s.sub = SUBS_BY_ID.get(im.sub) ?? s.sub;
+      SK.castSub(this, s);
+    } else if (im.k === 'ult') SK.castUlt(this, s, im.fam);
+    else if (im.k === 'new') SK3.castNew(this, s, im.id);
+    else SK3.castNewUlt(this, s, im.id);
   }
 
   addUlt(s: Snake, v: number) {
@@ -1142,9 +1307,14 @@ export class Simulation {
   private castUlt(s: Snake) {
     s.ult = 0;
     s.ultUses++;
-    this.events.push({ type: 'skill', snake: s.id, fam: s.fam.id, name: s.fam.ult.name, icon: s.fam.ult.icon, x: s.x, y: s.y, angle: s.angle, slot: 'ult' });
+    const un = s.kit ? s.kit.ult : s.fam.ult;
+    this.events.push({ type: 'skill', snake: s.id, fam: s.fam.id, name: un.name, icon: un.icon, x: s.x, y: s.y, angle: s.angle, slot: 'ult' });
     this.mark(s, 'ult');
-    SK.castUlt(this, s);
+    const prev = this.actor;
+    this.actor = s;
+    if (s.kit) this.runImpl(s, s.kit.ult.impl);
+    else SK.castUlt(this, s);
+    this.actor = prev;
     s.st.ultCasts++;
   }
 
@@ -1168,12 +1338,24 @@ export class Simulation {
   }
 
   later(t: number, fn: () => void) {
-    this.timers.push({ t, fn });
+    const who = this.actor;
+    this.timers.push({ t, fn: who ? () => this.as(who, fn) : fn });
+  }
+
+  /** who가 일으킨 일로 fn을 돌린다 */
+  as<T>(who: Snake | null, fn: () => T): T {
+    const prev = this.actor;
+    this.actor = who;
+    try {
+      return fn();
+    } finally {
+      this.actor = prev;
+    }
   }
 
   /** 바닥 예고 후 실행(필살기) */
   telegraph(owner: Snake, tv: Omit<TeleView, 't' | 'total' | 'owner'>, fn: () => void, t: number = CONFIG.ultTele) {
-    this.teles.push({ ...tv, t, total: t, owner: owner.id, fn });
+    this.teles.push({ ...tv, t, total: t, owner: owner.id, fn: () => this.as(owner, fn) });
   }
 
   private updateTeles(dt: number) {
@@ -1206,7 +1388,7 @@ export class Simulation {
     this.projs.push({ dmg: 0, pierce: 1, hits: new Set(), ...p });
   }
 
-  addMinion(owner: Snake, kind: 'bee' | 'wasp' | 'ant' | 'soldier', life: number, dps: number, heat = false, slot = 0) {
+  addMinion(owner: Snake, kind: 'bee' | 'wasp' | 'ant' | 'soldier' | 'worker', life: number, dps: number, heat = false, slot = 0) {
     dps *= this.tm(owner, 'minionDmg');
     const a = this.rng.range(0, Math.PI * 2);
     this.minions.push({ x: owner.x + Math.cos(a) * 30, y: owner.y + Math.sin(a) * 30, angle: a, owner: owner.id, life, hp: owner.maxHp * 0.08, dps, speed: kind === 'ant' ? 260 : kind === 'soldier' ? 300 : 330, target: -1, kind, slot, bite: 9, acc: 0, heat, ult: null });
@@ -1259,6 +1441,7 @@ export class Simulation {
 
   stun(o: Snake, t: number) {
     if (o.isBoss || o.invulnT > 0) return;
+    if (this.actor && this.actor !== o && this.actor.v3fam === 'beetle') t += 0.2; // 무거운 껍질
     o.stunT = Math.max(o.stunT, t);
   }
   slow(o: Snake, t: number, mul: number) {
@@ -1284,6 +1467,25 @@ export class Simulation {
     if (o.isBoss || o.invulnT > 0) return;
     o.blindT = Math.max(o.blindT, t);
   }
+  /** 혼란(나비): 조작 방향이 흔들리고 기술 조준이 빗나간다 */
+  confuse(o: Snake, t: number, by?: Snake) {
+    if (o.isBoss || o.invulnT > 0) return;
+    void by;
+    o.confuseT = Math.max(o.confuseT, t);
+  }
+  /** 매혹: by 쪽으로 천천히 걸어간다(기술 못 씀) */
+  charm(o: Snake, t: number, by: Snake) {
+    if (o.isBoss || o.invulnT > 0) return;
+    o.charmT = Math.max(o.charmT, t);
+    o.charmBy = by.id;
+  }
+  /** 가려움(독나방): 독털이 박혀 오래 지속 피해 */
+  itch(o: Snake, t: number, dps: number, by: Snake) {
+    if (o.isBoss || o.invulnT > 0) return;
+    o.itchT = Math.max(o.itchT, t);
+    o.itchDps = Math.max(o.itchT > 0 && o.itchBy === by.id ? o.itchDps : 0, dps);
+    o.itchBy = by.id;
+  }
   markOn(o: Snake, t: number) {
     o.markT = Math.max(o.markT, t);
   }
@@ -1294,7 +1496,8 @@ export class Simulation {
   /** 밀치기·끌어당기기: 0.3초쯤에 걸쳐 dist만큼 미끄러진다 */
   knock(o: Snake, angle: number, dist: number) {
     if (o.invulnT > 0 && dist > 0) return;
-    const k = o.isBoss ? 0.25 : o.fam.knockTaken * this.tm(o, 'knock');
+    let k = o.isBoss ? 0.25 : (o.v3fam === 'beetle' ? 0.5 : o.fam.knockTaken) * this.tm(o, 'knock');
+    if (dist > 0 && this.actor && this.actor !== o && this.actor.v3fam === 'beetle') k *= 1.2; // 무거운 껍질: 내 밀어내기 더 멀리
     const v = dist * k * 8;
     o.kvx += Math.cos(angle) * v;
     o.kvy += Math.sin(angle) * v;
@@ -1371,6 +1574,9 @@ export class Simulation {
       if (t.hp < t.maxHp * 0.3) d *= 1 + this.ab(a, 'eye');
       if (this.inst(a, 'patrol') && Math.hypot(a.x - a.patrolX, a.y - a.patrolY) < 320 && a.patrolT > 2) d *= 1.2;
       if (this.inst(a, 'snail') && (t.slowT > 0 || t.stunT > 0 || t.rootT > 0)) d *= 1.25;
+      // 3판 계열 특성
+      if (a.v3fam === 'bee' && t.poisonT > 0) d *= 1.15; // 독침: 중독된 적에게 +15%
+      if (a.v3fam === 'centipede' && kind === 'bite' && (t.rootT > 0 || t.grabbedBy === a.id)) d *= 1.3; // 독턱: 휘감긴 적
       if (!t.isBoss) {
         if (this.inst(a, 'raid') && t.fam.id === 'bee') d *= 1.3;
         if (this.inst(a, 'heat') && t.fam.id === 'wasp') d *= 1.3;
@@ -1384,6 +1590,11 @@ export class Simulation {
     }
     const dealt = this.damage(t, d, a.id, kind, x, y, cause);
     if (ult) ult.set(t.id, (ult.get(t.id) ?? 0) + dealt);
+    if (dealt > 0 && !a.isBoss && t.alive && (kind === 'skill' || kind === 'ult' || kind === 'crit')) {
+      // 독침(벌): 기술에 맞은 적 3초 중독 · 인분 날개(나비): 1.5초 혼란
+      if (a.v3fam === 'bee' && kind !== 'crit') this.poison(a, t, 3, this.B(a) * 0.08);
+      if (a.v3fam === 'butterfly' && kind !== 'crit') this.confuse(t, 1.5 + this.ab(a, 'scales'), a);
+    }
     if (dealt > 0 && (kind === 'skill' || kind === 'ult') && this.tsp(a, 'chase')) a.chaseT = 2;
     if (dealt > 0 && !a.isBoss && kind !== 'ult' && !ult) this.addUlt(a, (dealt / this.B(a)) * CONFIG.ultDealt);
     return dealt;
@@ -1416,6 +1627,34 @@ export class Simulation {
       if (this.tsp(t, 'sandbody') && t.sneaking) d *= 0.7;
       if (t.reduceT > 0) d *= t.reduceMul;
       if (t.curlT > 0) d *= 0.4;
+      if (t.coilT > 0) d *= 0.6; // 몸 말기 −40%
+      if (t.v3fam === 'beetle') d *= 0.9; // 무거운 껍질
+      if (t.flutterT > 0 && kind !== 'bite' && kind !== 'crit') d *= 0.5; // 팔랑 비행: 기술 피해 절반
+      if (t.boosting && this.ab(t, 'glide') > 0) d *= 1 - this.ab(t, 'glide');
+      if (atk && atk !== t && (t.leafT > 0 || (this.inst(t, 'bigeye') && t.bigeyeCd <= 0))) {
+        const dir = Math.atan2(atk.y - t.y, atk.x - t.x) - t.angle;
+        if (Math.cos(dir) > 0.35) {
+          if (t.leafT > 0) {
+            // 잎 방패: 앞쪽 피해를 막는다(각성: 막은 만큼 30% 회복)
+            this.events.push({ type: 'hit', snake: t.id, by, dmg: 0, x, y, kind, good, blocked: true });
+            t.st.dmgBlocked += d;
+            if (t.leafHeal) this.heal(t, d * 0.3);
+            return 0;
+          }
+          // 큰 눈(올빼미나비): 정면 첫 공격 −50%(8초에 한 번)
+          d *= 0.5;
+          t.bigeyeCd = 8;
+        }
+      }
+      if (this.inst(t, 'segment') && kind === 'bite' && atk) {
+        // 단단한 마디(왕지네): 몸 가운데를 물리면 −20%
+        let bi = 0, bd = Infinity;
+        for (let i = 0; i < t.segN; i += 2) {
+          const dd = Math.hypot(t.segs[i * 2] - x, t.segs[i * 2 + 1] - y);
+          if (dd < bd) ((bd = dd), (bi = i));
+        }
+        if (bi > t.segN * 0.2 && bi < t.segN * 0.8) d *= 0.8;
+      }
       if (t.acroT > 0) d *= 1 - this.ab(t, 'acro');
       if (t.sapT > 0) d *= 1 - this.ab(t, 'saplove');
       if (t.grabTarget >= 0) d *= 1 - this.ab(t, 'legs');
@@ -1490,6 +1729,11 @@ export class Simulation {
     this.events.push({ type: 'hit', snake: t.id, by, dmg: d, x, y, kind, good });
     if (t.hp <= 0) this.kill(t, by, cause, enemy);
     return d;
+  }
+
+  nearPuddle(s: Snake, pad: number) {
+    for (const p of this.map.puddles) if (Math.hypot(s.x - p.x, s.y - p.y) < p.r + pad) return true;
+    return false;
   }
 
   nearRock(s: Snake, pad: number) {
@@ -1607,6 +1851,42 @@ export class Simulation {
     s.sapT = dec(s.sapT);
     s.safeT = dec(s.safeT);
     s.sprintT = dec(s.sprintT);
+    // 3판 시간들
+    s.coilT = dec(s.coilT);
+    if (s.coilT <= 0) s.coilPoison = false;
+    s.leafT = dec(s.leafT);
+    s.flutterT = dec(s.flutterT);
+    s.glowT = dec(s.glowT);
+    if (s.glowT > 0) s.hiddenT = 0; // 빛 점액: 숨지 못함
+    s.jumpT = dec(s.jumpT);
+    s.fungusT = dec(s.fungusT);
+    s.autoCurlCd = dec(s.autoCurlCd);
+    s.osmCd = dec(s.osmCd);
+    s.bigeyeCd = dec(s.bigeyeCd);
+    s.shimmerCd = dec(s.shimmerCd);
+    s.workerCd = dec(s.workerCd);
+    s.raidT = dec(s.raidT);
+    if (s.raidT <= 0) s.raidN = 0;
+    if (s.bitterT <= 0) ((s.bitterPoison = false), (s.bitterMul = 0.5));
+    if (s.charmT <= 0) s.charmBy = -1;
+    if (s.itchT > 0) {
+      s.itchAcc += dt;
+      if (s.itchAcc >= 0.5) {
+        s.itchAcc = 0;
+        const by = s.itchBy >= 0 ? this.snakes[s.itchBy] : null;
+        if (by && by.alive) this.deal(by, s, s.itchDps * 0.5, 'poison', s.x, s.y, 'poison', null, false);
+      }
+    }
+    if (this.inst(s, 'autocurl') && s.hp < s.maxHp * 0.3 && s.autoCurlCd <= 0 && s.alive) {
+      // 노래기: 체력 30% 밑에서 저절로 몸을 만다(1초, 피해 −50%)
+      s.autoCurlCd = 20;
+      s.reduceT = Math.max(s.reduceT, 1);
+      s.reduceMul = Math.min(s.reduceMul, 0.5);
+      this.fx('lifted', s, s.x, s.y, { angle: s.angle, wk: 'curl', dur: 1 });
+      this.events.push({ type: 'pop', snake: s.id, x: s.x, y: s.y - 30, text: '🌀 몸 말기', color: 0xffc83a });
+    }
+    if (s.fungusT > 0) this.heal(s, s.maxHp * 0.025 * dt);
+    if (s.v3fam === 'ant') SK3.workerTick(this, s, dt);
     s.hurtT += dt;
     if (s.isBoss) {
       if (s.poisonT > 0) this.tickPoison(s, dt);
@@ -1678,7 +1958,7 @@ export class Simulation {
   private moveSnake(s: Snake, dt: number) {
     const c = s.cmd;
     const pinned = s.grabbedBy >= 0;
-    const busy = s.stunT > 0 || s.rootT > 0 || s.curlT > 0 || s.deadT > 0 || s.ambushT > 0 || pinned;
+    const busy = s.stunT > 0 || s.rootT > 0 || s.curlT > 0 || s.coilT > 0 || s.deadT > 0 || s.ambushT > 0 || pinned;
     s.sneaking = c.sneak && !s.isBoss && s.dashT <= 0;
     s.boosting = c.boost && !c.sneak && !busy && s.segCount > CONFIG.boostMinSegments && s.dashT <= 0 && s.whirlT <= 0;
     const sizeSlow = 1 - CONFIG.sizeTurnSlow * Math.min(1, Math.max(0, s.segCount - CONFIG.startSegments) / 200);
@@ -1687,7 +1967,15 @@ export class Simulation {
     let want = c.angle;
     // 눈부심: 방향이 흔들린다
     if (s.blindT > 0) want += Math.sin(this.time * 11 + s.id) * 1.1;
+    // 혼란: 조작 방향이 갈지자로 흔들린다
+    if (s.confuseT > 0) want += Math.sin(this.time * 7 + s.id * 1.7) * 0.9;
+    // 매혹: 건 쪽으로 걸어간다
+    if (s.charmT > 0 && s.charmBy >= 0) {
+      const by = this.snakes[s.charmBy];
+      if (by && by.alive) want = Math.atan2(by.y - s.y, by.x - s.x);
+    }
     if (s.chanT > 0 && s.chanKind === 'circle') s.angle += 8.4 * dt * s.side * (s.chanT > 0.75 ? 1 : -1); // 맴돌기: 반은 왼쪽, 반은 오른쪽으로 돌아 8자를 그린다
+    else if (s.chanT > 0 && s.chanKind === 'orbit') s.angle += 4.2 * dt * s.side; // 백족 소용돌이: 큰 원으로 내달림
     else {
       let diff = want - s.angle;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
@@ -1696,7 +1984,14 @@ export class Simulation {
     let speed = this.speedOf(s);
     if (!s.isBoss) {
       if (s.yuckT > 0) speed *= CONFIG.yuckMul;
-      if (s.boosting) speed *= CONFIG.boostMul * this.tm(s, 'boost');
+      if (s.boosting) {
+        speed *= CONFIG.boostMul * this.tm(s, 'boost');
+        if (s.v3fam === 'dragonfly') speed *= 1.1; // 비행
+        if (this.inst(s, 'migrate')) speed *= 1.15; // 대이동
+        if (this.inst(s, 'groundhunt')) speed *= 1.1; // 땅 사냥꾼
+        if (this.inst(s, 'waterdance') && this.nearPuddle(s, 90)) speed *= 1.15; // 물가의 춤
+      }
+      if (s.charmT > 0) speed *= 0.5;
       else if (s.sneaking) speed *= CONFIG.sneakMul;
       if (s.dashT > 0) speed *= s.dashMul;
       if (s.evolveT > 0) speed *= 0.5;
@@ -1706,8 +2001,8 @@ export class Simulation {
       if (s.alertT > 0) speed *= 1.2;
       if (s.grabTarget >= 0) speed *= 0.4;
       if (s.chanT > 0 && s.chanKind === 'push') speed *= 0.35;
-      if (s.chanT > 0 && s.chanKind === 'circle') speed *= 1.4;
-      if (this.inPuddle(s) && s.flyT <= 0) speed *= this.inst(s, 'water') ? 1.25 : s.fam.id === 'dragonfly' && s.evo === 1 ? 1.3 : 0.7;
+      if (s.chanT > 0 && (s.chanKind === 'circle' || s.chanKind === 'orbit')) speed *= 1.4;
+      if (this.inPuddle(s) && s.flyT <= 0 && !this.inst(s, 'raft')) speed *= this.inst(s, 'water') ? 1.25 : !s.kit && s.fam.id === 'dragonfly' && s.evo === 1 ? 1.3 : 0.7;
     }
     if (s.slowT > 0) speed *= s.slowMul;
     if (s.stunT > 0) speed *= 0.25;
@@ -1716,6 +2011,7 @@ export class Simulation {
     if (s.boosting) {
       let drain = 1 - this.ab(s, 'breath');
       if (this.inst(s, 'bigwing')) drain *= 0.5;
+      if (this.inst(s, 'migrate')) drain *= 0.6;
       if (s.sprintT > 0) drain = 0;
       s.boostAcc += dt * drain;
       const dropI = CONFIG.boostDropInterval / this.tm(s, 'boostDrop');
@@ -1727,6 +2023,10 @@ export class Simulation {
         this.dropFood(tx, ty, 0.6, 30, s.level);
       }
     } else s.boostAcc = 0;
+    // 질주 시작·멈춤(모르포나비 빛 무늬 · 불독개미 점프 사냥)
+    if (s.boosting && !s.wasBoosting && this.inst(s, 'shimmer') && s.shimmerCd <= 0) ((s.shimmerCd = 10), (s.hiddenT = Math.max(s.hiddenT, 1)));
+    if (!s.boosting && s.wasBoosting && this.inst(s, 'jumphunt')) s.jumpT = 1;
+    s.wasBoosting = s.boosting;
     s.px = s.x;
     s.py = s.y;
     const mvA = Number.isNaN(s.dashAngle) ? s.angle : s.dashAngle;
@@ -1864,7 +2164,7 @@ export class Simulation {
           const rr = o.r + 8;
           if (dx * dx + dy * dy < rr * rr) {
             p.hits.add(o.id);
-            p.onHit(o, p.x, p.y);
+            this.as(this.snakes[p.owner] ?? null, () => p.onHit(o, p.x, p.y));
             if (p.hits.size >= p.pierce) done = true;
             break;
           }
@@ -1947,6 +2247,7 @@ export class Simulation {
             a.path[a.path.length - 1] = a.y;
             this.rebuildSegs(a);
             SK.onRock(this, a);
+            if (this.inst(a, 'rockslip')) a.alertT = Math.max(a.alertT, 0.5); // 땅지네: 바위를 스치면 0.5초 빨라짐
           }
         }
       }
@@ -1988,7 +2289,7 @@ export class Simulation {
     for (const [a, b, x, y] of dashHits) {
       if (!a.alive || !b.alive || a.dashHits.has(b.id)) continue;
       a.dashHits.add(b.id);
-      SK.onDashHit(this, a, b, x, y);
+      this.as(a, () => SK.onDashHit(this, a, b, x, y));
     }
     for (const { a, b, x, y, i } of bites) {
       if (!a.alive || !b.alive || a.biteCd > 0) continue;
@@ -2026,6 +2327,14 @@ export class Simulation {
       const ven = this.ab(a, 'venom');
       if (ven > 0 && b.alive) this.poison(a, b, ven, this.B(a) * 0.1);
       if (this.inst(a, 'beak') && b.alive) this.poison(a, b, 2, this.B(a) * 0.15);
+      // 3판 계열 특성(무는 쪽)
+      if (a.v3fam === 'centipede' && b.alive) this.poison(a, b, 2, this.B(a) * 0.1 * (1 + this.ab(a, 'venomjaw'))); // 독턱
+      if (a.v3fam === 'spider' && b.alive && !b.isBoss && (a.paraT.get(b.id) ?? -99) <= this.time - 3) {
+        a.paraT.set(b.id, this.time); // 독니: 0.5초 마비(같은 적 3초에 한 번)
+        this.stun(b, 0.5);
+        this.events.push({ type: 'skillHit', x, y, kind: 'stun' });
+      }
+      if (a.v3fam === 'ant' && b.alive) SK3.workersBite(this, a, b, dealt); // 일개미 행렬
       if (a.fangT > 0 && b.alive) {
         a.fangT = 0;
         this.stun(b, 1);
@@ -2038,8 +2347,19 @@ export class Simulation {
     if (!b.isBoss && !a.isBoss) {
       if (bitterB) {
         this.slow(a, 1, 0.6);
-        this.deal(b, a, dealt * 0.5, 'reflect', a.x, a.y, 'bite', null, false);
+        this.deal(b, a, dealt * b.bitterMul, 'reflect', a.x, a.y, 'bite', null, false);
       }
+      // 3판(물린 쪽)
+      if (b.coilT > 0 && b.coilPoison) this.poison(b, a, 2, this.B(b) * 0.12); // 몸 말기
+      if (bitterB && b.bitterPoison) this.poison(b, a, 3, this.B(b) * 0.1); // 쓴 독 몸
+      if (b.v3fam === 'butterfly') this.confuse(a, 1.5 + this.ab(b, 'scales'), b); // 인분 날개
+      if (this.inst(b, 'hairbody')) this.itch(a, 2, this.B(b) * 0.1, b); // 독털 몸
+      if (this.inst(b, 'osmeterium') && b.evo === 1 && b.osmCd <= 0) {
+        b.osmCd = 5; // 냄새뿔(호랑나비 애벌레)
+        this.stun(a, 0.5);
+        this.events.push({ type: 'pop', snake: b.id, x: b.x, y: b.y - 30, text: '냄새뿔!', color: 0xffa040 });
+      }
+      if (a.itchT > 0 && this.inst(b, 'hairbody') && b.evo >= 3) this.itch(a, 2, this.B(b) * 0.1, b);
       const thorn = this.ab(b, 'thorn');
       if (thorn > 0 && dealt > 0) this.deal(b, a, dealt * thorn, 'reflect', a.x, a.y, 'bite', null, false);
       if (this.inst(b, 'warncolor')) this.slow(a, 1, 0.6);
@@ -2297,6 +2617,10 @@ export class Simulation {
       player: {
         level: p.level, nut: p.nut, need: nutNeed(p.level), offer, pending: p.pending, rerolls: p.rerolls,
         skillCd: p.skillCd, skillCdMax: this.skillCdMax(p), subId: p.sub?.id ?? null, subCd: p.subCd, subCdMax: this.subCdMax(p),
+        kit: p.kit
+          ? KIT_SLOTS.map((sl) => ({ slot: sl, name: p.kit![sl].name, icon: p.kit![sl].icon, cd: sl === 'atk' ? p.skillCd : sl === 'def' ? p.subCd : p.spcCd, cdMax: this.kitCdMax(p, sl), unlock: KIT_UNLOCK[sl] }))
+          : undefined,
+        ultName: p.kit?.ult.name, ultIcon: p.kit?.ult.icon,
         ult: p.ult, ultActive: p.whirlT > 0 || p.skyT > 0, abilities: p.abilities.map((a) => ({ ...a })), mainLv: p.mainLv, subLv: p.subLv,
         form: this.larvaLip(p) ? 'lip' : p.form.id, traits: [...p.traits],
         lives: p.lives, respawnIn: p.alive ? 0 : Math.max(0, p.respawnT), captured: Math.max(0, p.netT), rank, total, ultUses: p.ultUses,

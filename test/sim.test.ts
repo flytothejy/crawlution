@@ -21,7 +21,7 @@ const opts = (species: string, form: string, extra: Partial<GameOpts> = {}): Gam
   check('계열마다 기술 형태 3개', FAMILIES.every((f) => f.forms.length === 3));
   check('본능 40개 모두 다름', new Set(SPECIES.map((s) => s.instinct.id)).size === 40);
   check('특별 먹이 10종: 계열마다 좋아함·싫어함 하나씩', SPECIAL_FOODS.length === 10 && SPECIAL_FOODS.every((_, i) => FAMILIES.filter((f) => f.likes === i).length === 1 && FAMILIES.filter((f) => f.hates === i).length === 1) && FAMILIES.every((f) => f.likes !== f.hates));
-  check('능력 카드 37장(공용 17 + 계열 전용 2×10)', ABILITIES.length === 37 && FAMILIES.every((f) => ABILITIES.filter((a) => a.family === f.id).length === 2));
+  check('능력 카드 37장(공용 17 + 계열 전용 2×10)', ABILITIES.filter((a) => !a.family || FAMILIES.some((f) => f.id === a.family)).length === 37 && FAMILIES.every((f) => ABILITIES.filter((a) => a.family === f.id).length === 2));
   check('특성: 공용 10 + 계열마다 3, 모두 대가가 있음', COMMON_TRAITS.length === 10 && FAMILIES.every((f) => familyTraits(f.id).length === 3) && TRAITS.every((t) => t.up && t.down), `${TRAITS.length}개`);
   check('공용 보조 기술 10개', COMMON_SUBS.length === 10);
   check("레벨 곡선: 1→2에 20, 한 레벨마다 7씩 더", nutNeed(1) === 20 && nutNeed(15) === 118);

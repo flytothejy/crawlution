@@ -955,7 +955,7 @@ function startGame() {
 
 // ---------- 설정 ----------
 function gameOpts(): GameOpts {
-  return { power: S.son ? SON_POWER : 1, bots: S.bots, map: S.map, loadout: { ...LO, traits: [...LO.traits] } };
+  return { power: S.son ? SON_POWER : 1, bots: S.bots, map: S.map, loadout: { ...LO, traits: [...LO.traits] }, v3: true };
 }
 
 function applySettings() {

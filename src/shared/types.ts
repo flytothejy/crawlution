@@ -7,13 +7,15 @@ export interface Command {
   boost: boolean;
   sneak: boolean;
   skillSeq: number; // 주 기술(게이지가 차 있으면 필살기). 누를 때마다 1씩 증가
-  subSeq: number; // 보조 기술
+  subSeq: number; // 보조 기술(3판: 방어)
+  spcSeq: number; // 3판: 특수
+  ultSeq: number; // 3판: 필살기
   cardSeq: number; // 카드 고르기
   cardChoice: number; // 카드 번호
   rerollSeq: number; // 다시 뽑기
 }
 
-export const emptyCommand = (angle = 0): Command => ({ angle, boost: false, sneak: false, skillSeq: 0, subSeq: 0, cardSeq: 0, cardChoice: 0, rerollSeq: 0 });
+export const emptyCommand = (angle = 0): Command => ({ angle, boost: false, sneak: false, skillSeq: 0, subSeq: 0, spcSeq: 0, ultSeq: 0, cardSeq: 0, cardChoice: 0, rerollSeq: 0 });
 
 export type DeathCause = 'bite' | 'wall' | 'crush' | 'enemy' | 'poison' | 'skill' | 'ult';
 export type HitKind = 'bite' | 'recoil' | 'skill' | 'poison' | 'enemy' | 'wall' | 'crush' | 'crit' | 'ult' | 'minion' | 'reflect';
@@ -50,7 +52,7 @@ export type GameEvent =
   | { type: 'levelUp'; snake: number; level: number; x: number; y: number }
   | { type: 'evolveStart'; snake: number }
   | { type: 'evolve'; snake: number; stage: number; x: number; y: number }
-  | { type: 'skill'; snake: number; fam: FamilyId; name: string; icon: string; x: number; y: number; angle: number; slot: 'main' | 'sub' | 'ult' }
+  | { type: 'skill'; snake: number; fam: FamilyId; name: string; icon: string; x: number; y: number; angle: number; slot: 'main' | 'sub' | 'spc' | 'ult' }
   | { type: 'fx'; kind: FxKind; snake: number; fam: FamilyId | null; sp?: string; x: number; y: number; r?: number; angle?: number; len?: number; half?: number; x1?: number; y1?: number; awake?: boolean; wk?: string; dur?: number }
   | { type: 'skillHit'; x: number; y: number; kind: 'cut' | 'stun' | 'push' | 'slow' | 'root' | 'blind' | 'mark' | 'fear' | 'silence' | 'grab' | 'poison' | 'confuse' | 'charm' | 'itch' }
   | { type: 'pop'; snake: number; x: number; y: number; text: string; color: number }
@@ -160,6 +162,10 @@ export interface PlayerView {
   subId: string | null;
   subCd: number;
   subCdMax: number;
+  /** 3판 4칸 기술: 공격·방어·특수(잠김은 열리는 레벨) + 필살기 이름 */
+  kit?: { slot: 'atk' | 'def' | 'spc'; name: string; icon: string; cd: number; cdMax: number; unlock: number }[];
+  ultName?: string;
+  ultIcon?: string;
   ult: number; // 0~100
   ultActive: boolean;
   abilities: { id: string; lv: number }[];
@@ -200,7 +206,7 @@ export interface RingView {
   total: number;
 }
 
-export type ZoneKind = 'gas' | 'web' | 'silk' | 'pit' | 'honey' | 'blade' | 'stingers' | 'nest' | 'bait' | 'lantern' | 'prison' | 'rain' | 'decoy' | 'heat';
+export type ZoneKind = 'gas' | 'web' | 'silk' | 'pit' | 'honey' | 'blade' | 'stingers' | 'nest' | 'bait' | 'lantern' | 'prison' | 'rain' | 'decoy' | 'heat' | 'powder' | 'firenest' | 'bstorm';
 
 export interface ZoneView {
   x: number;
@@ -212,7 +218,7 @@ export interface ZoneView {
   owner: number;
 }
 
-export type ProjKind = 'sting' | 'bigsting' | 'silk' | 'orb' | 'spit';
+export type ProjKind = 'sting' | 'bigsting' | 'silk' | 'orb' | 'spit' | 'glob';
 export interface ProjView {
   x: number;
   y: number;
@@ -226,7 +232,7 @@ export interface MinionView {
   y: number;
   angle: number;
   owner: number;
-  kind: 'bee' | 'wasp' | 'ant' | 'soldier';
+  kind: 'bee' | 'wasp' | 'ant' | 'soldier' | 'worker';
   bite: number; // 문 뒤 지난 시간
   life: number;
 }
@@ -279,6 +285,8 @@ export interface GameOpts {
   map: MapTheme | 'random';
   loadout: Loadout;
   startLevel?: number; // 시험용
+  /** 3판(8계열 40종, 4칸 기술)으로 한 판 */
+  v3?: boolean;
 }
 export const defaultLoadout = (): Loadout => ({ species: 'kingmantis', form: 'sweep', traits: ['sharp', 'onescythe'] });
 export const defaultOpts = (): GameOpts => ({ power: 1, bots: 20, map: 'random', loadout: defaultLoadout() });

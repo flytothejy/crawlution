@@ -165,8 +165,19 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
 
   if (target && !scared && sim.tsp(s, 'poise') && !s.poised && s.skillCd <= 0 && Math.hypot(target.x - s.x, target.y - s.y) > 260) guard = true;
   // 기술: 조건이 반응 지연만큼 이어지면 쓴다
-  let skill = false, sub = false;
-  if (!grace && sim.canAct(s)) {
+  let skill = false, sub = false, spc = false, ult = false;
+  if (s.kit) {
+    // 3판: 공격·방어·특수·필살기 칸을 저마다 판단
+    const k = s.kit;
+    if (!grace && sim.canAct(s) && s.chanT <= 0) {
+      const wantAtk = s.skillCd <= 0 && wantAi(sim, s, k.atk.ai, k.atk.range * sim.rangeMul(s), scared, target);
+      s.thinkAcc = wantAtk ? s.thinkAcc + dt : 0;
+      if (wantAtk && s.thinkAcc >= s.react) ((skill = true), (s.thinkAcc = 0));
+      if (s.level >= 3 && s.subCd <= 0 && wantAi(sim, s, k.def.ai, k.def.range * sim.rangeMul(s, true), scared, target) && sim.rng.next() < 0.5) sub = true;
+      if (s.level >= 5 && s.spcCd <= 0 && wantAi(sim, s, k.spc.ai, k.spc.range * sim.rangeMul(s, true), scared, target) && sim.rng.next() < 0.5) spc = true;
+      if (s.ult >= CONFIG.ultMax && wantUlt(sim, s)) ult = true;
+    } else if (s.level >= 3 && s.subCd <= 0 && k.def.ai === 'escape' && (s.rootT > 0 || s.grabbedBy >= 0 || s.slowT > 0.5 || s.charmT > 0)) sub = true;
+  } else if (!grace && sim.canAct(s)) {
     const ultReady = s.ult >= CONFIG.ultMax;
     const wantMain = ultReady ? wantUlt(sim, s) : s.skillCd <= 0 && wantAi(sim, s, s.form.ai, s.form.range * sim.rangeMul(s), scared, target);
     s.thinkAcc = wantMain ? s.thinkAcc + dt : 0;
@@ -178,7 +189,7 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
       const sd = SUBS_BY_ID.get(s.sub.id)!;
       if (wantAi(sim, s, sd.ai, sd.range * sim.rangeMul(s, true), scared, target) && sim.rng.next() < 0.5) sub = true;
     }
-  } else if (s.sub && s.subCd <= 0 && (s.sub.id === 'escape' || s.sub.id === 'molt') && (s.rootT > 0 || s.grabbedBy >= 0 || s.slowT > 0.5)) sub = true;
+  } else if (!s.kit && s.sub && s.subCd <= 0 && (s.sub.id === 'escape' || s.sub.id === 'molt') && (s.rootT > 0 || s.grabbedBy >= 0 || s.slowT > 0.5)) sub = true;
   if (s.ambushT > 0) skill = false;
 
   // 카드: 나오면 잠시 뒤 고른다(가끔 다시 뽑기)
@@ -196,7 +207,7 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
     }
   }
 
-  return { angle: bestA, boost, sneak: guard, skillSeq: s.lastSkillSeq + (skill ? 1 : 0), subSeq: s.lastSubSeq + (sub ? 1 : 0), cardSeq, cardChoice, rerollSeq };
+  return { angle: bestA, boost, sneak: guard, skillSeq: s.lastSkillSeq + (skill ? 1 : 0), subSeq: s.lastSubSeq + (sub ? 1 : 0), spcSeq: s.lastSpcSeq + (spc ? 1 : 0), ultSeq: s.lastUltSeq + (ult ? 1 : 0), cardSeq, cardChoice, rerollSeq };
 }
 
 /** 카드 점수: 역할 추천 ×1.5, 계열 전용 ×2, 칸이 절반 넘게 차면 강화 우선, ±20% 흔들기 */
@@ -306,12 +317,12 @@ export function wantAi(sim: Simulation, s: Snake, ai: AiKind, range: number, sca
 
 /** 필살기: 범위 안 적 2마리 이상, 또는 체력 40% 이하 적 1마리 */
 function wantUlt(sim: Simulation, s: Snake): boolean {
-  const R = s.fam.ult.range;
+  const R = s.kit ? s.kit.ult.range : s.fam.ult.range;
   let n = 0, weak = false;
   for (const o of sim.snakes) {
     if (!o.alive || o.id === s.id || !sim.hittable(o) || invisible(sim, o)) continue;
     if (Math.hypot(o.x - s.x, o.y - s.y) > R + o.r) continue;
-    if (s.fam.id === 'rhino' || s.fam.id === 'stag') if (!inFront(s, o.x, o.y, 0.5)) continue;
+    if (s.kit ? s.kit.ult.impl.k === 'ult' && (s.kit.ult.impl.fam === 'rhino' || s.kit.ult.impl.fam === 'stag') : s.fam.id === 'rhino' || s.fam.id === 'stag') if (!inFront(s, o.x, o.y, 0.5)) continue;
     n++;
     if (o.hp < o.maxHp * 0.4) weak = true;
   }
@@ -380,7 +391,7 @@ export function bossThink(sim: Simulation, s: Snake, dt: number): Command {
   }
   const dc = Math.hypot(s.x, s.y);
   if (dc > CONFIG.arenaRadius - 260) desired = Math.atan2(-s.y, -s.x);
-  return { angle: desired, boost: false, sneak: false, skillSeq: s.lastSkillSeq, subSeq: s.lastSubSeq, cardSeq: s.lastCardSeq, cardChoice: 0, rerollSeq: s.lastRerollSeq };
+  return { angle: desired, boost: false, sneak: false, skillSeq: s.lastSkillSeq, subSeq: s.lastSubSeq, spcSeq: s.lastSpcSeq, ultSeq: s.lastUltSeq, cardSeq: s.lastCardSeq, cardChoice: 0, rerollSeq: s.lastRerollSeq };
 }
 
 function polyAreaFast(p: Float32Array): number {

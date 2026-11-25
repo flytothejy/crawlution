@@ -2,14 +2,16 @@
 // 수치는 기획서 '기술 수치표' 탭. B = 기준 피해, R = 범위 배율.
 import { CONFIG } from './config';
 import type { Minion, Simulation, Snake, Zone } from './sim';
+import type { FamilyId } from './species';
+import * as SK3 from './skills3';
 
 const PI = Math.PI;
 
-function head(s: Snake, d = 0): [number, number] {
+export function head(s: Snake, d = 0): [number, number] {
   return [s.x + Math.cos(s.angle) * d, s.y + Math.sin(s.angle) * d];
 }
 
-function dist(ax: number, ay: number, bx: number, by: number) {
+export function dist(ax: number, ay: number, bx: number, by: number) {
   return Math.hypot(ax - bx, ay - by);
 }
 
@@ -27,7 +29,7 @@ export function nearestEnemy(sim: Simulation, s: Snake, range: number, x = s.x, 
 }
 
 /** 예고 동작 뒤에 발동: 힘을 모으는 모습(windup)을 보여 준 뒤 t초 후 실제 기술 */
-function windup(sim: Simulation, s: Snake, t: number, kind: string, fn: () => void) {
+export function windup(sim: Simulation, s: Snake, t: number, kind: string, fn: () => void) {
   sim.fx('windup', s, s.x, s.y, { angle: s.angle, wk: kind, dur: t });
   sim.later(t, () => {
     if (s.alive && s.stunT <= 0 && s.grabbedBy < 0 && s.netT <= 0) fn();
@@ -46,11 +48,11 @@ export function startDash(sim: Simulation, s: Snake, kind: string, len: number, 
 
 // ---------- 주 기술 ----------
 
-export function castMain(sim: Simulation, s: Snake) {
+export function castMain(sim: Simulation, s: Snake, famId?: FamilyId) {
   const B = sim.B(s) * sim.mainMul(s) * (s.prayArmed ? 1.5 : 1);
   const R = sim.rangeMul(s);
   const aw = s.evo >= 3;
-  const fam = s.fam.id;
+  const fam = famId ?? s.fam.id;
   const form = s.form.id;
   const [hx, hy] = [s.x, s.y];
   if (sim.larvaLip(s)) {
@@ -355,7 +357,7 @@ function jawNear(sim: Simulation, s: Snake, x: number, y: number) {
 }
 
 /** 앞쪽 가장 가까운 적 하나 */
-function pickFront(sim: Simulation, s: Snake, range: number, half: number): { o: Snake; pos: [number, number] } | null {
+export function pickFront(sim: Simulation, s: Snake, range: number, half: number): { o: Snake; pos: [number, number] } | null {
   let best: { o: Snake; pos: [number, number]; d: number } | null = null;
   sim.cone(s, s.x, s.y, s.angle, range, half, (o, x, y) => {
     const d = dist(x, y, s.x, s.y);
@@ -595,12 +597,12 @@ export function castSub(sim: Simulation, s: Snake) {
 
 // ---------- 필살기 ----------
 
-export function castUlt(sim: Simulation, s: Snake) {
+export function castUlt(sim: Simulation, s: Snake, famId?: FamilyId) {
   const B = sim.B(s);
   const aw = s.evo >= 3;
   const cap = new Map<number, number>();
   s.ultMap = cap;
-  const fam = s.fam.id;
+  const fam = famId ?? s.fam.id;
   const at = (d: number) => head(s, d);
   switch (fam) {
     case 'rhino': {
@@ -794,7 +796,7 @@ function onDashEnd(sim: Simulation, s: Snake, kind: string) {
         hit = true;
       });
       s.acroT = 1;
-      if (hit && sim.ab(s, 'ace') > 0) s.skillCd *= 1 - sim.ab(s, 'ace');
+      if (hit && sim.ab(s, 'ace') > 0) sim.cutCd(s, 'dive', 1 - sim.ab(s, 'ace'));
       if (kind === 'dive' && aw) {
         const d = s.dashDmg;
         sim.later(0.12, () => {
@@ -944,7 +946,7 @@ export function tickSkills(sim: Simulation, s: Snake, dt: number) {
         sim.events.push({ type: 'skillHit', x, y, kind: 'cut' });
       });
     }
-    if (s.whirlT <= 0 && s.evo >= 3) s.skillCd = 0;
+    if (s.whirlT <= 0 && s.evo >= 3) sim.cutCd(s, null, 0);
   }
   // 숨어 기다리기
   if (s.ambushT > 0) {
@@ -1034,7 +1036,7 @@ function snatchTick(sim: Simulation, s: Snake) {
           sim.fx('snatch', s, s.x, s.y, { angle: s.angle, wk: 'grab', x1: o.x, y1: o.y, dur: 0.35 });
           sim.hitstop(s, o, 0.06);
         }
-        if (sim.ab(s, 'ace') > 0) s.skillCd *= 1 - sim.ab(s, 'ace');
+        if (sim.ab(s, 'ace') > 0) sim.cutCd(s, 'snatch', 1 - sim.ab(s, 'ace'));
         break;
       }
     }
@@ -1109,6 +1111,7 @@ export function updateZones(sim: Simulation, dt: number) {
     if (!z) continue;
     z.life -= dt;
     const owner = sim.snakes[z.owner];
+    sim.actor = owner ?? null;
     if (z.follow) {
       if (!owner.alive) z.life = 0;
       else ((z.x = owner.x), (z.y = owner.y));
@@ -1140,12 +1143,12 @@ export function updateZones(sim: Simulation, dt: number) {
         break;
       case 'web':
         for (const o of sim.snakes) {
-          if (o.id === z.owner || !sim.hittable(o)) continue;
+          if (o.id === z.owner || !sim.zoneHit(o)) continue;
           if (dist(o.x, o.y, z.x, z.y) < z.r) {
             sim.root(o, 1.5 + sim.ab(owner, 'tough'), owner);
             sim.deal(owner, o, z.dps, 'skill', o.x, o.y);
             if (sim.inst(owner, 'venom')) sim.poison(owner, o, 1.2 + sim.ab(owner, 'tough'), sim.B(owner) * 0.25);
-            if (sim.inst(owner, 'rebuild')) owner.skillCd *= 0.5;
+            if (sim.inst(owner, 'rebuild')) sim.cutCd(owner, 'orb', 0.5);
             if (sim.ab(owner, 'sense') > 0) owner.senseT = 2;
             sim.events.push({ type: 'skillHit', x: o.x, y: o.y, kind: 'root' });
             consumed = true;
@@ -1155,7 +1158,7 @@ export function updateZones(sim: Simulation, dt: number) {
         break;
       case 'silk':
         for (const o of sim.snakes) {
-          if (o.id === z.owner || z.hits.has(o.id) || !sim.hittable(o)) continue;
+          if (o.id === z.owner || z.hits.has(o.id) || !sim.zoneHit(o)) continue;
           if (dist(o.x, o.y, z.x, z.y) < z.r + o.r) {
             z.hits.add(o.id);
             sim.deal(owner, o, z.dps, 'skill', o.x, o.y);
@@ -1168,7 +1171,7 @@ export function updateZones(sim: Simulation, dt: number) {
         break;
       case 'pit': {
         for (const o of sim.snakes) {
-          if (o.id === z.owner || !sim.hittable(o)) continue;
+          if (o.id === z.owner || !sim.zoneHit(o)) continue;
           const d = dist(o.x, o.y, z.x, z.y);
           if (d > z.r) continue;
           sim.knock(o, Math.atan2(z.y - o.y, z.x - o.x), z.mul * dt * (o.isBoss ? 1 : 1.2));
@@ -1192,7 +1195,7 @@ export function updateZones(sim: Simulation, dt: number) {
         break;
       case 'stingers':
         for (const o of sim.snakes) {
-          if (o.id === z.owner || z.hits.has(o.id) || !sim.hittable(o)) continue;
+          if (o.id === z.owner || z.hits.has(o.id) || !sim.zoneHit(o)) continue;
           if (dist(o.x, o.y, z.x, z.y) < z.r + o.r) {
             z.hits.add(o.id);
             sim.poison(owner, o, 3, sim.B(owner) * 0.1);
@@ -1202,7 +1205,7 @@ export function updateZones(sim: Simulation, dt: number) {
         break;
       case 'bait':
         for (const o of sim.snakes) {
-          if (o.id === z.owner || !sim.hittable(o)) continue;
+          if (o.id === z.owner || !sim.zoneHit(o)) continue;
           if (dist(o.x, o.y, z.x, z.y) < z.r + o.r) {
             sim.root(o, z.mul, owner);
             sim.deal(owner, o, z.dps, 'skill', o.x, o.y);
@@ -1220,7 +1223,7 @@ export function updateZones(sim: Simulation, dt: number) {
           if (d < z.r && d > 1) ((f.x += (z.x - f.x) * 0.45), (f.y += (z.y - f.y) * 0.45));
         }
         for (const o of sim.snakes) {
-          if (o.id === z.owner || !sim.hittable(o)) continue;
+          if (o.id === z.owner || !sim.zoneHit(o)) continue;
           if (dist(o.x, o.y, z.x, z.y) < z.r) {
             sim.slow(o, 0.5, 0.6);
             if (z.awake) sim.pullTo(o, z.x, z.y, 25);
@@ -1236,6 +1239,8 @@ export function updateZones(sim: Simulation, dt: number) {
         else sim.slow(t, 0.4, 0.7);
         break;
       }
+      default:
+        SK3.zoneTick(sim, z, owner, tick);
     }
     if (consumed || z.life <= 0) {
       const idx = sim.zones.indexOf(z);
@@ -1285,6 +1290,11 @@ export function updateMinions(sim: Simulation, dt: number) {
     if (!m) continue;
     m.life -= dt;
     const owner = sim.snakes[m.owner];
+    sim.actor = owner ?? null;
+    if (m.kind === 'worker') {
+      SK3.workerMove(sim, m, owner, dt);
+      continue;
+    }
     if (!owner.alive || m.life <= 0 || m.hp <= 0) {
       const idx = sim.minions.indexOf(m);
       if (idx >= 0) sim.minions.splice(idx, 1);
