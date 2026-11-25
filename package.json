@@ -8,9 +8,10 @@
     "build": "vite build",
     "test": "tsx test/sim.test.ts && tsx test/v3.test.ts",
     "typecheck": "tsc --noEmit",
-    "balance": "tsx scripts/balance.ts",
+    "balance": "tsx balance/run.ts",
     "duel": "tsx scripts/duel.ts",
-    "codex": "vite build --config vite.codex.config.ts"
+    "codex": "vite build --config vite.codex.config.ts",
+    "balance:quick": "tsx balance/run.ts --quick"
   },
   "dependencies": {
     "pixi-filters": "^6.1.5",

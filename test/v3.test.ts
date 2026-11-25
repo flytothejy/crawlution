@@ -60,6 +60,7 @@ const hits = new Map<string, number>();
 
 // 2) 기술 64개를 하나씩: 앞에 허수아비 셋을 두고 칸을 직접 써서 맞는지
 const unhit: string[] = [];
+const noSrc: string[] = [];
 const statusSeen = new Set<string>();
 {
   for (const sp of V3_SPECIES) {
@@ -88,7 +89,7 @@ const statusSeen = new Set<string>();
       if (sl === 'spc') cmd.spcSeq = me.lastSpcSeq + 1;
       if (sl === 'ult') cmd.ultSeq = me.lastUltSeq + 1;
       sim.setCommand(0, cmd);
-      let hit = false, cast = false;
+      let hit = false, cast = false, dmgHit = false, srcHit = false;
       for (let t = 0; t < CONFIG.tickRate * 4; t++) {
         for (const d of dummies) d.biteCd = 99;
         sim.step();
@@ -96,16 +97,22 @@ const statusSeen = new Set<string>();
         const snap = sim.snapshot();
         for (const e of snap.events) {
           if (e.type === 'skill' && e.snake === 0) cast = true;
-          if (e.type === 'hit' && e.by === 0 && e.dmg > 0) hit = true;
+          if (e.type === 'hit' && e.by === 0 && e.dmg > 0) {
+            hit = true;
+            if (e.kind === 'skill' || e.kind === 'ult') dmgHit = true; // 물기·일개미·특성 독은 칸이 없다
+            if (e.src === sl) srcHit = true;
+          }
         }
         for (const s of snap.snakes) for (let q = 0; q < s.st.length; q += 2) statusSeen.add(STATUSES[s.st[q]].id);
         if (sl === 'def' && (me.coilT > 0 || me.leafT > 0 || me.flutterT > 0 || me.bitterT > 0 || me.reduceT > 0 || me.invulnT > 0 || me.curlT > 0 || me.deadT > 0 || me.ghostT > 0 || me.flyT > 0 || me.hiddenT > 0 || me.trailT > 0 || me.backT > 0 || me.decoyT > 0)) hit = true;
         if (sl === 'spc' && (me.hiddenT > 0 || me.compoundT > 0 || sim.zones.some((z) => z.owner === 0) || sim.minions.some((m) => m.owner === 0 && m.kind !== 'worker'))) hit = true;
       }
       if (!cast || !hit) unhit.push(`${sp.name}:${sk.name}${cast ? '' : '(안 나감)'}`);
+      if (dmgHit && !srcHit) noSrc.push(`${sp.name}:${sk.name}`);
     }
   }
   check('3판 기술: 칸마다 써서 나가고 효과가 들어감', unhit.length === 0, unhit.join(', '));
+  check('기술 피해에 어느 칸인지(src) 표시됨(밸런스 측정용)', noSrc.length === 0, noSrc.join(', '));
   const need = ['stun', 'root', 'slow', 'silence', 'fear', 'blind', 'confuse', 'charm', 'mark', 'poison', 'itch', 'invuln', 'shield', 'bitter', 'hidden', 'fly', 'ghost'];
   const miss = need.filter((x) => !statusSeen.has(x));
   check('기술로 상태 17종이 실제로 걸림', miss.length === 0, miss.length ? `안 걸림: ${miss.join(',')}` : `${statusSeen.size}종`);

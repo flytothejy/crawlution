@@ -100,7 +100,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
           if (!s.alive) return;
           const [lx, ly] = head(s, 20);
           sim.fx('land', s, lx, ly, { angle: s.angle, r: 80 });
-          let best: Snake | null = null, bd = 90 * R;
+          let best: Snake | null = null, bd = Infinity; // 범위 판정(반지름+몸 두께) 안이면 가장 가까운 적
           sim.circle(s, lx, ly, 90 * R, (o, x, y) => {
             const d = dist(x, y, lx, ly);
             if (d < bd) ((bd = d), (best = o));
@@ -272,12 +272,12 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
       return;
     }
     case 'antcall': {
-      // 일개미 4마리(각성 6)가 4초 동안 가까운 적을 쫓아 문다
+      // 일개미 4마리(각성 6)가 3.5초 동안 가까운 적을 쫓아 문다
       pose(sim, s, 'call', 0.5);
       sim.fx('antcall', s, s.x, s.y, { r: 50 });
       const n = (aw ? 6 : 4) + sim.tm(s, 'minion');
-      const life = 4 + sim.ab(s, 'colony');
-      for (let k = 0; k < n; k++) sim.addMinion(s, 'ant', life, B * 0.13 * (1 + sim.ab(s, 'formic')), false, k);
+      const life = 3.5 + sim.ab(s, 'colony');
+      for (let k = 0; k < n; k++) sim.addMinion(s, 'ant', life, B * 0.1 * (1 + sim.ab(s, 'formic')), false, k);
       return;
     }
     case 'leafshield': {
@@ -348,8 +348,8 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
             sim.circle(s, lx, ly, 70 * R, (o, x, y) => {
               if (hit) return;
               hit = true;
-              sim.deal(s, o, B * 1.1, 'skill', x, y);
-              sim.stun(o, 0.8);
+              sim.deal(s, o, B * 0.65, 'skill', x, y);
+              sim.stun(o, 0.6);
               hitFx(sim, x, y, 'stun');
               sim.hitstop(s, o, 0.06);
             });
@@ -365,7 +365,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
       sim.later(0.1, () => {
         if (!s.alive) return;
         sim.fx('spiderlings', s, s.x, s.y, { r: 130 * R });
-        sim.circle(s, s.x, s.y, 140 * R, (o, x, y) => (sim.slow(o, 2, 0.55), hitFx(sim, x, y, 'slow')));
+        sim.circle(s, s.x, s.y, 140 * R, (o, x, y) => (sim.deal(s, o, B * 0.4, 'skill', x, y), sim.slow(o, 2.5, 0.5), hitFx(sim, x, y, 'slow'))); // 밸런스: 새끼거미가 물어 피해 + 느려짐 2.5초
         s.decoyT = 2;
         s.decoyX = s.x;
         s.decoyY = s.y;
@@ -433,11 +433,11 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
       return;
     }
     case 'bitter': {
-      // 2초 동안 나를 문 적이 피해의 40%(각성 60%)를 돌려받고 중독
-      s.bitterT = 2 * D;
+      // 3초 동안 나를 문 적이 피해의 50%(각성 75%)를 돌려받고 중독
+      s.bitterT = 3 * D;
       s.bitterPoison = true;
-      s.bitterMul = aw ? 0.6 : 0.4;
-      pose(sim, s, 'bitterglow', 2 * D);
+      s.bitterMul = aw ? 0.75 : 0.5;
+      pose(sim, s, 'bitterglow', 3 * D);
       sim.fx('bitter', s, s.x, s.y, { r: 70 });
       sim.later(0.3, () => s.alive && sim.fx('powder', s, s.x, s.y, { angle: s.angle, r: 90, half: 3.1 }));
       return;
@@ -555,7 +555,7 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
       sim.fx('warhorn', s, s.x, s.y, { r: 130 });
       const n = (aw ? 18 : 12) + sim.tm(s, 'minion');
       for (let k = 0; k < n; k++) {
-        sim.addMinion(s, 'soldier', 6 + sim.ab(s, 'colony'), B * 0.28 * (1 + sim.ab(s, 'formic')), false, k);
+        sim.addMinion(s, 'soldier', 6 + sim.ab(s, 'colony'), B * 0.11 * (1 + sim.ab(s, 'formic')), false, k);
         sim.minions[sim.minions.length - 1].ult = cap;
       }
       return;

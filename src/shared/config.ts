@@ -155,10 +155,13 @@ export const CONFIG = {
   birdDamage: 0.55, // 머리가 그림자 안: 최대 체력의 이만큼(몸만 걸리면 60%)
 
 
-  // 점수
-  scoreKill: 50,
+  // 점수(아레나 순위). 모두 판 전체로 쌓는다: 쓰러져도 남고, 봇도 같은 기준.
+  // 먹은 영양 + 처치×scoreKill + 도움×scoreAssist + 압착×scoreCrush + (최고 레벨−1)×scoreLevel − 쓰러짐×scoreDeath
+  scoreKill: 100,
+  scoreAssist: 25,
   scoreCrush: 100,
   scoreLevel: 40,
+  scoreDeath: 50,
   scoreBoss: 1500, // 왕지네 처치
 } as const;
 

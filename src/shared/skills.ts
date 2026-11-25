@@ -70,7 +70,7 @@ export function castMain(sim: Simulation, s: Snake, famId?: FamilyId) {
       if (form === 'charge') {
         // 뒷발로 땅을 긁으며 몸을 낮췄다가 튀어 나간다
         windup(sim, s, 0.16, 'charge', () => {
-          startDash(sim, s, 'charge', 260 * R * heavy, 3, false, B * 0.85);
+          startDash(sim, s, 'charge', 260 * R * heavy, 3, false, B * 1.05); // 밸런스: 0.85→1.05(딱정벌레 처치력)
           sim.fx('charge', s, s.x, s.y, { angle: s.angle, len: 260 * R * heavy, dur: s.dashT });
         });
       } else if (form === 'lift') {
@@ -162,7 +162,7 @@ export function castMain(sim: Simulation, s: Snake, famId?: FamilyId) {
       } else if (form === 'stab') {
         sim.fx('stab', s, hx, hy, { angle: s.angle, len: 220 * R });
         sim.line(s, hx, hy, s.angle, 220 * R, 30, aw ? 2 : 1, (o, x, y) => {
-          sim.deal(s, o, B * 1.5, 'skill', x, y);
+          sim.deal(s, o, B * 1.0, 'skill', x, y); // 밸런스: 1.5→1.0(위장·매복 배율과 겹쳐 한 방에 끝남)
           sim.events.push({ type: 'skillHit', x, y, kind: 'cut' });
         });
       } else {
@@ -370,9 +370,9 @@ function comboHit(sim: Simulation, s: Snake) {
   const R = sim.rangeMul(s);
   const n = s.chanN++;
   const last = n === 2;
-  sim.fx('combo', s, s.x, s.y, { angle: s.angle + (n - 1) * 0.5, r: 80 * R, half: 0.8, awake: last, wk: last ? 'X' : n === 0 ? 'L' : 'R' });
-  sim.cone(s, s.x, s.y, s.angle, 80 * R, 0.8, (o, x, y) => {
-    const dmg = s.chanDmg * 0.45 * (last ? 1.6 * (1 + sim.ab(s, 'tail')) : 1);
+  sim.fx('combo', s, s.x, s.y, { angle: s.angle + (n - 1) * 0.5, r: 110 * R, half: 0.8, awake: last, wk: last ? 'X' : n === 0 ? 'L' : 'R' });
+  sim.cone(s, s.x, s.y, s.angle, 110 * R, 0.8, (o, x, y) => {
+    const dmg = s.chanDmg * 0.5 * (last ? 1.6 * (1 + sim.ab(s, 'tail')) : 1);
     sim.deal(s, o, dmg, last ? 'crit' : 'skill', x, y);
     sim.events.push({ type: 'skillHit', x, y, kind: 'cut' });
     if (last && s.evo >= 3) (sim.stun(o, 0.5), sim.events.push({ type: 'skillHit', x, y, kind: 'stun' }));
@@ -456,7 +456,7 @@ export function castSub(sim: Simulation, s: Snake) {
       });
       return;
     case 'playdead':
-      s.deadT = 2 * D;
+      s.deadT = 1.5 * D; // 밸런스: 2→1.5초(유령사마귀 판 생존이 너무 김)
       sim.releaseGrab(s);
       sim.fx('playdead', s, s.x, s.y, { dur: s.deadT });
       return;
@@ -468,7 +468,7 @@ export function castSub(sim: Simulation, s: Snake) {
       });
       return;
     case 'compound':
-      s.compoundT = 3 * D;
+      s.compoundT = 4 * D;
       sim.fx('compound', s, s.x, s.y, { r: 400 });
       return;
     case 'alarm':
@@ -489,6 +489,8 @@ export function castSub(sim: Simulation, s: Snake) {
       startDash(sim, s, 'backstep', 200 * R, Math.max(1.2, 200 / Math.max(80, sim.speedOf(s))), false);
       s.ghostT = Math.max(s.ghostT, s.dashT);
       sim.fx('backstep', s, s.x, s.y, { angle: s.angle });
+      // 물러난 길에 끈끈한 줄을 남긴다(쫓아오는 적이 느려짐)
+      if (s.trailT <= 0) ((s.trailT = 1.5), (s.trailAwake = false), (s.chanAcc = 0), (s.trailHits = new Set()));
       return;
     case 'waggle': {
       const r = 300 * R;
@@ -512,7 +514,7 @@ export function castSub(sim: Simulation, s: Snake) {
     case 'hop': {
       // 날아올라 옆으로 급선회: 가까운 적의 반대쪽으로 꺾어 빠진다
       const foe = nearestEnemy(sim, s, 320);
-      let side = Math.random() < 0.5 ? 1 : -1;
+      let side = sim.rng.next() < 0.5 ? 1 : -1;
       if (foe) side = Math.sin(Math.atan2(foe.y - s.y, foe.x - s.x) - s.angle) > 0 ? -1 : 1;
       // 거의 직각으로 확 꺾어 멀리 빠진다
       s.dashAngle = s.angle + side * 0.5;
@@ -552,7 +554,7 @@ export function castSub(sim: Simulation, s: Snake) {
       for (const sd of [-1, 1]) {
         const a = s.angle + sd * 0.75, d = 80 + s.r;
         const zx = s.x + Math.cos(a) * d, zy = s.y + Math.sin(a) * d;
-        sim.addZone({ x: zx, y: zy, r: 30, kind: 'bait', life: 8, owner: s.id, dps: B * 0.2, mul: 1 * D });
+        sim.addZone({ x: zx, y: zy, r: 30, kind: 'bait', life: 8, owner: s.id, dps: B * 0.3, mul: 1 * D });
         sim.fx('baitset', s, s.x, s.y, { x1: zx, y1: zy });
       }
       return;
@@ -560,7 +562,7 @@ export function castSub(sim: Simulation, s: Snake) {
     case 'roll': {
       // 옆으로 데굴 구른다: 가까운 적의 반대쪽 옆으로
       const foe = nearestEnemy(sim, s, 320);
-      let side = Math.random() < 0.5 ? 1 : -1;
+      let side = sim.rng.next() < 0.5 ? 1 : -1;
       if (foe) side = Math.sin(Math.atan2(foe.y - s.y, foe.x - s.x) - s.angle) > 0 ? -1 : 1;
       // 머리만이 아니라 몸 전체(꼬리까지)가 옆으로 데굴 비켜난다. 구르는 동안 맞지 않는다
       const T = 0.32, dist = 150;
@@ -821,11 +823,12 @@ export function counterDash(sim: Simulation, b: Snake, a: Snake) {
 
 /** 깡충거미: 줄·그물에 걸린 적에게 뛰어 붙는다 */
 export function pounce(sim: Simulation, s: Snake, o: Snake) {
-  if (!s.alive || s.dashT > 0 || !sim.canAct(s)) return;
+  if (!s.alive || s.dashT > 0 || s.pounceCd > 0 || !sim.canAct(s)) return;
   const d = dist(o.x, o.y, s.x, s.y);
   if (d > 340) return;
   s.angle = Math.atan2(o.y - s.y, o.x - s.x);
-  startDash(sim, s, 'pounce', Math.max(40, d - 10), 3, false, sim.B(s) * 0.5);
+  s.pounceCd = 4;
+  startDash(sim, s, 'pounce', Math.max(40, d - 10), 3, false, sim.B(s) * 0.3); // 밸런스: 0.5→0.3(깡충거미 본능)
   sim.fx('hop', s, s.x, s.y, { angle: s.angle });
 }
 
@@ -908,7 +911,7 @@ export function tickSkills(sim: Simulation, s: Snake, dt: number) {
         case 'circle': {
           s.chanAcc = 0.3;
           sim.circle(s, s.x, s.y, 110 * R, (o, x, y) => {
-            sim.deal(s, o, s.chanDmg * 0.25, 'skill', x, y);
+            sim.deal(s, o, s.chanDmg * 0.32, 'skill', x, y);
             if (s.evo >= 3) sim.slow(o, 0.5, 0.7);
             sim.events.push({ type: 'skillHit', x, y, kind: 'cut' });
           });
@@ -1000,7 +1003,7 @@ function snatchPull(sim: Simulation, s: Snake, a: number, L: number, B: number) 
     sim.deal(s, o, B * 0.8, 'skill', x, y);
     sim.events.push({ type: 'skillHit', x, y, kind: 'grab' });
     sim.pullTo(o, fx0, fy0, Math.hypot(fx0 - o.x, fy0 - o.y) + 40);
-    sim.stun(o, s.evo >= 3 ? 0.6 : 0.3);
+    sim.stun(o, s.evo >= 3 ? 0.8 : 0.5); // 밸런스: 끌어온 뒤 급강하로 이어 칠 틈
     sim.fx('lifted', o, o.x, o.y, { angle: a + PI, wk: 'yank', dur: 0.35, x1: s.x, y1: s.y });
     if (n++ === 0) sim.hitstop(s, o, 0.06);
   });
@@ -1112,6 +1115,7 @@ export function updateZones(sim: Simulation, dt: number) {
     z.life -= dt;
     const owner = sim.snakes[z.owner];
     sim.actor = owner ?? null;
+    sim.src = z.src ?? null;
     if (z.follow) {
       if (!owner.alive) z.life = 0;
       else ((z.x = owner.x), (z.y = owner.y));
@@ -1291,6 +1295,7 @@ export function updateMinions(sim: Simulation, dt: number) {
     m.life -= dt;
     const owner = sim.snakes[m.owner];
     sim.actor = owner ?? null;
+    sim.src = m.src ?? null;
     if (m.kind === 'worker') {
       SK3.workerMove(sim, m, owner, dt);
       continue;

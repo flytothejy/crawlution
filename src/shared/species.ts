@@ -137,7 +137,7 @@ export const FAMILIES: Family[] = [
       { id: 'throw', name: '집어 던지기', icon: '🤾', desc: '잡아서 뒤로 던짐(떨어진 적 0.5초 기절)', awake: '던진 적이 다른 적과 부딪히면 둘 다 피해', cd: 12.5, ai: 'melee', range: 70 },
       { id: 'scissor', name: '가위 닫기', icon: '✂️', desc: '앞쪽 넓은 범위를 순간적으로 물어 피해', awake: '두 번 연속', cd: 12.5, ai: 'cone', range: 110 },
     ],
-    sub: { id: 'playdead', name: '죽은 척', icon: '💤', desc: '2초 동안 멈추고 무적, 적의 표적에서 빠짐', cd: 18, ai: 'defense', range: 0 },
+    sub: { id: 'playdead', name: '죽은 척', icon: '💤', desc: '1.5초 동안 멈추고 무적, 적의 표적에서 빠짐', cd: 18, ai: 'defense', range: 0 },
     ult: { name: '내리꽂기', icon: '⏬', desc: '앞의 적 하나를 잡아 들어 올렸다 내리꽂음', awake: '내리꽂은 자리 주변에도 피해', range: 90 },
     larva: GRUB(0xa8682a, 0xf4ead0, 0xe6d6b0), likes: 1, hates: 6, strong: '돌격', weak: '사격',
     species: ['flatstag', 'kingstag', 'sawstag', 'giraffe'],
@@ -148,7 +148,7 @@ export const FAMILIES: Family[] = [
     forms: [
       { id: 'sweep', name: '넓게 베기', icon: '🌙', desc: '앞쪽 부채꼴, 피해 보통. 여럿과 싸울 때', awake: '베인 자리에 칼날 자국이 2초 남음', cd: 9, ai: 'cone', range: 120 },
       { id: 'stab', name: '찌르기', icon: '🗡️', desc: '앞으로 긴 직선, 피해 높음, 폭 좁음', awake: '2마리까지 관통', cd: 10, ai: 'line', range: 220 },
-      { id: 'combo', name: '연속 베기', icon: '⚔️', desc: '짧은 범위 3연타, 3타째는 꼬리 급소 판정', awake: '마지막 타격에 0.5초 기절', cd: 9, ai: 'cone', range: 80 },
+      { id: 'combo', name: '연속 베기', icon: '⚔️', desc: '짧은 범위 3연타, 3타째는 꼬리 급소 판정', awake: '마지막 타격에 0.5초 기절', cd: 9, ai: 'cone', range: 110 },
     ],
     sub: { id: 'threat', name: '날개 펼쳐 위협', icon: '🦋', desc: '주변 적을 1초 겁먹게 해 느려지고 기술을 못 씀', cd: 14, ai: 'aoe', range: 160 },
     ult: { name: '천 개의 낫', icon: '🌪️', desc: '2초 동안 주변을 난도질, 그동안 받는 피해 −30%', awake: '끝나면 주 기술 재사용 초기화', range: 140 },
@@ -156,14 +156,14 @@ export const FAMILIES: Family[] = [
     species: ['kingmantis', 'widemantis', 'smallmantis', 'orchid', 'ghost'],
   },
   {
-    id: 'dragonfly', name: '잠자리', role: 'charge', hp: 0.88, atk: 1.0, spd: 1.12, cdMul: 1, knockTaken: 1,
+    id: 'dragonfly', name: '잠자리', role: 'charge', hp: 0.95, atk: 1.0, spd: 1.12, cdMul: 1, knockTaken: 1,
     color: 0x4ab8f0, color2: 0xb8f0ff, stages: ['수채', '성충', '각성'], skill: '공중 강하',
     forms: [
       { id: 'dive', name: '급강하', icon: '🪂', desc: '빠르게 날아가 내려앉는 자리에 피해(날 때 몸 충돌 없음)', awake: '내려앉은 뒤 한 번 더', cd: 8, ai: 'dash', range: 300 },
       { id: 'snatch', name: '낚아채기', icon: '🪝', desc: '앞으로 줄을 그어 줄 위의 적과 먹이를 내 앞으로 끌어옴', awake: '끌려온 적 기절이 길어짐', cd: 8, ai: 'dash', range: 260 },
       { id: 'circle', name: '맴돌기', icon: '🌀', desc: '주변을 빠르게 원을 그리며 연속 타격', awake: '원 안의 적이 느려짐', cd: 10, ai: 'aoe', range: 110 },
     ],
-    sub: { id: 'compound', name: '겹눈', icon: '👁️', desc: '3초 동안 주변 적의 위치와 기술 예고를 보여 주고 피해 +15%', cd: 15, ai: 'buff', range: 400 },
+    sub: { id: 'compound', name: '겹눈', icon: '👁️', desc: '4초 동안 주변 적의 위치와 기술 예고를 보여 주고 피해 +25%', cd: 15, ai: 'buff', range: 400 },
     ult: { name: '하늘 사냥', icon: '☄️', desc: '3초 동안 날아올라 무적, 세 번 급강하', awake: '다섯 번', range: 300 },
     larva: { body: 0x6a5a3a, stripe: 0x4e4228, head: 0x5a4a30, shape: 'naiad', antenna: 'short' }, likes: 3, hates: 9, strong: '사격', weak: '방어, 함정',
     species: ['giantdf', 'emperor', 'redDf', 'damsel'],
@@ -195,7 +195,7 @@ export const FAMILIES: Family[] = [
     species: ['brownbug', 'jewelbug', 'assassin', 'strider'],
   },
   {
-    id: 'spider', name: '거미', role: 'trap', hp: 1.0, atk: 1.08, spd: 1.0, cdMul: 1, knockTaken: 1,
+    id: 'spider', name: '거미', role: 'trap', hp: 1.12, atk: 1.08, spd: 1.0, cdMul: 1, knockTaken: 1,
     color: 0xb8a8f0, color2: 0xe8e8f8, stages: ['새끼 거미', '어른 거미', '각성'], skill: '거미줄',
     forms: [
       { id: 'orb', name: '둥근 그물', icon: '🕸️', desc: '앞에 그물을 쳐 걸린 적을 묶음(최대 2개)', awake: '그물에 걸린 적에게 피해', cd: 10, ai: 'place', range: 190 },
@@ -215,7 +215,7 @@ export const FAMILIES: Family[] = [
       { id: 'sand', name: '모래 던지기', icon: '🏜️', desc: '모래를 튀겨 맞은 적이 느려지고 내 쪽으로 밀림', awake: '세 갈래로', cd: 9, ai: 'line', range: 260 },
       { id: 'ambush', name: '숨어 기다리기', icon: '🫣', desc: '땅속에 숨었다가 가까이 온 적을 급습(다시 누르면 바로 급습)', awake: '급습에 기절', cd: 12, ai: 'ambush', range: 100 },
     ],
-    sub: { id: 'backstep', name: '뒷걸음질', icon: '⏪', desc: '뒤로 빠르게 물러남, 그동안 몸 충돌 없음', cd: 10, ai: 'escape', range: 0 },
+    sub: { id: 'backstep', name: '뒷걸음질', icon: '⏪', desc: '뒤로 빠르게 물러남, 그동안 몸 충돌 없음. 지나온 길에 1.5초 끈끈한 줄', cd: 10, ai: 'escape', range: 0 },
     ult: { name: '개미지옥', icon: '🌀', desc: '거대한 구덩이가 주변 적을 가운데로 빨아들임', awake: '가운데 닿은 적 기절', range: 260 },
     larva: { body: 0x9a8a6a, stripe: 0x7a6a4a, head: 0x8a7a5a, shape: 'antlion', antenna: 'short', mandible: { size: 52, teeth: true, color: 0x5a4a2a }, pattern: 'fuzzy' },
     likes: 7, hates: 0, strong: '돌격', weak: '사격',
@@ -235,7 +235,7 @@ export const FAMILIES: Family[] = [
     species: ['honeybee', 'nativebee', 'bumble', 'giantbee'],
   },
   {
-    id: 'firefly', name: '반딧불이', role: 'support', hp: 0.9, atk: 1.0, spd: 1.0, cdMul: 1, knockTaken: 1,
+    id: 'firefly', name: '반딧불이', role: 'support', hp: 1.15, atk: 1.1, spd: 1.0, cdMul: 1, knockTaken: 1,
     color: 0xd8ff5a, color2: 0x6aff9a, stages: ['애벌레', '성충', '각성'], skill: '빛',
     forms: [
       { id: 'flash', name: '섬광', icon: '✨', desc: '주변 적이 1.5초 눈부셔 방향이 흔들리고 기술을 못 씀', awake: '범위가 넓어짐', cd: 8, ai: 'aoe', range: 160 },
@@ -268,7 +268,7 @@ export const NEW_FAMILIES: Family[] = [
     larva: GRUB(0xd8c8a8, 0xfaf4e6, 0xece2c8), likes: 8, hates: 5, strong: '지네·딱정벌레', weak: '거미·벌', species: ['v3:wangant', 'v3:armyant', 'v3:leafant', 'v3:bulldog', 'v3:fireant'],
   },
   {
-    id: 'butterfly', name: '나비', role: 'trap', hp: 1.0, atk: 1.0, spd: 1.08, cdMul: 1, knockTaken: 1.1,
+    id: 'butterfly', name: '나비', role: 'trap', hp: 1.08, atk: 1.0, spd: 1.08, cdMul: 1, knockTaken: 1.1,
     color: 0xe07ad8, color2: 0x7ad8ff, stages: ['애벌레', '나비', '각성'], skill: '인분', forms: kitForm('인분 흩뿌리기', '🌫️'),
     sub: { id: 'v3def', name: '팔랑 비행', icon: '🪽', desc: '', cd: 11, ai: 'move', range: 0 },
     ult: { name: '나비 떼 폭풍', icon: '🌪️', desc: '넓은 범위에 나비 떼가 휘몰아쳐 4초 동안 지속 피해 + 혼란.', awake: '폭풍이 나를 따라다님', range: 300 },
@@ -339,7 +339,7 @@ export const SPECIES: Species[] = [
     look: { body: 0xf2d04a, stripe: 0x2a2a2a, head: 0x2a2a2a, shape: 'spider', feats: ['legs8'], fang: 16 }, fact: '가을에 크고 노란빛이 도는 그물을 친다.' }),
   sp({ id: 'gardenspider', family: 'spider', name: '왕거미', instinct: { id: 'rebuild', name: '그물 다시 짓기', desc: '그물에 적이 걸리면 재사용 시간이 바로 절반' },
     look: { body: 0x9a6a3a, stripe: 0xe8d2a6, head: 0x7a4a22, shape: 'spider', pattern: 'fuzzy', feats: ['legs8'], fang: 16 }, fact: '둥근 그물을 자주 새로 친다.' }),
-  sp({ id: 'jumper', family: 'spider', forms: ['silk', 'trail'], name: '깡충거미', instinct: { id: 'pounce', name: '뛰어 덮치기', desc: '줄·그물에 걸린 적에게 자동으로 뛰어 붙음' },
+  sp({ id: 'jumper', family: 'spider', forms: ['silk', 'trail'], name: '깡충거미', instinct: { id: 'pounce', name: '뛰어 덮치기', desc: '줄·그물에 걸린 적에게 자동으로 뛰어 붙음(4초에 한 번)' },
     look: { body: 0x6a6a72, stripe: 0xe8c547, head: 0x4a4a52, shape: 'spider', pattern: 'fuzzy', feats: ['legs8'], fang: 14, eye: 0x111111 }, fact: '그물 대신 앞쪽의 큰 눈으로 거리를 재고 뛰어서 덮친다.' }),
   sp({ id: 'wolfspider', family: 'spider', forms: ['silk', 'trail'], name: '늑대거미', instinct: { id: 'babies', name: '새끼 업기', desc: '쓰러질 때 새끼거미가 흩어져 주변 적을 느리게 함' },
     look: { body: 0x6a5a48, stripe: 0x4a3e30, head: 0x5a4a3a, shape: 'spider', pattern: 'fuzzy', feats: ['legs8'], fang: 16 }, fact: '어미가 새끼를 등에 업고 다닌다.' }),
@@ -390,7 +390,7 @@ export const NEW_SPECIES: Species[] = Object.keys(NEW_INSTINCT).map((id) => {
 // 3판에서 바뀐 본능: 늑대거미는 새끼 업기 대신 땅 사냥꾼(새끼는 '새끼 흩기' 기술로 옮겨 감)
 {
   const w = SPECIES.find((x) => x.id === 'wolfspider');
-  if (w) w.instinct = { id: 'groundhunt', name: '땅 사냥꾼', desc: '그물 대신 질주 속도 +10%' };
+  if (w) w.instinct = { id: 'groundhunt', name: '땅 사냥꾼', desc: '그물 대신 질주 속도 +15%' };
 }
 export const SPECIES_BY_ID = new Map([...SPECIES, ...NEW_SPECIES].map((s) => [s.id, s]));
 

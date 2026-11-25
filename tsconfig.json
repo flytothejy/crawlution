@@ -10,5 +10,6 @@
     "resolveJsonModule": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "balance"],
+  "exclude": ["balance/_*.ts"]
 }

@@ -47,7 +47,7 @@ export type GameEvent =
   | { type: 'crush'; snake: number; cx: number; cy: number; count: number }
   | { type: 'bounce'; snake: number; x: number; y: number }
   | { type: 'respawn'; snake: number }
-  | { type: 'hit'; snake: number; by: number; dmg: number; x: number; y: number; kind: HitKind; good: boolean; blocked?: boolean }
+  | { type: 'hit'; snake: number; by: number; dmg: number; x: number; y: number; kind: HitKind; good: boolean; blocked?: boolean; src?: string }
   | { type: 'lifeLost'; lives: number; respawn?: number }
   | { type: 'levelUp'; snake: number; level: number; x: number; y: number }
   | { type: 'evolveStart'; snake: number }

@@ -5,7 +5,7 @@ import { kitOf } from '../shared/kit';
 import '../client/fonts.css';
 import { CONFIG, evoOf, radiusFor } from '../shared/config';
 import { COMMON_SUBS, FAMILIES, FAMILY, ROLE_LIST, ROLES, SPECIAL_FOODS, SPECIES_BY_ID, formsOf, type Family, type FamilyId, type SubDef } from '../shared/species';
-import { ABILITIES, COMMON_TRAITS, familyTraits, type TraitDef } from '../shared/cards';
+import { ABILITIES } from '../shared/cards';
 import { baseB, biteOf, maxHpOf } from '../shared/combat';
 import { Simulation, type Snake } from '../shared/sim';
 import type { Snapshot, SnakeView } from '../shared/types';
@@ -583,12 +583,6 @@ function fxTags(m?: Meas) {
   return m ? m.fx.map((x) => `<span class="tag">${x}</span>`).join('') : '';
 }
 
-function traitCard(t: TraitDef) {
-  const wr = M.traitDuel?.[t.id];
-  const fld = M.traitField?.[t.id];
-  return `<div class="tr"><b>${t.icon} ${t.name}</b>${pctTag(wr)}<small class="up">▲ ${t.up}</small><small class="dn">▼ ${t.down}</small>${fld !== undefined ? `<small class="ms">판 순위 ${fld >= 0 ? '+' : ''}${fld}점</small>` : ''}</div>`;
-}
-
 function drawInfo() {
   const F = fam;
   const sp = SPECIES_BY_ID.get(species)!;
@@ -638,7 +632,6 @@ function drawInfo() {
       return `<div class="spc${id === species ? ' on' : ''}" data-s="${id}"><img src="${renderer.portrait(id + '@3')}" alt=""><div><b>${s.name}</b><small><em>${s.instinct.name}</em> ${s.instinct.desc}</small><small class="fxs">✨ ${themeOf(id)?.tag ?? ''}</small></div></div>`;
     }).join('')}</div>
   </section>
-  <section><h3>🎒 ${F.name} 전용 특성 <small>%는 1:1 거울 대결에서 특성 단 쪽 승률</small></h3><div class="trgrid">${familyTraits(F.id).map(traitCard).join('')}</div></section>
   <section><h3>🍽 입맛 · 상성</h3><div class="kv"><span class="lk">좋아함 ${like.icon} ${like.name}</span><span class="ht">싫어함 ${hate.icon} ${hate.name}</span></div><p class="note">강함: ${F.strong}<br>약함: ${F.weak}</p></section>`;
   $('info').querySelectorAll<HTMLButtonElement>('.pl').forEach((b) =>
     (b.onclick = () => {
@@ -685,11 +678,7 @@ function drawCompare() {
   $('cmpForms').querySelectorAll<HTMLElement>('tr[data-f]').forEach((tr) => (tr.onclick = () => (showTab('crawler'), pickFam(tr.dataset.f as FamilyId))));
 }
 
-// ---------- 특성·카드·보조 기술 탭 ----------
-function drawTraits() {
-  $('traitsBox').innerHTML = `<section><h3>공용 특성 10 <small>1칸 · %는 1:1 거울 대결 승률, '판 순위'는 8분 판 안 순위 백분위 변화</small></h3><div class="trgrid">${COMMON_TRAITS.map(traitCard).join('')}</div></section>` +
-    FAMILIES.map((f) => `<section><h3 style="color:${hex(f.color)}">${f.name} 전용 <small>${ROLES[f.role].icon} ${ROLES[f.role].name}</small></h3><div class="trgrid">${familyTraits(f.id).map(traitCard).join('')}</div></section>`).join('');
-}
+// ---------- 카드·보조 기술 탭 ----------
 function drawCards() {
   const fams = new Map(FAMILIES.map((f) => [f.id, f]));
   const one = (a: (typeof ABILITIES)[number]) => `<div class="ab"><div class="hd"><b>${a.icon} ${a.name}</b>${a.family ? `<span class="badge" style="background:${hex(FAMILY[a.family].color)}">${FAMILY[a.family].name}</span>` : ''}${a.roles ? a.roles.map((r) => `<span class="badge g">${ROLES[r].icon}</span>`).join('') : ''}${a.auto ? '<span class="badge g">자동</span>' : ''}</div><ol>${[1, 2, 3].map((l) => `<li>${a.desc(l)}</li>`).join('')}</ol></div>`;
@@ -726,7 +715,6 @@ async function boot() {
   drawInfo();
   drawControls();
   drawCompare();
-  drawTraits();
   drawCards();
   drawSubs();
   drawV3();

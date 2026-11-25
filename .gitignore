@@ -2,3 +2,5 @@ node_modules
 dist
 *.log
 dist-codex
+balance/out/
+balance/_*.ts

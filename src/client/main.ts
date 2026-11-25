@@ -2,7 +2,7 @@
 import './fonts.css';
 import { CONFIG } from '../shared/config';
 import { FAMILIES, FAMILY, ROLE_LIST, ROLES, SPECIAL_FOODS, SPECIES_BY_ID, SUBS_BY_ID, formsOf, type Family, type FamilyId, type Role } from '../shared/species';
-import { ABILITY_BY_ID, BONUS_CARDS, MAIN_UPS, SUB_UP, COMMON_TRAITS, TRAIT_BY_ID, familyTraits, type TraitDef } from '../shared/cards';
+import { ABILITY_BY_ID, BONUS_CARDS, MAIN_UPS, SUB_UP } from '../shared/cards';
 import { relation } from '../shared/combat';
 import type { CardView, EnemyKind, EnemyView, GameOpts, Loadout, Snapshot, SnakeView } from '../shared/types';
 import { createHost, type SimHost } from './host';
@@ -47,14 +47,11 @@ function loadLoadout(): Loadout {
   } catch {
     /* 저장 불가 환경 */
   }
-  return { species: 'rhino', form: 'charge', traits: ['sharp', 'heavyhorn'] };
+  return { species: 'rhino', form: 'charge', traits: [] };
 }
-/** 특성 2칸 = 공용 1 + 지금 계열 전용 1 (예전 특성·다른 계열 특성은 바꿔 끼운다) */
+/** 3판: 출전 전 특성 칸은 없다(예전 저장값의 특성은 지운다) */
 function normTraits() {
-  const F = famOf(LO.species);
-  const common = LO.traits.find((t) => TRAIT_BY_ID.get(t) && !TRAIT_BY_ID.get(t)!.family) ?? COMMON_TRAITS[0].id;
-  const own = LO.traits.find((t) => TRAIT_BY_ID.get(t)?.family === F.id) ?? familyTraits(F.id)[0].id;
-  LO.traits = [common, own];
+  LO.traits = [];
 }
 function saveLoadout() {
   try {
@@ -758,7 +755,7 @@ function showResult(latest: Snapshot) {
   const all = latest.snakes.filter((s) => !s.isBoss).sort((x, y) => y.score - x.score);
   const myI = all.findIndex((s) => s.isPlayer);
   const rr = (s: SnakeView, i: number) => `<tr class="${s.isPlayer ? 'me' : ''}"><td>${i + 1}</td><td class="n">${s.isPlayer ? '나' : s.name}</td><td>${s.level}</td><td>${s.killsAll}/${s.deaths}</td><td>${s.score}</td></tr>`;
-  $('oRank').innerHTML = `<table><tr><th>순위</th><th class="n">이름</th><th>Lv</th><th>처치/쓰러짐</th><th>점수</th></tr>${all.slice(0, 5).map(rr).join('')}${myI >= 5 ? rr(all[myI], myI) : ''}</table>`;
+  $('oRank').innerHTML = `<table><tr><th>순위</th><th class="n">이름</th><th>Lv</th><th>처치/쓰러짐</th><th>점수</th></tr>${all.slice(0, 5).map(rr).join('')}${myI >= 5 ? rr(all[myI], myI) : ''}</table><p class="scorehow">점수 = 먹은 영양 + 처치 ${CONFIG.scoreKill} + 도움 ${CONFIG.scoreAssist} + 최고 레벨 ${CONFIG.scoreLevel} − 쓰러짐 ${CONFIG.scoreDeath} (판 전체 누적)</p>`;
   const sec = Math.floor((performance.now() - startedAt) / 1000);
   $('oTime').textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
   // 빌드 요약
@@ -853,9 +850,9 @@ function statBar(label: string, v: number) {
   return `<div class="sbar"><em>${label}</em><i><b style="width:${k * 100}%"></b></i></div>`;
 }
 
-// 단계별 크롤러 고르기(3판): 계열 → 종 → 기술(4칸 보기) → 공용 특성 → 전용 특성 → 확인
-const STEPS = ['계열', '종', '기술', '특성①', '특성②', '확인'] as const;
-const STEP_TITLE = ['계열 고르기', '종 고르기', '기술 보기', '공용 특성 고르기', '전용 특성 고르기', '이대로 시작할까요?'];
+// 단계별 크롤러 고르기(3판): 계열 → 종 → 기술(4칸 보기) → 확인
+const STEPS = ['계열', '종', '기술', '확인'] as const;
+const STEP_TITLE = ['계열 고르기', '종 고르기', '기술 보기', '이대로 시작할까요?'];
 const LAST = STEPS.length - 1;
 let step = 0;
 
@@ -890,8 +887,7 @@ function buildSelect() {
   normTraits();
   $('selTitle').textContent = STEP_TITLE[step];
   $('stepDots').innerHTML = STEPS.map((n, i) => `<button class="sd${i === step ? ' on' : i < step ? ' done' : ''}" data-st="${i}">${i + 1}. ${n}</button>`).join('');
-  const tc = TRAIT_BY_ID.get(LO.traits[0])!, tf = TRAIT_BY_ID.get(LO.traits[1])!;
-  $('selCur').innerHTML = step === LAST ? '' : `<img src="${renderer.portrait(LO.species + '@3')}" alt=""><span>${VF.icon} ${VF.name} · ${sp.name} · ${tc.icon}${tf.icon}</span>`;
+  $('selCur').innerHTML = step === LAST ? '' : `<img src="${renderer.portrait(LO.species + '@3')}" alt=""><span>${VF.icon} ${VF.name} · ${sp.name}</span>`;
   const like = SPECIAL_FOODS[F.likes], hate = SPECIAL_FOODS[F.hates];
   let body = '';
   if (step === 0) {
@@ -908,9 +904,6 @@ function buildSelect() {
   } else if (step === 2) {
     body = `<p class="hint">기술은 종마다 정해져 있어요. 방어는 Lv3, 특수는 Lv5에 열리고, 필살기는 게이지가 차면 써요.</p><div class="kitlist">${kitRows(LO.species)}</div>
       <div class="ultline">✨ 계열 특성 <b>${VF.trait.icon} ${VF.trait.name}</b> — ${VF.trait.desc}<br>🧬 본능 <b>${sp.instinct.name}</b> — ${sp.instinct.desc}</div>`;
-  } else if (step === 3 || step === 4) {
-    const list = step === 3 ? COMMON_TRAITS : familyTraits(F.id);
-    body = `<p class="hint">${step === 3 ? '모든 크롤러가 고를 수 있는 특성 1개. 얻는 만큼 잃어요.' : `${sp.name}만 고를 수 있는 특성 1개. 기술을 한쪽으로 기울여요.`}</p><div class="tgrid">${list.map((t) => `<button class="trait${LO.traits.includes(t.id) ? ' on' : ''}" data-t="${t.id}"><b>${t.icon} ${t.name}</b><small class="up">▲ ${t.up}</small><small class="dn">▼ ${t.down}</small></button>`).join('')}</div>`;
   } else {
     const row = (st: number, label: string, val: string) => `<button class="sumrow" data-st="${st}"><em>${label}</em><span>${val}</span><i>바꾸기 ›</i></button>`;
     const kit = kitOf(LO.species)!;
@@ -918,7 +911,7 @@ function buildSelect() {
       <div class="tx"><div class="nm ol">${sp.name}</div><div class="rl">${VF.icon} ${VF.name} · ${VF.stages.join(' → ')}</div>
       <div class="inst"><b>🧬 ${sp.instinct.name}</b> ${sp.instinct.desc}</div>
       <div class="tst"><span class="lk">♥ ${like.icon} ${like.name}</span> <span class="ht">✖ ${hate.icon} ${hate.name}</span></div></div></div>
-      <div class="sum">${row(0, '계열', `${VF.icon} ${VF.name}`)}${row(1, '종', sp.name)}${row(2, '기술', `${kit.atk.icon}${kit.def.icon}${kit.spc.icon}${kit.ult.icon}`)}${row(3, '공용 특성', `${tc.icon} ${tc.name}`)}${row(4, '전용 특성', `${tf.icon} ${tf.name}`)}</div>`;
+      <div class="sum">${row(0, '계열', `${VF.icon} ${VF.name}`)}${row(1, '종', sp.name)}${row(2, '기술', `${kit.atk.icon}${kit.def.icon}${kit.spc.icon}${kit.ult.icon}`)}</div>`;
   }
   $('stepBody').innerHTML = body;
   $('goBtn').textContent = step === LAST ? '시작!' : '다음 ▶';
@@ -928,12 +921,6 @@ function buildSelect() {
   $('stepBody').querySelectorAll<HTMLButtonElement>('[data-st]').forEach((el) => (el.onclick = () => ((step = Number(el.dataset.st)), sfx.play('click'), buildSelect())));
   $('stepBody').querySelectorAll<HTMLButtonElement>('[data-vf]').forEach((el) => (el.onclick = pick(() => setV3Family(el.dataset.vf as V3FamId))));
   $('stepBody').querySelectorAll<HTMLButtonElement>('[data-s]').forEach((el) => (el.onclick = pick(() => (LO.species = el.dataset.s!))));
-  $('stepBody').querySelectorAll<HTMLButtonElement>('[data-t]').forEach((el) =>
-    (el.onclick = pick(() => {
-      const t = TRAIT_BY_ID.get(el.dataset.t!)!;
-      LO.traits = t.family ? [LO.traits[0], t.id] : [t.id, LO.traits[1]];
-    })),
-  );
   $('stepBody').scrollTop = 0;
 }
 
@@ -1007,7 +994,7 @@ function startGame() {
 
 // ---------- 설정 ----------
 function gameOpts(): GameOpts {
-  return { power: S.son ? SON_POWER : 1, bots: S.bots, map: S.map, loadout: { ...LO, traits: [...LO.traits] }, v3: true };
+  return { power: S.son ? SON_POWER : 1, bots: S.bots, map: S.map, loadout: { ...LO, traits: [] }, v3: true };
 }
 
 function applySettings() {
