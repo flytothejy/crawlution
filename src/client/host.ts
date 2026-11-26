@@ -3,6 +3,14 @@
 import SimWorker from './sim.worker?worker&inline';
 import { Simulation } from '../shared/sim';
 import type { Command, GameOpts, HostIn, HostOut, Snapshot } from '../shared/types';
+import type { ReplayRecord } from '../shared/sim';
+
+/** 마지막으로 끝난 판의 기록(순위 제출·실유저 밸런스 수집에 쓴다). 시험·디버그용으로 window.__lastReplay에도 둔다 */
+export let lastReplay: ReplayRecord | null = null;
+function gotReplay(r: ReplayRecord) {
+  lastReplay = r;
+  (globalThis as { __lastReplay?: ReplayRecord }).__lastReplay = r;
+}
 
 export interface SimHost {
   readonly kind: string;
@@ -22,6 +30,7 @@ class WorkerHost implements SimHost {
     this.w = new SimWorker();
     this.w.onmessage = (e: MessageEvent<HostOut>) => {
       if (e.data.type === 'snap') this.onSnap(e.data.snap);
+      else if (e.data.type === 'replay') gotReplay(e.data.rec);
     };
   }
   private post(m: HostIn) {
@@ -58,6 +67,7 @@ class LocalHost implements SimHost {
     this.last = performance.now();
     this.acc = 0;
     this.paused = false;
+    this.sentReplay = false;
     if (this.timer) clearInterval(this.timer);
     this.timer = setInterval(() => this.loop(), 4);
   }
@@ -78,8 +88,15 @@ class LocalHost implements SimHost {
       steps++;
     }
     if (this.acc > sim.dt * 8) this.acc = 0;
-    if (steps > 0) this.onSnap(sim.snapshot());
+    if (steps > 0) {
+      this.onSnap(sim.snapshot());
+      if (sim.state === 'ended' && !this.sentReplay) {
+        this.sentReplay = true;
+        gotReplay(sim.replayRecord());
+      }
+    }
   }
+  private sentReplay = false;
   send(cmd: Command) {
     this.sim?.setCommand(0, cmd);
   }

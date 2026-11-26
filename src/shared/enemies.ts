@@ -2,6 +2,7 @@
 import { CONFIG } from './config';
 import type { Simulation, Snake } from './sim';
 import type { EnemyKind, EnemyView } from './types';
+import { datan2, dcos, dhypot, dsin } from './dmath';
 
 interface Shadow {
   x: number;
@@ -60,7 +61,7 @@ export class Enemies {
   private edgePoint(): [number, number, number] {
     const a = this.sim.rng.range(0, Math.PI * 2);
     const R = CONFIG.arenaRadius - 30;
-    return [Math.cos(a) * R, Math.sin(a) * R, a + Math.PI];
+    return [dcos(a) * R, dsin(a) * R, a + Math.PI];
   }
 
   /** 몸이 긴 곤충일수록 잘 뽑힌다 */
@@ -170,8 +171,8 @@ export class Enemies {
         const lead = CONFIG.birdShadowTime * 0.6;
         const sp = sim.speedOf(target);
         this.shadows.push({
-          x: target.x + Math.cos(target.angle) * sp * lead,
-          y: target.y + Math.sin(target.angle) * sp * lead,
+          x: target.x + dcos(target.angle) * sp * lead,
+          y: target.y + dsin(target.angle) * sp * lead,
           r: CONFIG.birdRadius, t: CONFIG.birdShadowTime, total: CONFIG.birdShadowTime,
         });
       }
@@ -185,9 +186,9 @@ export class Enemies {
       sim.events.push({ type: 'birdDive', x: sh.x, y: sh.y, r: sh.r });
       for (const s of sim.snakes) {
         if (!sim.onField(s) || s.isBoss || s.flyT > 0) continue;
-        const headIn = Math.hypot(s.x - sh.x, s.y - sh.y) < sh.r;
+        const headIn = dhypot(s.x - sh.x, s.y - sh.y) < sh.r;
         let bodyIn = headIn;
-        for (let i = 0; i < s.segN && !bodyIn; i += 2) if (Math.hypot(s.segs[i * 2] - sh.x, s.segs[i * 2 + 1] - sh.y) < sh.r) bodyIn = true;
+        for (let i = 0; i < s.segN && !bodyIn; i += 2) if (dhypot(s.segs[i * 2] - sh.x, s.segs[i * 2 + 1] - sh.y) < sh.r) bodyIn = true;
         if (bodyIn) sim.damage(s, s.maxHp * CONFIG.birdDamage * (headIn ? 1 : 0.6), -1, 'enemy', s.x, s.y, 'enemy', 'bird');
       }
       this.shadows.splice(k, 1);
@@ -208,7 +209,7 @@ export class Enemies {
       if (this.aim.t <= 0) {
         // 발사: 예고선 방향으로 혀를 쭉 뻗는다
         const dx = this.aim.x - this.x, dy = this.aim.y - this.y;
-        const d = Math.hypot(dx, dy) || 1;
+        const d = dhypot(dx, dy) || 1;
         const L = Math.min(CONFIG.frogRange, d + 140);
         const ex = this.x + (dx / d) * L, ey = this.y + (dy / d) * L;
         this.tongue = { x: ex, y: ey, t: 0.35 };
@@ -218,7 +219,7 @@ export class Enemies {
           const w = 22 + s.r;
           if (segDist(s.x, s.y, this.x, this.y, ex, ey) < w) {
             sim.damage(s, s.maxHp * CONFIG.frogHead, -1, 'enemy', s.x, s.y, 'enemy', 'frog');
-            if (s.alive) sim.shove(s, Math.atan2(this.y - s.y, this.x - s.x), 220);
+            if (s.alive) sim.shove(s, datan2(this.y - s.y, this.x - s.x), 220);
             continue;
           }
           for (let i = 2; i < s.segN; i += 2) {
@@ -238,13 +239,13 @@ export class Enemies {
       let best: Snake | null = null, bd: number = CONFIG.frogRange;
       for (const s of sim.snakes) {
         if (!sim.onField(s) || s.isBoss || s.safeT > 0) continue;
-        const d = Math.hypot(s.x - this.x, s.y - this.y);
+        const d = dhypot(s.x - this.x, s.y - this.y);
         if (d < bd) ((bd = d), (best = s));
       }
       if (best) {
         const sp = sim.speedOf(best) * 0.45;
-        this.aim = { x: best.x + Math.cos(best.angle) * sp, y: best.y + Math.sin(best.angle) * sp, t: CONFIG.frogAim, total: CONFIG.frogAim };
-        this.angle = Math.atan2(this.aim.y - this.y, this.aim.x - this.x);
+        this.aim = { x: best.x + dcos(best.angle) * sp, y: best.y + dsin(best.angle) * sp, t: CONFIG.frogAim, total: CONFIG.frogAim };
+        this.angle = datan2(this.aim.y - this.y, this.aim.x - this.x);
       } else this.cd = 0.5;
     }
     if (this.t <= 0 && !this.aim && !this.tongue) this.end();
@@ -263,7 +264,7 @@ export class Enemies {
         const i = Math.floor(sim.rng.next() * s.segN);
         const a = sim.rng.range(0, Math.PI * 2), d = sim.rng.range(0, 90);
         const r = CONFIG.rainRadius;
-        this.drops.push({ x: s.segs[i * 2] + Math.cos(a) * d, y: s.segs[i * 2 + 1] + Math.sin(a) * d, r, t: CONFIG.rainWarn, total: CONFIG.rainWarn });
+        this.drops.push({ x: s.segs[i * 2] + dcos(a) * d, y: s.segs[i * 2 + 1] + dsin(a) * d, r, t: CONFIG.rainWarn, total: CONFIG.rainWarn });
       }
     }
     for (let k = this.drops.length - 1; k >= 0; k--) {
@@ -274,7 +275,7 @@ export class Enemies {
       for (const s of sim.snakes) {
         if (!sim.onField(s) || s.isBoss || s.flyT > 0) continue;
         for (let i = 0; i < s.segN; i += 2) {
-          if (Math.hypot(s.segs[i * 2] - dr.x, s.segs[i * 2 + 1] - dr.y) < dr.r + s.r * 0.5) {
+          if (dhypot(s.segs[i * 2] - dr.x, s.segs[i * 2 + 1] - dr.y) < dr.r + s.r * 0.5) {
             sim.damage(s, s.maxHp * CONFIG.rainDamage, -1, 'enemy', dr.x, dr.y, 'enemy', 'rain');
             s.slowT = Math.max(s.slowT, 1.2);
             break;
@@ -334,9 +335,9 @@ export class Enemies {
     if (this.licks <= 0) return this.end();
     const target = this.pickWeighted(8);
     const tx = target ? target.x : 0, ty = target ? target.y : 0;
-    this.angle = Math.atan2(ty - this.y, tx - this.x);
+    this.angle = datan2(ty - this.y, tx - this.x);
     const L = CONFIG.anteaterLen;
-    this.strip = { x1: this.x + Math.cos(this.angle) * L, y1: this.y + Math.sin(this.angle) * L, w: CONFIG.anteaterWidth, t: CONFIG.anteaterAim, total: CONFIG.anteaterAim, lick: 0 };
+    this.strip = { x1: this.x + dcos(this.angle) * L, y1: this.y + dsin(this.angle) * L, w: CONFIG.anteaterWidth, t: CONFIG.anteaterAim, total: CONFIG.anteaterAim, lick: 0 };
   }
 
   // ---------- 어린아이: 채집망으로 덮쳐 가둠 ----------
@@ -352,7 +353,7 @@ export class Enemies {
       tgt = null;
       for (const s of sim.snakes) {
         if (!sim.onField(s) || s.isBoss || s.invulnT > 0 || s.safeT > 0) continue;
-        const v = s.segCount / (300 + Math.hypot(s.x - this.x, s.y - this.y));
+        const v = s.segCount / (300 + dhypot(s.x - this.x, s.y - this.y));
         if (v > best) ((best = v), (tgt = s));
       }
       this.netTarget = tgt ? tgt.id : -1;
@@ -360,9 +361,9 @@ export class Enemies {
     }
     if (tgt) {
       const sp = sim.speedOf(tgt);
-      const tx = tgt.x + Math.cos(tgt.angle) * sp * 0.35, ty = tgt.y + Math.sin(tgt.angle) * sp * 0.35;
+      const tx = tgt.x + dcos(tgt.angle) * sp * 0.35, ty = tgt.y + dsin(tgt.angle) * sp * 0.35;
       const dx = tx - this.x, dy = ty - this.y;
-      const d = Math.hypot(dx, dy);
+      const d = dhypot(dx, dy);
       const speed = CONFIG.netSpeed * (this.swoop > 0 ? 0.75 : 1); // 내려치는 중에도 따라간다
       if (d > 1) {
         const v = Math.min(d, speed * dt);
@@ -380,7 +381,7 @@ export class Enemies {
         let caught = 0;
         for (const s of sim.snakes) {
           if (!sim.onField(s) || s.isBoss || s.flyT > 0 || s.invulnT > 0) continue;
-          if (Math.hypot(s.x - this.x, s.y - this.y) < CONFIG.netRadius) {
+          if (dhypot(s.x - this.x, s.y - this.y) < CONFIG.netRadius) {
             sim.capture(s);
             this.held.push(s.id);
             caught++;
@@ -398,12 +399,12 @@ export class Enemies {
   hazard(x: number, y: number): number {
     if (this.phase !== 'active') return 0;
     let h = 0;
-    for (const sh of this.shadows) if (Math.hypot(x - sh.x, y - sh.y) < sh.r + 20) h = Math.max(h, 0.9);
-    for (const d of this.drops) if (Math.hypot(x - d.x, y - d.y) < d.r + 10) h = Math.max(h, 0.5);
+    for (const sh of this.shadows) if (dhypot(x - sh.x, y - sh.y) < sh.r + 20) h = Math.max(h, 0.9);
+    for (const d of this.drops) if (dhypot(x - d.x, y - d.y) < d.r + 10) h = Math.max(h, 0.5);
     if (this.aim && segDist(x, y, this.x, this.y, this.aim.x + (this.aim.x - this.x) * 0.3, this.aim.y + (this.aim.y - this.y) * 0.3) < 50) h = Math.max(h, 0.9);
     if (this.strip && this.strip.t > 0 && segDist(x, y, this.x, this.y, this.strip.x1, this.strip.y1) < this.strip.w / 2 + 20) h = Math.max(h, 0.9);
-    if (this.kind === 'child' && Math.hypot(x - this.x, y - this.y) < CONFIG.netRadius + 40) h = Math.max(h, this.swoop > 0 ? 1 : 0.6);
-    if (this.kind === 'frog' && Math.hypot(x - this.x, y - this.y) < 160) h = Math.max(h, 0.7);
+    if (this.kind === 'child' && dhypot(x - this.x, y - this.y) < CONFIG.netRadius + 40) h = Math.max(h, this.swoop > 0 ? 1 : 0.6);
+    if (this.kind === 'frog' && dhypot(x - this.x, y - this.y) < 160) h = Math.max(h, 0.7);
     return h;
   }
 
@@ -436,5 +437,5 @@ export function segDist(px: number, py: number, x0: number, y0: number, x1: numb
   const dx = x1 - x0, dy = y1 - y0;
   const L2 = dx * dx + dy * dy || 1;
   const t = Math.max(0, Math.min(1, ((px - x0) * dx + (py - y0) * dy) / L2));
-  return Math.hypot(px - (x0 + dx * t), py - (y0 + dy * t));
+  return dhypot(px - (x0 + dx * t), py - (y0 + dy * t));
 }

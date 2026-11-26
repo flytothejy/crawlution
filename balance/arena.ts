@@ -1,6 +1,7 @@
 // 3층 · 아레나 판: 21마리 모두 봇 AI로 5분 판을 돌려 종별 성적과 기술 칸별 실전 기여를 모은다.
 // 플레이어 자리(0번)도 봇으로 돌린다 — 부활 규칙이 같아서 모두 같은 조건.
 import { CONFIG, newSim, V3_ROSTER } from './lib';
+import type { Simulation, Snake } from '../src/shared/sim';
 
 export interface ArenaAgg {
   lives: number;
@@ -26,21 +27,29 @@ export interface ArenaAgg {
 const SLOT_OF: Record<string, string> = { main: 'atk', sub: 'def', spc: 'spc', ult: 'ult' };
 const empty = (): ArenaAgg => ({ lives: 0, secs: 0, kills: 0, deaths: 0, dmg: {}, taken: 0, casts: {}, levelSum: 0, rankPct: 0, rankN: 0, eng: 0, engDied: 0, ttd: [], engCc: 0, engTime: 0, engDef: 0, engDefLived: 0 });
 
-export function arenaRound(seed: number): Record<string, ArenaAgg> {
-  const sp0 = V3_ROSTER[seed % V3_ROSTER.length];
-  const sim = newSim(90000 + seed, sp0, 20, 1, 'random');
-  sim.snakes[0].isPlayer = false;
+/**
+ * 판 하나에서 종별 성적을 모으는 수집기. 봇끼리 판(arenaRound)과 실유저 기록 다시 돌리기(replay.ts)가 함께 쓴다.
+ * keyOf: 곤충을 어느 줄에 셀지(null이면 세지 않음) — 예: 사람만 세려면 s.isPlayer ? s.sp.id : null
+ */
+export function arenaCollector(sim: Simulation, keyOf: (s: Snake) => string | null = (s) => s.sp.id) {
   const by: Record<string, ArenaAgg> = {};
-  const row = (sp: string) => (by[sp] ??= empty());
+  const rowOf = (id: number) => {
+    const s = sim.snakes[id];
+    if (!s || s.isBoss) return null;
+    const k = keyOf(s);
+    return k ? (by[k] ??= empty()) : null;
+  };
   const lifeStart = new Map<number, number>();
-  for (const s of sim.snakes) lifeStart.set(s.id, 0);
+  for (const s of sim.snakes) lifeStart.set(s.id, sim.time);
   const close = (id: number, died: boolean) => {
     const s = sim.snakes[id];
-    const r = row(s.sp.id);
-    r.lives++;
-    r.secs += sim.time - (lifeStart.get(id) ?? 0);
-    r.levelSum += s.level;
-    if (died) r.deaths++;
+    const r = rowOf(id);
+    if (r) {
+      r.lives++;
+      r.secs += sim.time - (lifeStart.get(id) ?? 0);
+      r.levelSum += s.level;
+      if (died) r.deaths++;
+    }
     lifeStart.set(id, sim.time);
   };
   // 교전 추적: 다른 곤충에게 맞기 시작하면 열고, 4초 동안 안 맞으면 '살아남음', 그 전에 쓰러지면 '쓰러짐'
@@ -52,7 +61,8 @@ export function arenaRound(seed: number): Record<string, ArenaAgg> {
     eng.delete(id);
     const s = sim.snakes[id];
     if (!died && g.dmg < s.maxHp * 0.15) return; // 스친 정도는 세지 않는다
-    const r = row(s.sp.id);
+    const r = rowOf(id);
+    if (!r) return;
     r.eng++;
     if (g.def) r.engDef++;
     if (died) {
@@ -62,9 +72,8 @@ export function arenaRound(seed: number): Record<string, ArenaAgg> {
       r.engTime += sim.time - g.t0;
     } else if (g.def) r.engDefLived++;
   };
-  const N = CONFIG.tickRate * CONFIG.roundTime;
-  for (let t = 0; t < N; t++) {
-    sim.step();
+  /** sim.step() 직후마다 부른다(이벤트를 읽고 비운다) */
+  const step = () => {
     for (const [id, g] of eng) {
       const s = sim.snakes[id];
       if (s.stunT > 0 || s.charmT > 0 || s.fearT > 0 || s.rootT > 0) g.cc += sim.dt;
@@ -73,7 +82,8 @@ export function arenaRound(seed: number): Record<string, ArenaAgg> {
     for (const e of sim.events) {
       if (e.type === 'hit' && e.dmg > 0) {
         const v = sim.snakes[e.snake];
-        if (v && !v.isBoss) row(v.sp.id).taken += e.dmg;
+        const rv = rowOf(e.snake);
+        if (rv) rv.taken += e.dmg;
         if (v && !v.isBoss && e.by >= 0 && e.by !== e.snake && !sim.snakes[e.by]?.isBoss) {
           const g = eng.get(e.snake) ?? { t0: sim.time, last: sim.time, dmg: 0, cc: 0, def: false };
           g.last = sim.time;
@@ -81,19 +91,17 @@ export function arenaRound(seed: number): Record<string, ArenaAgg> {
           eng.set(e.snake, g);
         }
         if (e.by >= 0 && e.by !== e.snake) {
-          const a = sim.snakes[e.by];
-          if (!a || a.isBoss) continue;
+          const r = rowOf(e.by);
+          if (!r) continue;
           const k = e.src ?? (e.kind === 'bite' || e.kind === 'crit' ? 'bite' : 'etc');
-          const r = row(a.sp.id);
           r.dmg[k] = (r.dmg[k] ?? 0) + e.dmg;
         }
       }
       if (e.type === 'skill') {
-        const a = sim.snakes[e.snake];
         if (e.slot === 'sub' && eng.has(e.snake)) eng.get(e.snake)!.def = true;
-        if (a && !a.isBoss) {
+        const r = rowOf(e.snake);
+        if (r) {
           const k = SLOT_OF[e.slot] ?? e.slot;
-          const r = row(a.sp.id);
           r.casts[k] = (r.casts[k] ?? 0) + 1;
         }
       }
@@ -102,21 +110,42 @@ export function arenaRound(seed: number): Record<string, ArenaAgg> {
         if (!v || v.isBoss) continue;
         endEng(e.snake, true);
         close(e.snake, true);
-        if (e.by >= 0 && e.by !== e.snake && !sim.snakes[e.by].isBoss) row(sim.snakes[e.by].sp.id).kills++;
+        if (e.by >= 0 && e.by !== e.snake) {
+          const r = rowOf(e.by);
+          if (r) r.kills++;
+        }
       }
     }
     sim.events = [];
+  };
+  /** 판(또는 기록)이 끝났을 때 한 번: 살아 있는 생을 닫고 점수 순위를 센다 */
+  const finish = () => {
+    const live = sim.snakes.filter((s) => !s.isBoss);
+    for (const s of live) if (s.respawnT <= 0) close(s.id, false);
+    const order = [...live].sort((a, b) => b.score - a.score);
+    order.forEach((s, i) => {
+      const r = rowOf(s.id);
+      if (!r) return;
+      r.rankPct += 1 - i / (order.length - 1);
+      r.rankN++;
+    });
+    return by;
+  };
+  return { step, finish };
+}
+
+export function arenaRound(seed: number): Record<string, ArenaAgg> {
+  const sp0 = V3_ROSTER[seed % V3_ROSTER.length];
+  const sim = newSim(90000 + seed, sp0, 20, 1, 'random');
+  sim.snakes[0].isPlayer = false;
+  sim.recording = false;
+  const c = arenaCollector(sim);
+  const N = CONFIG.tickRate * CONFIG.roundTime;
+  for (let t = 0; t < N; t++) {
+    sim.step();
+    c.step();
   }
-  const live = sim.snakes.filter((s) => !s.isBoss);
-  for (const s of live) if (s.respawnT <= 0) close(s.id, false);
-  // 판 끝 점수 순위(판 전체 누적 점수, 플레이어·봇 같은 기준)
-  const order = [...live].sort((a, b) => b.score - a.score);
-  order.forEach((s, i) => {
-    const r = row(s.sp.id);
-    r.rankPct += 1 - i / (order.length - 1);
-    r.rankN++;
-  });
-  return by;
+  return c.finish();
 }
 
 export function mergeArena(list: Record<string, ArenaAgg>[]) {

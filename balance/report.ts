@@ -8,9 +8,10 @@ import type { BenchRow } from './bench';
 import type { DuelRow } from './duel';
 import type { EscapeRow } from './escape';
 import { mergeArena, type ArenaAgg } from './arena';
+import type { HumanRun } from './human';
 import { W, FLAG, TARGET } from './weights';
 
-type Data = { profile: { name: string; benchLevels: number[]; duelLevels: number[]; arenaRounds: number }; at: string; bench?: BenchRow[]; duel?: DuelRow[]; arena?: Record<string, ArenaAgg>[]; escape?: EscapeRow[] };
+type Data = { profile: { name: string; benchLevels: number[]; duelLevels: number[]; arenaRounds: number }; at: string; bench?: BenchRow[]; duel?: DuelRow[]; arena?: Record<string, ArenaAgg>[]; escape?: EscapeRow[]; human?: HumanRun[] };
 
 export interface SkillA {
   sp: string;
@@ -206,7 +207,43 @@ export function analyze(d: Data) {
     ttdHist: [0, 1, 2, 3, 4, 6, 8, 12, 99].slice(0, -1).map((lo, i, arr) => ({ lo, hi: [1, 2, 3, 4, 6, 8, 12, 99][i], n: ttdAll.filter((x) => x >= lo && x < [1, 2, 3, 4, 6, 8, 12, 99][i]).length / Math.max(1, ttdAll.length) })),
   };
   const ttkAll = median(duels.filter((r) => r.win !== 0 && r.t < 60).map((r) => r.t));
-  return { at: d.at, profile: d.profile, levels, duelLevels: dLv, skills, species, families, famM, global: { ttk, ttkAll, draw, mix, eng, duels: duels.length, rounds: d.arena?.length ?? 0 } };
+  return { at: d.at, profile: d.profile, levels, duelLevels: dLv, skills, species, families, famM, global: { ttk, ttkAll, draw, mix, eng, duels: duels.length, rounds: d.arena?.length ?? 0 }, human: humanA(d.human ?? [], arena) };
+}
+
+/** 한 묶음(생 여러 개)의 전투 요약 */
+function engSum(rows: ArenaAgg[]) {
+  const s = (k: 'eng' | 'engDied' | 'engDef' | 'engDefLived' | 'kills' | 'deaths' | 'secs' | 'lives') => rows.reduce((x, r) => x + (r?.[k] ?? 0), 0);
+  const mins = s('secs') / 60;
+  const casts: Record<string, number> = {};
+  for (const r of rows) for (const [k, v] of Object.entries(r?.casts ?? {})) casts[k] = (casts[k] ?? 0) + v;
+  return {
+    mins, lives: s('lives'), kd: s('kills') / Math.max(1, s('deaths')), survive: 1 - s('engDied') / Math.max(1, s('eng')), ttd: median(rows.flatMap((r) => r?.ttd ?? [])),
+    defUse: s('engDef') / Math.max(1, s('eng')), defLived: s('engDefLived') / Math.max(1, s('engDef')), life: s('secs') / Math.max(1, s('lives')),
+    perMin: Object.fromEntries(['atk', 'def', 'spc', 'ult'].map((k) => [k, (casts[k] ?? 0) / Math.max(1e-6, mins)])) as Record<string, number>,
+  };
+}
+
+/** 실유저 층: 사람 기록을 다시 돌려 뽑은 지표를 같은 판 봇·봇끼리 아레나와 비교 */
+function humanA(runs: HumanRun[], arena: Record<string, ArenaAgg>) {
+  const ok = runs.filter((r) => !r.unranked);
+  if (!ok.length) return null;
+  const me = engSum(ok.flatMap((r) => Object.values(r.rows)));
+  const bots = engSum(ok.map((r) => r.botsAgg));
+  const byBuild: Record<string, number> = {};
+  for (const r of ok) byBuild[r.build] = (byBuild[r.build] ?? 0) + 1;
+  const sps = [...new Set(ok.flatMap((r) => Object.keys(r.rows)))];
+  const species = sps.map((sp) => {
+    const h = engSum(ok.map((r) => r.rows[sp]).filter(Boolean));
+    const b = arena[sp] ? engSum([arena[sp]]) : null;
+    return { sp, name: nameOf(sp), fam: v3FamOf(sp)!, h, b };
+  }).sort((a, b) => b.h.mins - a.h.mins);
+  return {
+    runs: ok.length, mins: me.mins, byBuild, me, bots,
+    rank: avg(ok.map((r) => 1 - (r.rank - 1) / Math.max(1, r.of - 1))), top3: ok.filter((r) => r.rank <= 3).length / ok.length,
+    maxLevel: avg(ok.map((r) => r.maxLevel)), score: median(ok.map((r) => r.score)),
+    input: { turns: avg(ok.map((r) => r.input.turnsPerSec)), boost: avg(ok.map((r) => r.input.boostShare)) },
+    species,
+  };
 }
 type A = ReturnType<typeof analyze>;
 
@@ -288,7 +325,7 @@ table.mx td,table.mx th{text-align:center}table.mx td.dg{color:var(--mut)}
 p.note{color:var(--mut);font-size:12.5px}
 </style></head><body>
 <header><h1>크롤루션 밸런스 보고서</h1><small>${A.at.slice(0, 16).replace('T', ' ')} UTC · ${A.profile.name === 'full' ? '전체 측정' : '빠른 점검'} · 1:1 ${A.global.duels}판 · 아레나 ${A.global.rounds}판${B ? ` · 기준선(${B.at.slice(0, 10)}) 대비 Δ` : ''}</small></header>
-<nav><button data-t="sum" class="on">요약</button><button data-t="fam">계열</button><button data-t="sp">종</button><button data-t="sk">기술</button><button data-t="how">방법</button></nav>
+<nav><button data-t="sum" class="on">요약</button><button data-t="fam">계열</button><button data-t="sp">종</button><button data-t="sk">기술</button><button data-t="hu">실유저</button><button data-t="how">방법</button></nav>
 <section id="sum" class="on">
 <div class="card"><h3>전체 지표</h3><div class="kv">${A.duelLevels.map((l) => `<div><small>1:1 결판 시간(Lv${l})</small><b>${f1(A.global.ttk[l])}초</b><small>무승부 ${pct(A.global.draw[l])}</small></div>`).join('')}<div><small>계열 1:1 승률 폭</small><b>${pct(Math.min(...A.families.map((f) => f.duel)))}–${pct(Math.max(...A.families.map((f) => f.duel)))}</b></div><div><small>계열 K/D 폭</small><b>${f1(Math.min(...A.families.map((f) => f.kd)), 2)}–${f1(Math.max(...A.families.map((f) => f.kd)), 2)}</b></div></div><p class="note">실전 피해 출처: ${mix}</p></div>
 <div class="card"><h3>전투 시간 기준(balance/weights.ts)</h3><div class="kv">${[
@@ -306,6 +343,7 @@ p.note{color:var(--mut);font-size:12.5px}
 <section id="sk"><p class="note">Lv${lv} 실측. 가치 = 기술 한 번이 낸 효과를 '상대 체력 비율'로 환산(방법 탭). 칸 대비 = 10초당 가치 ÷ 같은 칸 중간값(필살기는 한 번당). 실전 = 아레나 분당 사용·피해 비중.</p>
 <div class="chips"><button data-f="all" class="on">전체</button><button data-f="atk">공격</button><button data-f="def">방어</button><button data-f="spc">특수</button><button data-f="ult">필살기</button></div>
 <div class="tw"><table class="st" id="skt"><tr><th>종</th><th>칸</th><th>기술</th><th>쿨</th><th>피해 합</th><th>1명 최대</th><th>대상</th><th>제어(초)</th><th>밀기</th><th>지킴</th><th>이동</th><th>가치</th><th>칸 대비</th><th>실전 분당</th><th>실전 비중</th><th>탈출 기여(%p)</th><th>표시</th></tr>${skRows}</table></div></section>
+${humanHtml(A)}
 <section id="how"><div class="card"><h3>세 층</h3><ul class="fl">
 <li><b>기술 실측</b>: 레벨 ${A.levels.join('·')}, 고정 장면에서 기술 하나를 한 번 쓴다. 공격 장면(앞에 허수아비 3마리) · 방어 장면(세 방향에서 0.5초마다 최대 체력 4%) · 이동 장면(혼자 직진). 안 쓴 판과의 차이로 잰다. 봇 판단이 끼지 않는 순수 수치.</li>
 <li><b>1:1 대전표</b>: 레벨 ${A.duelLevels.join('·')}, 40종 모든 쌍 × 시드 × 자리 바꿈, 봇 AI(싸움꾼). 60초 넘으면 남은 체력으로 판정.</li>
@@ -322,6 +360,26 @@ document.querySelectorAll('table.st').forEach(t=>t.querySelectorAll('th').forEac
 </script></body></html>`;
 }
 
+function humanHtml(A: A) {
+  const H = A.human;
+  const fc = (id: string) => `#${V3_FAMILY[id as keyof typeof V3_FAMILY].color.toString(16).padStart(6, '0')}`;
+  if (!H)
+    return `<section id="hu"><div class="card"><h3>실유저 기록 없음</h3><p>사람이 둔 판 기록을 <code>balance/replays/inbox/</code>에 넣고 <code>npm run balance:ingest</code> → <code>npm run balance -- --only=none</code>. 기록은 판이 끝날 때 게임이 만든다(<code>window.__lastReplay</code>, 출시 뒤에는 순위 서버가 모은다).</p></div></section>`;
+  const cmp = (n: string, a: number, b: number, fmt: (x: number) => string) => `<div><small>${n}</small><b>${fmt(a)}</b><small>같은 판 봇 ${fmt(b)}</small></div>`;
+  const rows = H.species
+    .map((s) => `<tr><td class="n" style="--c:${fc(s.fam)}">${esc(s.name)}</td><td>${f1(s.h.mins, 0)}</td><td>${s.h.lives}</td><td>${f1(s.h.kd, 2)}</td><td>${s.b ? f1(s.b.kd, 2) : '–'}</td><td>${pct(s.h.survive)}</td><td>${s.b ? pct(s.b.survive) : '–'}</td><td>${f1(s.h.ttd)}</td><td>${s.b ? f1(s.b.ttd) : '–'}</td>${['atk', 'def', 'spc', 'ult'].map((k) => `<td>${f1(s.h.perMin[k], 1)}<small class="dl">봇 ${s.b ? f1(s.b.perMin[k], 1) : '–'}</small></td>`).join('')}</tr>`)
+    .join('');
+  return `<section id="hu"><div class="card"><h3>실유저 ${H.runs}판 · ${f1(H.mins, 0)}분</h3><div class="kv">${[
+    cmp('K/D', H.me.kd, H.bots.kd, (x) => f1(x, 2)),
+    cmp('붙잡힌 뒤 살아남음', H.me.survive, H.bots.survive, pct),
+    cmp('붙잡혀 쓰러지기까지', H.me.ttd, H.bots.ttd, (x) => `${f1(x)}초`),
+    cmp('교전 중 방어 기술 씀', H.me.defUse, H.bots.defUse, pct),
+    cmp('한 생(초)', H.me.life, H.bots.life, (x) => f1(x, 0)),
+  ].join('')}<div><small>판 순위(1=1등 백분위)</small><b>${pct(H.rank)}</b><small>3등 안 ${pct(H.top3)}</small></div><div><small>최고 레벨 평균</small><b>${f1(H.maxLevel)}</b><small>점수 중간값 ${f1(H.score, 0)}</small></div><div><small>조작</small><b>${f1(H.input.turns)}회/초</b><small>달리기 ${pct(H.input.boost)}</small></div></div>
+<p class="note">버전별 판 수: ${Object.entries(H.byBuild).map(([b, n]) => `${b} ${n}`).join(' · ')}. 봇 비교 칸은 종별 표에서는 봇끼리 아레나(같은 종), 위 요약에서는 같은 판의 봇 20마리.</p></div>
+<div class="tw"><table class="st"><tr><th>종</th><th>분</th><th>생</th><th>K/D</th><th>봇 K/D</th><th>붙잡혀 생존</th><th>봇</th><th>쓰러지기까지</th><th>봇</th><th>공격/분</th><th>방어/분</th><th>특수/분</th><th>필살기/분</th></tr>${rows}</table></div></section>`;
+}
+
 function md(A: A, B: A | null) {
   const bSp = new Map(B?.species.map((s) => [s.sp, s]) ?? []);
   const lines: string[] = [];
@@ -336,6 +394,10 @@ function md(A: A, B: A | null) {
   for (const f of [...A.families].sort((a, b) => b.strength - a.strength)) lines.push(`| ${f.icon} ${f.name} | ${pct(f.duel)} | ${f1(f.kd, 2)} | ${pct(f.rank)} | ${f1(f.dpm, 0)} | ${f1(f.strength, 2)} |`);
   lines.push('', '## 종 (강함 지수 순)', '', '| 종 | 계열 | 1:1 | K/D | 판 순위 | 기술 지수 | 강함 지수 | Δ강함 |', '|---|---|---|---|---|---|---|---|');
   for (const s of [...A.species].sort((a, b) => b.strength - a.strength)) lines.push(`| ${s.name} | ${V3_FAMILY[s.fam as keyof typeof V3_FAMILY].name} | ${pct(s.duelAll)} | ${f1(s.kd, 2)} | ${pct(s.rank)} | ${f1(s.skillIdx, 2)} | ${f1(s.strength, 2)} | ${B ? sign(s.strength - (bSp.get(s.sp)?.strength ?? NaN), 2) : ''} |`);
+  if (A.human) {
+    const H = A.human;
+    lines.push('', `## 실유저 (${H.runs}판 · ${f1(H.mins, 0)}분)`, '', `- K/D ${f1(H.me.kd, 2)} (같은 판 봇 ${f1(H.bots.kd, 2)}) · 붙잡힌 뒤 살아남음 ${pct(H.me.survive)} (봇 ${pct(H.bots.survive)}) · 쓰러지기까지 ${f1(H.me.ttd)}초 (봇 ${f1(H.bots.ttd)}초) · 판 순위 ${pct(H.rank)}`);
+  }
   lines.push('', '## 살펴볼 것', '');
   for (const s of A.species.filter((x) => x.flags.length)) lines.push(`- **${s.name}**: ${s.flags.join(' · ')}`);
   for (const s of A.skills.filter((x) => x.flags.length)) lines.push(`- ${nameOf(s.sp)} ${SLOTN[s.slot]} **${s.name}**: ${s.flags.join(' · ')}`);

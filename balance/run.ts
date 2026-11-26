@@ -12,6 +12,7 @@ import { cpus } from 'node:os';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildReport, analyze } from './report';
+import { loadHumanRuns } from './human';
 
 const args = new Map(process.argv.slice(2).map((a) => {
   const [k, v] = a.replace(/^--/, '').split('=');
@@ -53,6 +54,7 @@ for (const layer of ['bench', 'duel', 'arena', 'escape']) {
   else if (prev && prev.profile?.name === PROFILE.name) data[layer] = prev[layer]; // 안 돌린 층은 지난 결과를 쓴다
 }
 writeFileSync(join(OUT, 'latest.json'), JSON.stringify(data));
+data.human = loadHumanRuns(); // 실유저 지표는 매번 runs/에서 새로 읽는다(측정 결과에 섞지 않음)
 const basePath = join(import.meta.dirname, 'baseline.json');
 const base = existsSync(basePath) ? JSON.parse(readFileSync(basePath, 'utf8')) : null;
 buildReport(data, base && base.at !== data.at ? base : null); // 기준선이 이번 결과면 비교하지 않는다

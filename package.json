@@ -6,12 +6,17 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "tsx test/sim.test.ts && tsx test/v3.test.ts",
+    "test": "tsx test/sim.test.ts && tsx test/v3.test.ts && tsx test/determinism.test.ts",
     "typecheck": "tsc --noEmit",
     "balance": "tsx balance/run.ts",
     "duel": "tsx scripts/duel.ts",
     "codex": "vite build --config vite.codex.config.ts",
-    "balance:quick": "tsx balance/run.ts --quick"
+    "balance:quick": "tsx balance/run.ts --quick",
+    "stamp": "node scripts/stamp.mjs",
+    "pretest": "node scripts/stamp.mjs",
+    "prebuild": "node scripts/stamp.mjs",
+    "precodex": "node scripts/stamp.mjs",
+    "balance:ingest": "tsx balance/human.ts"
   },
   "dependencies": {
     "pixi-filters": "^6.1.5",

@@ -13,6 +13,8 @@ import * as SK from './skills';
 import * as SK3 from './skills3';
 import { KIT_SLOTS, KIT_UNLOCK, kitOf, V3_ROSTER, type Kit, type KitSlot } from './kit';
 import { V3_FAMILIES, type V3FamId } from './v3';
+import { datan2, dcos, dexp, dhypot, dsin } from './dmath';
+import { SIM_BUILD } from './build';
 import {
   defaultOpts, emptyCommand, emptyStats,
   type CardView, type Command, type DeathCause, type EnemyKind, type FxKind, type GameEvent, type GameOpts, type HitKind, type MapTheme, type MapView,
@@ -20,6 +22,33 @@ import {
 } from './types';
 
 export type Personality = 'hunter' | 'gatherer' | 'brawler' | 'coward';
+
+/**
+ * 판 기록(입력 기록): 시드 + 설정 + 사람 입력만으로 판 전체를 다시 돌릴 수 있다(시뮬레이션이 결정적이라).
+ * 쓰임: 순위 점수 검증(서버가 다시 돌려 직접 계산), 실유저 밸런스 분석(다시 돌려 어떤 지표든 뽑음), 버그 재현.
+ * cmds 한 줄 = [틱, 곤충 id, 칸 번호, 값, 칸 번호, 값, …] — 바뀐 칸만. 칸 순서는 CMD_FIELDS.
+ */
+export interface ReplayRecord {
+  v: 1;
+  build: string; // 시뮬레이션 버전 도장(같은 도장의 코드로만 똑같이 재현된다)
+  seed: number;
+  name: string;
+  theme?: MapTheme;
+  opts: GameOpts;
+  ticks: number; // 기록을 끊은 틱(판이 끝났으면 끝난 틱)
+  ended: boolean;
+  cmds: number[][];
+  optsLog: [number, number][]; // [틱, power] 판 중 설정 바뀜(순위 판에서는 없어야 함)
+}
+export const CMD_FIELDS = ['angle', 'boost', 'sneak', 'skillSeq', 'subSeq', 'spcSeq', 'ultSeq', 'cardSeq', 'cardChoice', 'rerollSeq'] as const;
+/** 방향은 한 바퀴를 4096칸으로 잘라 정수로 기록·사용한다(기록 = 실제) */
+export const ANGLE_Q = 4096;
+const TAU_ = 6.283185307179586;
+export const quantAngle = (a: number) => Math.round((a * ANGLE_Q) / TAU_);
+export const encodeCmd = (c: Command): number[] => [quantAngle(c.angle), c.boost ? 1 : 0, c.sneak ? 1 : 0, c.skillSeq, c.subSeq, c.spcSeq, c.ultSeq, c.cardSeq, c.cardChoice, c.rerollSeq];
+export function decodeCmd(v: number[]): Command {
+  return { angle: (v[0] * TAU_) / ANGLE_Q, boost: v[1] === 1, sneak: v[2] === 1, skillSeq: v[3], subSeq: v[4], spcSeq: v[5], ultSeq: v[6], cardSeq: v[7], cardChoice: v[8], rerollSeq: v[9] };
+}
 
 export interface Snake {
   id: number;
@@ -372,12 +401,14 @@ export class Simulation {
     this.enemies = new Enemies(this);
     this.playerName = playerName;
     if (opts) this.opts = { ...defaultOpts(), ...opts, loadout: { ...defaultOpts().loadout, ...(opts.loadout ?? {}) } };
+    this.recInit = { seed, name: playerName, theme, opts: JSON.parse(JSON.stringify(this.opts)) };
     if (!theme && this.opts.map !== 'random') theme = this.opts.map;
     this.reset(theme);
   }
 
   /** 판 도중 바꿀 수 있는 설정(세기) */
   setOpts(opts: GameOpts) {
+    if (opts.power !== this.opts.power) this.recOpts.push([this.tick, opts.power]);
     this.opts = { ...this.opts, power: opts.power };
   }
 
@@ -465,15 +496,15 @@ export class Simulation {
     const nRock = Math.round((theme === 'sand' ? 20 : theme === 'forest' ? 16 : 13) * area);
     const nPud = Math.round((theme === 'sand' ? 5 : theme === 'forest' ? 11 : 9) * area);
     const free = (x: number, y: number, r: number) =>
-      Math.hypot(x, y) > 380 && Math.hypot(x, y) + r < R - 120 && rocks.every((o) => Math.hypot(o.x - x, o.y - y) > o.r + r + 160) && puddles.every((o) => Math.hypot(o.x - x, o.y - y) > o.r + r + 60);
+      dhypot(x, y) > 380 && dhypot(x, y) + r < R - 120 && rocks.every((o) => dhypot(o.x - x, o.y - y) > o.r + r + 160) && puddles.every((o) => dhypot(o.x - x, o.y - y) > o.r + r + 60);
     for (let k = 0, tries = 0; k < nRock && tries < 500; tries++) {
       const a = this.rng.range(0, Math.PI * 2), d = Math.sqrt(this.rng.next()) * R;
-      const x = Math.cos(a) * d, y = Math.sin(a) * d, r = this.rng.range(55, theme === 'sand' ? 140 : 115);
+      const x = dcos(a) * d, y = dsin(a) * d, r = this.rng.range(55, theme === 'sand' ? 140 : 115);
       if (free(x, y, r)) (rocks.push({ x, y, r }), k++);
     }
     for (let k = 0, tries = 0; k < nPud && tries < 500; tries++) {
       const a = this.rng.range(0, Math.PI * 2), d = Math.sqrt(this.rng.next()) * R;
-      const x = Math.cos(a) * d, y = Math.sin(a) * d, r = this.rng.range(90, 190);
+      const x = dcos(a) * d, y = dsin(a) * d, r = this.rng.range(90, 190);
       if (free(x, y, r)) (puddles.push({ x, y, r }), k++);
     }
     this.map = { theme, rocks, puddles };
@@ -722,7 +753,7 @@ export class Simulation {
     const len = segCount * sp + 40;
     s.path = [];
     const steps = Math.ceil(len / 3);
-    for (let i = steps; i >= 0; i--) s.path.push(x - Math.cos(angle) * i * 3, y - Math.sin(angle) * i * 3);
+    for (let i = steps; i >= 0; i--) s.path.push(x - dcos(angle) * i * 3, y - dsin(angle) * i * 3);
     this.rebuildSegs(s);
   }
 
@@ -732,15 +763,15 @@ export class Simulation {
     for (let tries = 0; tries < 40; tries++) {
       const a = this.rng.range(0, Math.PI * 2);
       const d = Math.sqrt(this.rng.next()) * R;
-      const x = Math.cos(a) * d, y = Math.sin(a) * d;
+      const x = dcos(a) * d, y = dsin(a) * d;
       let near = Infinity;
       for (const o of this.snakes) {
         if (!o.alive || o === avoid) continue;
         // 머리는 그대로, 몸은 절반 거리로 친다(몸 근처도 위험하지만 머리가 더 위험)
-        near = Math.min(near, Math.hypot(x - o.x, y - o.y));
-        for (let k = 8; k < o.segN; k += 8) near = Math.min(near, Math.hypot(x - o.segs[k * 2], y - o.segs[k * 2 + 1]) * 1.6);
+        near = Math.min(near, dhypot(x - o.x, y - o.y));
+        for (let k = 8; k < o.segN; k += 8) near = Math.min(near, dhypot(x - o.segs[k * 2], y - o.segs[k * 2 + 1]) * 1.6);
       }
-      for (const z of this.zones) near = Math.min(near, Math.hypot(x - z.x, y - z.y) - z.r + 200);
+      for (const z of this.zones) near = Math.min(near, dhypot(x - z.x, y - z.y) - z.r + 200);
       if (near > best) ((best = near), (bx = x), (by = y));
       if (near > minDist) break;
     }
@@ -818,8 +849,8 @@ export class Simulation {
     let away = this.rng.range(0, Math.PI * 2), nd = Infinity;
     for (const o of this.snakes) {
       if (!o.alive || o === p) continue;
-      const d = Math.hypot(o.x - x, o.y - y);
-      if (d < nd) ((nd = d), (away = Math.atan2(y - o.y, x - o.x)));
+      const d = dhypot(o.x - x, o.y - y);
+      if (d < nd) ((nd = d), (away = datan2(y - o.y, x - o.x)));
     }
     this.spawnAt(p, x, y, away, segs);
     this.fullHeal(p);
@@ -842,9 +873,9 @@ export class Simulation {
     for (let k = 0; k < 6; k++) {
       const a = this.rng.range(0, Math.PI * 2);
       const d = Math.sqrt(this.rng.next()) * R;
-      x = Math.cos(a) * d;
-      y = Math.sin(a) * d;
-      if (this.map.rocks.every((o) => Math.hypot(o.x - x, o.y - y) > o.r + 12)) break;
+      x = dcos(a) * d;
+      y = dsin(a) * d;
+      if (this.map.rocks.every((o) => dhypot(o.x - x, o.y - y) > o.r + 12)) break;
     }
     if (kind === 3) return { x, y, r: CONFIG.goldRadius, ep: CONFIG.goldEP, kind, sub: 0, life: Infinity };
     if (kind === 4) return { x, y, r: CONFIG.specialRadius, ep: CONFIG.specialEP, kind, sub: sub >= 0 ? sub : this.rng.int(0, SPECIAL_FOODS.length - 1), life: Infinity };
@@ -857,12 +888,33 @@ export class Simulation {
 
   private dropGold(x: number, y: number) {
     const a = this.rng.range(0, Math.PI * 2), d = this.rng.range(10, 60);
-    this.foods.push({ x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, r: CONFIG.goldRadius, ep: CONFIG.goldEP, kind: 3, sub: 0, life: 45 });
+    this.foods.push({ x: x + dcos(a) * d, y: y + dsin(a) * d, r: CONFIG.goldRadius, ep: CONFIG.goldEP, kind: 3, sub: 0, life: 45 });
   }
 
   setCommand(id: number, cmd: Command) {
     const s = this.snakes[id];
-    if (s) s.cmd = cmd;
+    if (!s) return;
+    const enc = encodeCmd(cmd);
+    // 바뀐 칸은 '지금 곤충이 들고 있는 명령'과 비교한다. 판이 명령을 직접 고치는 때(부활하면 방향을 새로 잡는 등)가 있어서,
+    // 보낸 명령끼리 비교하면 같은 명령을 다시 보낸 효과가 기록에서 빠진다.
+    const base = s.isPlayer && this.recording ? encodeCmd(s.cmd) : null;
+    s.cmd = decodeCmd(enc); // 기록과 똑같은 값으로 판을 돌린다
+    // 사람이 조종하는 곤충만 기록(봇 입력은 판 안에서 정해져 다시 돌리면 똑같이 나온다)
+    if (!base) return;
+    const row: number[] = [this.tick, id];
+    for (let k = 0; k < enc.length; k++) if (base[k] !== enc[k]) row.push(k, enc[k]);
+    if (row.length > 2) this.recCmds.push(row);
+  }
+
+  /** 입력 기록(끄면 측정 도구처럼 기록이 필요 없는 곳에서 메모리를 아낀다) */
+  recording = true;
+  private recCmds: number[][] = [];
+  private recOpts: [number, number][] = [];
+  private recInit!: { seed: number; name: string; theme?: MapTheme; opts: GameOpts };
+
+  /** 지금까지의 판 기록 */
+  replayRecord(): ReplayRecord {
+    return { v: 1, build: SIM_BUILD, ...this.recInit, opts: JSON.parse(JSON.stringify(this.recInit.opts)), ticks: this.tick, ended: this.state === 'ended', cmds: this.recCmds.map((r) => [...r]), optsLog: [...this.recOpts] };
   }
 
   /** o가 s보다 강한가(레벨 3 이상 높음 또는 천적) */
@@ -888,7 +940,7 @@ export class Simulation {
     for (let i = p.length - 4; i >= 0 && n < need; i -= 2) {
       const x = p[i], y = p[i + 1];
       let dx = x - lastX, dy = y - lastY;
-      let d = Math.hypot(dx, dy);
+      let d = dhypot(dx, dy);
       let ox = lastX, oy = lastY;
       while (d > 0 && carry + d >= sp && n < need) {
         const t = (sp - carry) / d;
@@ -900,7 +952,7 @@ export class Simulation {
         oy = ny;
         dx = x - ox;
         dy = y - oy;
-        d = Math.hypot(dx, dy);
+        d = dhypot(dx, dy);
         carry = 0;
       }
       carry += d;
@@ -934,7 +986,7 @@ export class Simulation {
       for (const s of this.snakes) {
         if (!this.onField(s) || !(this.tsp(s, 'loner') || this.tsp(s, 'duelist'))) continue;
         let n = 0;
-        for (const o of this.snakes) if (o !== s && !o.isBoss && this.onField(o) && Math.hypot(o.x - s.x, o.y - s.y) < 450) n++;
+        for (const o of this.snakes) if (o !== s && !o.isBoss && this.onField(o) && dhypot(o.x - s.x, o.y - s.y) < 450) n++;
         s.crowd = n;
       }
     // 1) 봇·왕지네 생각 → 명령(봇은 3틱마다, 서로 엇갈려)
@@ -958,7 +1010,7 @@ export class Simulation {
       if (s.alive) {
         const x0 = s.x, y0 = s.y;
         this.moveSnake(s, dt);
-        const mv = Math.hypot(s.x - x0, s.y - y0);
+        const mv = dhypot(s.x - x0, s.y - y0);
         if (mv < 60) s.st.distance += mv; // 순간이동(부활 등)은 빼고
         if (s.segCount > s.st.maxLen) s.st.maxLen = s.segCount;
       }
@@ -1441,7 +1493,7 @@ export class Simulation {
   addMinion(owner: Snake, kind: 'bee' | 'wasp' | 'ant' | 'soldier' | 'worker', life: number, dps: number, heat = false, slot = 0) {
     dps *= this.tm(owner, 'minionDmg');
     const a = this.rng.range(0, Math.PI * 2);
-    this.minions.push({ x: owner.x + Math.cos(a) * 30, y: owner.y + Math.sin(a) * 30, angle: a, owner: owner.id, life, hp: owner.maxHp * 0.08, dps, speed: kind === 'ant' ? 260 : kind === 'soldier' ? 300 : 330, target: -1, kind, slot, bite: 9, acc: 0, heat, ult: null, src: kind === 'worker' ? null : this.src });
+    this.minions.push({ x: owner.x + dcos(a) * 30, y: owner.y + dsin(a) * 30, angle: a, owner: owner.id, life, hp: owner.maxHp * 0.08, dps, speed: kind === 'ant' ? 260 : kind === 'soldier' ? 300 : 330, target: -1, kind, slot, bite: 9, acc: 0, heat, ult: null, src: kind === 'worker' ? null : this.src });
   }
 
   /** 범위 안 상대마다 '처음 닿은 마디'로 한 번씩 */
@@ -1459,23 +1511,23 @@ export class Simulation {
   }
 
   circle(s: Snake, cx: number, cy: number, r: number, apply: (o: Snake, x: number, y: number, i: number) => void) {
-    this.forEachHit(s, (o, _i, x, y) => Math.hypot(x - cx, y - cy) <= r + o.r, apply);
+    this.forEachHit(s, (o, _i, x, y) => dhypot(x - cx, y - cy) <= r + o.r, apply);
   }
 
   cone(s: Snake, cx: number, cy: number, dir: number, range: number, half: number, apply: (o: Snake, x: number, y: number, i: number) => void) {
     this.forEachHit(s, (o, _i, x, y) => {
       const dx = x - cx, dy = y - cy;
-      const d = Math.hypot(dx, dy);
+      const d = dhypot(dx, dy);
       if (d > range + o.r) return false;
-      let da = Math.atan2(dy, dx) - dir;
-      da = Math.atan2(Math.sin(da), Math.cos(da));
+      let da = datan2(dy, dx) - dir;
+      da = datan2(dsin(da), dcos(da));
       return Math.abs(da) <= half || d < s.r + o.r;
     }, apply);
   }
 
   /** 직선(폭 w). 가까운 순으로 최대 n마리 */
   line(s: Snake, x0: number, y0: number, dir: number, len: number, w: number, n: number, apply: (o: Snake, x: number, y: number, i: number) => void) {
-    const ux = Math.cos(dir), uy = Math.sin(dir);
+    const ux = dcos(dir), uy = dsin(dir);
     const hits: { o: Snake; x: number; y: number; i: number; t: number }[] = [];
     this.forEachHit(s, (o, _i, x, y) => {
       const t = (x - x0) * ux + (y - y0) * uy;
@@ -1550,12 +1602,12 @@ export class Simulation {
     let k = o.isBoss ? 0.25 : (o.v3fam === 'beetle' ? 0.5 : o.fam.knockTaken) * this.tm(o, 'knock');
     if (dist > 0 && this.actor && this.actor !== o && this.actor.v3fam === 'beetle') k *= 1.2; // 무거운 껍질: 내 밀어내기 더 멀리
     const v = dist * k * 8;
-    o.kvx += Math.cos(angle) * v;
-    o.kvy += Math.sin(angle) * v;
+    o.kvx += dcos(angle) * v;
+    o.kvy += dsin(angle) * v;
   }
   pullTo(o: Snake, x: number, y: number, dist: number) {
-    const d = Math.hypot(x - o.x, y - o.y);
-    this.knock(o, Math.atan2(y - o.y, x - o.x), Math.min(dist, Math.max(0, d - 30)));
+    const d = dhypot(x - o.x, y - o.y);
+    this.knock(o, datan2(y - o.y, x - o.x), Math.min(dist, Math.max(0, d - 30)));
   }
 
   /** 잡기(사슴벌레) */
@@ -1623,7 +1675,7 @@ export class Simulation {
       if (this.tsp(a, 'sticky') && (t.rootT > 0 || t.slowT > 0)) d *= 1.25;
       if (a.crisisT > 0) d *= 1 + this.ab(a, 'crisis');
       if (t.hp < t.maxHp * 0.3) d *= 1 + this.ab(a, 'eye');
-      if (this.inst(a, 'patrol') && Math.hypot(a.x - a.patrolX, a.y - a.patrolY) < 320 && a.patrolT > 2) d *= 1.2;
+      if (this.inst(a, 'patrol') && dhypot(a.x - a.patrolX, a.y - a.patrolY) < 320 && a.patrolT > 2) d *= 1.2;
       if (this.inst(a, 'snail') && (t.slowT > 0 || t.stunT > 0 || t.rootT > 0)) d *= 1.25;
       // 3판 계열 특성
       if (a.v3fam === 'bee' && t.poisonT > 0) d *= 1.15; // 독침: 중독된 적에게 +15%
@@ -1663,8 +1715,8 @@ export class Simulation {
     }
     // 딱딱한 등판: 뒤에서 오는 피해를 막는다
     if (t.backT > 0 && atk) {
-      const dir = Math.atan2(atk.y - t.y, atk.x - t.x) - t.angle;
-      if (Math.cos(dir) < 0.2) {
+      const dir = datan2(atk.y - t.y, atk.x - t.x) - t.angle;
+      if (dcos(dir) < 0.2) {
         this.events.push({ type: 'hit', snake: t.id, by, dmg: 0, x, y, kind, good, blocked: true });
         t.st.dmgBlocked += amount;
         return 0;
@@ -1683,8 +1735,8 @@ export class Simulation {
       if (t.flutterT > 0 && kind !== 'bite' && kind !== 'crit') d *= 0.5; // 팔랑 비행: 기술 피해 절반
       if (t.boosting && this.ab(t, 'glide') > 0) d *= 1 - this.ab(t, 'glide');
       if (atk && atk !== t && (t.leafT > 0 || (this.inst(t, 'bigeye') && t.bigeyeCd <= 0))) {
-        const dir = Math.atan2(atk.y - t.y, atk.x - t.x) - t.angle;
-        if (Math.cos(dir) > 0.35) {
+        const dir = datan2(atk.y - t.y, atk.x - t.x) - t.angle;
+        if (dcos(dir) > 0.35) {
           if (t.leafT > 0) {
             // 잎 방패: 앞쪽 피해를 막는다(각성: 막은 만큼 30% 회복)
             this.events.push({ type: 'hit', snake: t.id, by, dmg: 0, x, y, kind, good, blocked: true });
@@ -1701,7 +1753,7 @@ export class Simulation {
         // 단단한 마디(왕지네): 몸 가운데를 물리면 −20%
         let bi = 0, bd = Infinity;
         for (let i = 0; i < t.segN; i += 2) {
-          const dd = Math.hypot(t.segs[i * 2] - x, t.segs[i * 2 + 1] - y);
+          const dd = dhypot(t.segs[i * 2] - x, t.segs[i * 2 + 1] - y);
           if (dd < bd) ((bd = dd), (bi = i));
         }
         if (bi > t.segN * 0.2 && bi < t.segN * 0.8) d *= 0.8;
@@ -1713,8 +1765,8 @@ export class Simulation {
         d *= CONFIG.guardMul;
         if (this.inst(t, 'brace')) d *= 0.7;
         if (this.inst(t, 'leafshield') && atk) {
-          const dir = Math.atan2(atk.y - t.y, atk.x - t.x) - t.angle;
-          if (Math.cos(dir) > 0.3) d *= 0.4;
+          const dir = datan2(atk.y - t.y, atk.x - t.x) - t.angle;
+          if (dcos(dir) > 0.3) d *= 0.4;
         }
       }
       if (this.inst(t, 'flat') && this.nearRock(t, 60)) d *= 0.7;
@@ -1722,7 +1774,7 @@ export class Simulation {
       if (this.inst(t, 'trash') && t.pack > 0) {
         // 몸 뒤쪽(머리에서 먼 곳)으로 오는 피해를 등짐이 막는다
         const hx = t.segs[0], hy = t.segs[1];
-        if (Math.hypot(x - hx, y - hy) > t.r * 3) d *= 1 - 0.4 * t.pack;
+        if (dhypot(x - hx, y - hy) > t.r * 3) d *= 1 - 0.4 * t.pack;
       }
     }
     if (!t.isBoss && d < amount) t.st.dmgBlocked += amount - d;
@@ -1783,22 +1835,22 @@ export class Simulation {
   }
 
   nearPuddle(s: Snake, pad: number) {
-    for (const p of this.map.puddles) if (Math.hypot(s.x - p.x, s.y - p.y) < p.r + pad) return true;
+    for (const p of this.map.puddles) if (dhypot(s.x - p.x, s.y - p.y) < p.r + pad) return true;
     return false;
   }
 
   nearRock(s: Snake, pad: number) {
-    for (const rk of this.map.rocks) if (Math.hypot(s.x - rk.x, s.y - rk.y) < rk.r + s.r + pad) return true;
+    for (const rk of this.map.rocks) if (dhypot(s.x - rk.x, s.y - rk.y) < rk.r + s.r + pad) return true;
     return false;
   }
 
   nearBigFood(s: Snake) {
-    for (const f of this.foods) if ((f.kind === 1 || f.kind === 4) && Math.abs(f.x - s.x) < 200 && Math.abs(f.y - s.y) < 200 && Math.hypot(f.x - s.x, f.y - s.y) < 200) return true;
+    for (const f of this.foods) if ((f.kind === 1 || f.kind === 4) && Math.abs(f.x - s.x) < 200 && Math.abs(f.y - s.y) < 200 && dhypot(f.x - s.x, f.y - s.y) < 200) return true;
     return false;
   }
 
   inPuddle(s: Snake) {
-    for (const pd of this.map.puddles) if (Math.hypot(s.x - pd.x, s.y - pd.y) < pd.r) return true;
+    for (const pd of this.map.puddles) if (dhypot(s.x - pd.x, s.y - pd.y) < pd.r) return true;
     return false;
   }
 
@@ -1838,8 +1890,8 @@ export class Simulation {
   shove(o: Snake, a: number, dist: number) {
     o.px = o.x;
     o.py = o.y;
-    o.x += Math.cos(a) * dist;
-    o.y += Math.sin(a) * dist;
+    o.x += dcos(a) * dist;
+    o.y += dsin(a) * dist;
     o.path.push(o.x, o.y);
     this.rebuildSegs(o);
   }
@@ -1966,7 +2018,7 @@ export class Simulation {
     }
     // 왕잠자리: 4초마다 순찰 기준점을 옮긴다
     if (this.inst(s, 'patrol')) {
-      if (Math.hypot(s.x - s.patrolX, s.y - s.patrolY) > 320) ((s.patrolX = s.x), (s.patrolY = s.y), (s.patrolT = 0));
+      if (dhypot(s.x - s.patrolX, s.y - s.patrolY) > 320) ((s.patrolX = s.x), (s.patrolY = s.y), (s.patrolT = 0));
       else s.patrolT += dt;
     }
     // 회복
@@ -1974,7 +2026,7 @@ export class Simulation {
     if (s.hurtT > CONFIG.regenDelay && s.hp < s.maxHp) regen += CONFIG.regenRate * (1 + this.ab(s, 'regen'));
     if (this.inst(s, 'waterborn') && this.inPuddle(s)) regen += 0.04;
     if (s.sneaking) regen += this.ab(s, 'patient');
-    for (const z of this.zones) if (z.kind === 'nest' && z.owner === s.id && Math.hypot(s.x - z.x, s.y - z.y) < z.r) regen += 0.03;
+    for (const z of this.zones) if (z.kind === 'nest' && z.owner === s.id && dhypot(s.x - z.x, s.y - z.y) < z.r) regen += 0.03;
     if (regen > 0 && s.hp < s.maxHp) this.heal(s, s.maxHp * regen * dt);
     // 양봉꿀벌: 체력이 낮으면 저장한 꿀을 먹는다
     if (this.inst(s, 'store') && s.hp < s.maxHp * 0.35 && s.store > 1) {
@@ -2020,19 +2072,19 @@ export class Simulation {
     if (s.stunT > 0 || s.deadT > 0) maxTurn = 0;
     let want = c.angle;
     // 눈부심: 방향이 흔들린다
-    if (s.blindT > 0) want += Math.sin(this.time * 11 + s.id) * 1.1;
+    if (s.blindT > 0) want += dsin(this.time * 11 + s.id) * 1.1;
     // 혼란: 조작 방향이 갈지자로 흔들린다
-    if (s.confuseT > 0) want += Math.sin(this.time * 7 + s.id * 1.7) * 0.9;
+    if (s.confuseT > 0) want += dsin(this.time * 7 + s.id * 1.7) * 0.9;
     // 매혹: 건 쪽으로 걸어간다
     if (s.charmT > 0 && s.charmBy >= 0) {
       const by = this.snakes[s.charmBy];
-      if (by && by.alive) want = Math.atan2(by.y - s.y, by.x - s.x);
+      if (by && by.alive) want = datan2(by.y - s.y, by.x - s.x);
     }
     if (s.chanT > 0 && s.chanKind === 'circle') s.angle += 8.4 * dt * s.side * (s.chanT > 0.75 ? 1 : -1); // 맴돌기: 반은 왼쪽, 반은 오른쪽으로 돌아 8자를 그린다
     else if (s.chanT > 0 && s.chanKind === 'orbit') s.angle += 4.2 * dt * s.side; // 백족 소용돌이: 큰 원으로 내달림
     else {
       let diff = want - s.angle;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      diff = datan2(dsin(diff), dcos(diff));
       s.angle += Math.max(-maxTurn, Math.min(maxTurn, diff));
     }
     let speed = this.speedOf(s);
@@ -2085,13 +2137,13 @@ export class Simulation {
     s.px = s.x;
     s.py = s.y;
     const mvA = Number.isNaN(s.dashAngle) ? s.angle : s.dashAngle;
-    let mx = speed > 0 ? Math.cos(mvA) * speed * dt : 0;
-    let my = speed > 0 ? Math.sin(mvA) * speed * dt : 0;
+    let mx = speed > 0 ? dcos(mvA) * speed * dt : 0;
+    let my = speed > 0 ? dsin(mvA) * speed * dt : 0;
     // 밀치기
     if (s.kvx !== 0 || s.kvy !== 0) {
       mx += s.kvx * dt;
       my += s.kvy * dt;
-      const k = Math.exp(-8 * dt);
+      const k = dexp(-8 * dt);
       s.kvx *= k;
       s.kvy *= k;
       if (Math.abs(s.kvx) + Math.abs(s.kvy) < 4) s.kvx = s.kvy = 0;
@@ -2100,7 +2152,7 @@ export class Simulation {
     if (pinned) {
       const a = this.snakes[s.grabbedBy];
       if (a && a.alive) {
-        const tx = a.x + Math.cos(a.angle) * (a.r * 2.4 + s.r), ty = a.y + Math.sin(a.angle) * (a.r * 2.4 + s.r);
+        const tx = a.x + dcos(a.angle) * (a.r * 2.4 + s.r), ty = a.y + dsin(a.angle) * (a.r * 2.4 + s.r);
         mx = (tx - s.x) * Math.min(1, dt * 14);
         my = (ty - s.y) * Math.min(1, dt * 14);
       } else s.grabbedBy = -1;
@@ -2269,10 +2321,10 @@ export class Simulation {
   private bounce(a: Snake, sx: number, sy: number, push: number = CONFIG.knockback) {
     a.x = a.px;
     a.y = a.py;
-    const away = Math.atan2(a.y - sy, a.x - sx);
+    const away = datan2(a.y - sy, a.x - sx);
     a.angle = away;
-    a.x += Math.cos(away) * push;
-    a.y += Math.sin(away) * push;
+    a.x += dcos(away) * push;
+    a.y += dsin(away) * push;
     a.path[a.path.length - 2] = a.x;
     a.path[a.path.length - 1] = a.y;
     this.rebuildSegs(a);
@@ -2290,13 +2342,13 @@ export class Simulation {
       if (a.flyT <= 0) {
         for (const rk of this.map.rocks) {
           const dx = a.x - rk.x, dy = a.y - rk.y;
-          const d = Math.hypot(dx, dy), min = rk.r + a.r * 0.7;
+          const d = dhypot(dx, dy), min = rk.r + a.r * 0.7;
           if (d < min) {
-            const out = Math.atan2(dy, dx);
-            a.x = rk.x + Math.cos(out) * (min + 2);
-            a.y = rk.y + Math.sin(out) * (min + 2);
+            const out = datan2(dy, dx);
+            a.x = rk.x + dcos(out) * (min + 2);
+            a.y = rk.y + dsin(out) * (min + 2);
             let diff = a.angle - out;
-            diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+            diff = datan2(dsin(diff), dcos(diff));
             a.angle = out + Math.sign(diff || 1) * Math.PI / 2.2;
             a.path[a.path.length - 2] = a.x;
             a.path[a.path.length - 1] = a.y;
@@ -2306,8 +2358,8 @@ export class Simulation {
           }
         }
       }
-      if (Math.hypot(a.x, a.y) > CONFIG.arenaRadius) {
-        a.angle = Math.atan2(-a.y, -a.x);
+      if (dhypot(a.x, a.y) > CONFIG.arenaRadius) {
+        a.angle = datan2(-a.y, -a.x);
         a.x = a.px;
         a.y = a.py;
         a.kvx = a.kvy = 0;
@@ -2479,7 +2531,7 @@ export class Simulation {
           o.x = o.px;
           o.y = o.py;
           o.kvx = o.kvy = 0;
-          const toC = Math.atan2(ring.cy - o.y, ring.cx - o.x);
+          const toC = datan2(ring.cy - o.y, ring.cx - o.x);
           o.angle = was ? toC : toC + Math.PI;
           o.path[o.path.length - 2] = o.x;
           o.path[o.path.length - 1] = o.y;
@@ -2500,7 +2552,7 @@ export class Simulation {
             // 실잠자리: 휘감기에서 한 번 빠져나간다
             o.thinCd = 20;
             o.invulnT = Math.max(o.invulnT, 0.6);
-            this.shove(o, Math.atan2(o.y - ring.cy, o.x - ring.cx), 120);
+            this.shove(o, datan2(o.y - ring.cy, o.x - ring.cx), 120);
             this.events.push({ type: 'pop', snake: o.id, x: o.x, y: o.y - 30, text: '빠져나감!', color: 0x9adfff });
           } else if (o.invulnT <= 0 && o.deadT <= 0) {
             this.events.push({ type: 'hit', snake: o.id, by: ring.owner, dmg: Math.ceil(o.hp), x: o.x, y: o.y, kind: 'crush', good: true });
@@ -2530,7 +2582,7 @@ export class Simulation {
     }
     this.clearStatus(b);
     b.totalNut = b.kills = b.score = 0;
-    this.spawnAt(b, x, y, Math.atan2(-y, -x), CONFIG.bossSegments);
+    this.spawnAt(b, x, y, datan2(-y, -x), CONFIG.bossSegments);
     this.fullHeal(b);
     this.bossId = b.id;
   }
@@ -2667,7 +2719,7 @@ export class Simulation {
     return {
       tick: this.tick, time: this.time, snakes, foods, rings,
       zones: this.zones.map((z) => ({ x: z.x, y: z.y, r: z.r, kind: z.kind, life: z.life, max: z.max, owner: z.owner })),
-      projs: this.projs.map((q) => ({ x: q.x, y: q.y, angle: Math.atan2(q.vy, q.vx), kind: q.kind, owner: q.owner })),
+      projs: this.projs.map((q) => ({ x: q.x, y: q.y, angle: datan2(q.vy, q.vx), kind: q.kind, owner: q.owner })),
       minions,
       teles: this.teles.map((t) => ({ shape: t.shape, x: t.x, y: t.y, r: t.r, angle: t.angle, len: t.len, w: t.w, t: t.t, total: t.total, owner: t.owner })),
       enemy: this.enemies.view(), map: this.map, timeLeft: Math.max(0, CONFIG.roundTime - this.time),

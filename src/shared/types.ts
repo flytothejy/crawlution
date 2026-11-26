@@ -300,4 +300,4 @@ export type HostIn =
   | { type: 'stop' };
 
 /** 시뮬레이션 → 화면 메시지 */
-export type HostOut = { type: 'snap'; snap: Snapshot };
+export type HostOut = { type: 'snap'; snap: Snapshot } | { type: 'replay'; rec: import('./sim').ReplayRecord };

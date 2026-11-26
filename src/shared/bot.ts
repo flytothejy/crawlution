@@ -5,6 +5,7 @@ import { ABILITY_BY_ID } from './cards';
 import { SUBS_BY_ID, taste, type AiKind } from './species';
 import type { Command } from './types';
 import type { Simulation, Snake } from './sim';
+import { datan2, dcos, dhypot, dsin } from './dmath';
 
 const OFFSETS = [0, -0.35, 0.35, -0.7, 0.7, -1.1, 1.1, -1.6, 1.6, -2.2, 2.2];
 const PROBES = [22, 45, 75, 110];
@@ -43,7 +44,7 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
       const tooStrong = persona === 'brawler' ? o.level > s.level + 2 : persona === 'hunter' ? o.level > s.level + 1 : o.level > s.level - 2;
       if (tooStrong) continue;
       const [ox, oy] = seenAt(o);
-      const d = Math.hypot(ox - s.x, oy - s.y);
+      const d = dhypot(ox - s.x, oy - s.y);
       if (d < best) ((best = d), (target = o));
     }
     // 사냥꾼은 몸이 길면 감싸기를 시도
@@ -63,7 +64,7 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
     for (const o of sim.snakes) {
       if (!sim.onField(o) || o.id === s.id || invisible(sim, o)) continue;
       if (!o.isBoss && o.level <= s.level && hpK > 0.35) continue;
-      const d = Math.hypot(o.x - s.x, o.y - s.y);
+      const d = dhypot(o.x - s.x, o.y - s.y);
       if (d < best) ((best = d), (flee = o));
     }
   }
@@ -75,7 +76,7 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
       if (!sim.onField(o) || o.id === s.id || o.isBoss || o.segN < 14 || !sim.stronger(o, s) || invisible(sim, o)) continue;
       const ti = o.segN - 2;
       const tx = o.segs[ti * 2], ty = o.segs[ti * 2 + 1];
-      if (Math.hypot(tx - s.x, ty - s.y) < 260 && Math.hypot(o.x - s.x, o.y - s.y) > 320) {
+      if (dhypot(tx - s.x, ty - s.y) < 260 && dhypot(o.x - s.x, o.y - s.y) > 320) {
         tailT = [tx, ty];
         break;
       }
@@ -83,24 +84,24 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
   }
 
   if (flee) {
-    desired = Math.atan2(s.y - flee.y, s.x - flee.x);
-    boost = s.segCount > 24 && Math.hypot(flee.x - s.x, flee.y - s.y) < 220;
+    desired = datan2(s.y - flee.y, s.x - flee.x);
+    boost = s.segCount > 24 && dhypot(flee.x - s.x, flee.y - s.y) < 220;
   } else if (target && coil) {
     const R = Math.max(55, Math.min(220, (s.segCount * s.r * CONFIG.spacingRatio) / (2 * Math.PI) * 0.75));
     const [ox, oy] = seenAt(target);
     const dx = ox - s.x, dy = oy - s.y;
-    const d = Math.hypot(dx, dy);
-    const toT = Math.atan2(dy, dx);
+    const d = dhypot(dx, dy);
+    const toT = datan2(dy, dx);
     const bend = Math.max(-0.9, Math.min(0.9, (d - R) / R)) * (Math.PI / 3);
     desired = toT + s.side * (Math.PI / 2 - bend);
     boost = d > R * 1.8 && s.segCount > 30 && sim.rng.next() < 0.6;
   } else if (tailT) {
-    desired = Math.atan2(tailT[1] - s.y, tailT[0] - s.x);
+    desired = datan2(tailT[1] - s.y, tailT[0] - s.x);
   } else if (target) {
     const i = Math.min(target.segN - 1, Math.max(2, Math.floor(target.segN / 3)));
     const [tx, ty] = target.decoyT > 0 ? seenAt(target) : [target.segs[i * 2], target.segs[i * 2 + 1]];
-    desired = Math.atan2(ty - s.y, tx - s.x);
-    boost = Math.hypot(tx - s.x, ty - s.y) > 160 && s.segCount > 30 && sim.rng.next() < 0.3;
+    desired = datan2(ty - s.y, tx - s.x);
+    boost = dhypot(tx - s.x, ty - s.y) > 160 && s.segCount > 30 && sim.rng.next() < 0.3;
   } else {
     // 먹이: 황금 꿀방울·좋아하는 특별 먹이는 귀하다. 싫어하는 먹이는 피한다. 가짜 먹이에도 속는다
     let bestScore = 0, fx = 0, fy = 0;
@@ -109,8 +110,8 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
       if (dx > 450 || dx < -450 || dy > 450 || dy < -450) continue;
       const d2 = dx * dx + dy * dy;
       if (d2 > 450 * 450) continue;
-      const a = Math.atan2(dy, dx) - s.angle;
-      const front = 0.6 + 0.4 * Math.cos(a);
+      const a = datan2(dy, dx) - s.angle;
+      const front = 0.6 + 0.4 * dcos(a);
       let v = f.ep;
       if (f.kind === 3) v = 15;
       else if (f.kind === 4) {
@@ -123,25 +124,25 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
     }
     for (const z of sim.zones) {
       if (z.kind !== 'bait' || z.owner === s.id) continue;
-      const d = Math.hypot(z.x - s.x, z.y - s.y);
+      const d = dhypot(z.x - s.x, z.y - s.y);
       if (d < 400 && 8 / (d + 40) > bestScore) ((bestScore = 8 / (d + 40)), (fx = z.x), (fy = z.y));
     }
     // 꽃 흉내: 먹이인 줄 알고 다가간다
     for (const o of sim.snakes) {
       if (o.id === s.id || !sim.onField(o) || !(sim.inst(o, 'flower') && o.crouchT >= 1)) continue;
-      const d = Math.hypot(o.x - s.x, o.y - s.y);
+      const d = dhypot(o.x - s.x, o.y - s.y);
       if (d < 400 && 10 / (d + 40) > bestScore) ((bestScore = 10 / (d + 40)), (fx = o.x), (fy = o.y));
     }
-    if (bestScore > 0) desired = Math.atan2(fy - s.y, fx - s.x);
+    if (bestScore > 0) desired = datan2(fy - s.y, fx - s.x);
     else {
-      if (s.modeT <= 0 || Math.hypot(s.wanderX - s.x, s.wanderY - s.y) < 60) {
+      if (s.modeT <= 0 || dhypot(s.wanderX - s.x, s.wanderY - s.y) < 60) {
         const a = sim.rng.range(0, Math.PI * 2);
         const r = sim.rng.range(0, CONFIG.arenaRadius * 0.7);
-        s.wanderX = Math.cos(a) * r;
-        s.wanderY = Math.sin(a) * r;
+        s.wanderX = dcos(a) * r;
+        s.wanderY = dsin(a) * r;
         s.modeT = 5;
       }
-      desired = Math.atan2(s.wanderY - s.y, s.wanderX - s.x);
+      desired = datan2(s.wanderY - s.y, s.wanderX - s.x);
     }
   }
 
@@ -163,7 +164,7 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
     if ((sim.time + s.id * 7) % 14 < 2.2) guard = true;
   }
 
-  if (target && !scared && sim.tsp(s, 'poise') && !s.poised && s.skillCd <= 0 && Math.hypot(target.x - s.x, target.y - s.y) > 260) guard = true;
+  if (target && !scared && sim.tsp(s, 'poise') && !s.poised && s.skillCd <= 0 && dhypot(target.x - s.x, target.y - s.y) > 260) guard = true;
   // 기술: 조건이 반응 지연만큼 이어지면 쓴다
   let skill = false, sub = false, spc = false, ult = false;
   if (s.kit) {
@@ -244,7 +245,7 @@ function enemiesWithin(sim: Simulation, s: Snake, r: number, filter?: (o: Snake,
     if (!o.alive || o.id === s.id || !sim.hittable(o) || invisible(sim, o)) continue;
     for (let i = 0; i < o.segN; i += 3) {
       const x = o.segs[i * 2], y = o.segs[i * 2 + 1];
-      if (Math.hypot(x - s.x, y - s.y) <= r && (!filter || filter(o, x, y))) {
+      if (dhypot(x - s.x, y - s.y) <= r && (!filter || filter(o, x, y))) {
         n++;
         break;
       }
@@ -254,8 +255,8 @@ function enemiesWithin(sim: Simulation, s: Snake, r: number, filter?: (o: Snake,
 }
 
 function inFront(s: Snake, x: number, y: number, half: number, back = false) {
-  let da = Math.atan2(y - s.y, x - s.x) - (s.angle + (back ? Math.PI : 0));
-  da = Math.atan2(Math.sin(da), Math.cos(da));
+  let da = datan2(y - s.y, x - s.x) - (s.angle + (back ? Math.PI : 0));
+  da = datan2(dsin(da), dcos(da));
   return Math.abs(da) <= half;
 }
 
@@ -264,7 +265,7 @@ function chased(sim: Simulation, s: Snake) {
   for (const o of sim.snakes) {
     if (!o.alive || o.id === s.id || !sim.hittable(o)) continue;
     const ti = Math.max(0, s.segN - 1);
-    if (Math.hypot(o.x - s.segs[ti * 2], o.y - s.segs[ti * 2 + 1]) < 200 && Math.hypot(o.x - s.x, o.y - s.y) > 80) return true;
+    if (dhypot(o.x - s.segs[ti * 2], o.y - s.segs[ti * 2 + 1]) < 200 && dhypot(o.x - s.x, o.y - s.y) > 80) return true;
   }
   return false;
 }
@@ -308,7 +309,7 @@ export function wantAi(sim: Simulation, s: Snake, ai: AiKind, range: number, sca
     case 'buff':
       return enemiesWithin(sim, s, R) > 0 || !!target;
     case 'move':
-      return (scared && s.hp < s.maxHp * 0.5) || (!!target && Math.hypot(target.x - s.x, target.y - s.y) > 200);
+      return (scared && s.hp < s.maxHp * 0.5) || (!!target && dhypot(target.x - s.x, target.y - s.y) > 200);
     case 'defense':
       return (scared && s.hp < s.maxHp * 0.5) || (s.hurtT < 0.4 && s.hp < s.maxHp * 0.6);
     case 'escape':
@@ -323,7 +324,7 @@ function wantUlt(sim: Simulation, s: Snake): boolean {
   let n = 0, weak = false;
   for (const o of sim.snakes) {
     if (!o.alive || o.id === s.id || !sim.hittable(o) || invisible(sim, o)) continue;
-    if (Math.hypot(o.x - s.x, o.y - s.y) > R + o.r) continue;
+    if (dhypot(o.x - s.x, o.y - s.y) > R + o.r) continue;
     if (s.kit ? s.kit.ult.impl.k === 'ult' && (s.kit.ult.impl.fam === 'rhino' || s.kit.ult.impl.fam === 'stag') : s.fam.id === 'rhino' || s.fam.id === 'stag') if (!inFront(s, o.x, o.y, 0.5)) continue;
     n++;
     if (o.hp < o.maxHp * 0.4) weak = true;
@@ -332,13 +333,13 @@ function wantUlt(sim: Simulation, s: Snake): boolean {
 }
 
 function danger(sim: Simulation, s: Snake, a: number): number {
-  const ca = Math.cos(a), sa = Math.sin(a);
+  const ca = dcos(a), sa = dsin(a);
   let worst = 0;
   for (let k = 0; k < PROBES.length; k++) {
     const dist = PROBES[k];
     const px = s.x + ca * dist, py = s.y + sa * dist;
     const weight = 1 - k / (PROBES.length + 1);
-    if (Math.hypot(px, py) > CONFIG.arenaRadius - 40) worst = Math.max(worst, weight);
+    if (dhypot(px, py) > CONFIG.arenaRadius - 40) worst = Math.max(worst, weight);
     sim.forSegsNear(px, py, s.r + 40, (o, _i, sx, sy) => {
       if (o.id === s.id || !deadly(sim, s, o)) return;
       const rr = s.r + o.r + 8;
@@ -350,19 +351,19 @@ function danger(sim: Simulation, s: Snake, a: number): number {
     });
     for (const ring of sim.rings) {
       if (ring.owner === s.id) continue;
-      const d = Math.hypot(px - ring.cx, py - ring.cy);
+      const d = dhypot(px - ring.cx, py - ring.cy);
       const approx = Math.sqrt(Math.abs(polyAreaFast(ring.poly)) / Math.PI);
       if (Math.abs(d - approx) < 25) worst = Math.max(worst, weight * 0.7);
     }
     for (const z of sim.zones) {
       if (z.owner === s.id || z.kind === 'bait' || z.kind === 'decoy' || z.kind === 'nest' || z.kind === 'honey' && !z.awake) continue;
-      if (Math.hypot(px - z.x, py - z.y) < z.r) worst = Math.max(worst, weight * (z.kind === 'lantern' ? 0.2 : z.kind === 'silk' ? 0.3 : 0.65));
+      if (dhypot(px - z.x, py - z.y) < z.r) worst = Math.max(worst, weight * (z.kind === 'lantern' ? 0.2 : z.kind === 'silk' ? 0.3 : 0.65));
     }
     for (const te of sim.teles) {
       if (te.owner === s.id) continue;
-      if (te.shape === 'circle' && Math.hypot(px - te.x, py - te.y) < te.r) worst = Math.max(worst, weight * 0.9);
+      if (te.shape === 'circle' && dhypot(px - te.x, py - te.y) < te.r) worst = Math.max(worst, weight * 0.9);
     }
-    for (const rk of sim.map.rocks) if (Math.hypot(px - rk.x, py - rk.y) < rk.r + s.r + 10) worst = Math.max(worst, weight * 0.8);
+    for (const rk of sim.map.rocks) if (dhypot(px - rk.x, py - rk.y) < rk.r + s.r + 10) worst = Math.max(worst, weight * 0.8);
     const hz = sim.enemies.hazard(px, py);
     if (hz > 0) worst = Math.max(worst, weight * hz);
     if (worst >= weight) break;
@@ -381,18 +382,18 @@ export function bossThink(sim: Simulation, s: Snake, dt: number): Command {
   let desired = s.angle;
   if (p.alive) {
     const lead = 90;
-    const tx = p.x + Math.cos(p.angle) * lead, ty = p.y + Math.sin(p.angle) * lead;
+    const tx = p.x + dcos(p.angle) * lead, ty = p.y + dsin(p.angle) * lead;
     const dx = tx - s.x, dy = ty - s.y;
-    const d = Math.hypot(dx, dy);
-    const toT = Math.atan2(dy, dx);
+    const d = dhypot(dx, dy);
+    const toT = datan2(dy, dx);
     if (s.hunting && d < 380) {
       const R = 160;
       const bend = Math.max(-0.9, Math.min(0.9, (d - R) / R)) * (Math.PI / 3);
       desired = toT + s.side * (Math.PI / 2 - bend);
     } else desired = toT;
   }
-  const dc = Math.hypot(s.x, s.y);
-  if (dc > CONFIG.arenaRadius - 260) desired = Math.atan2(-s.y, -s.x);
+  const dc = dhypot(s.x, s.y);
+  if (dc > CONFIG.arenaRadius - 260) desired = datan2(-s.y, -s.x);
   return { angle: desired, boost: false, sneak: false, skillSeq: s.lastSkillSeq, subSeq: s.lastSubSeq, spcSeq: s.lastSpcSeq, ultSeq: s.lastUltSeq, cardSeq: s.lastCardSeq, cardChoice: 0, rerollSeq: s.lastRerollSeq };
 }
 

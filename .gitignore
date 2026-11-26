@@ -4,3 +4,4 @@ dist
 dist-codex
 balance/out/
 balance/_*.ts
+balance/replays/inbox/

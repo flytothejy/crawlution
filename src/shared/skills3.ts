@@ -3,6 +3,7 @@
 import { CONFIG } from './config';
 import type { Minion, Simulation, Snake, Zone } from './sim';
 import { dist, head, nearestEnemy, pickFront, startDash, windup } from './skills';
+import { datan2, dcos, dsin } from './dmath';
 
 const PI = Math.PI;
 const hitFx = (sim: Simulation, x: number, y: number, kind: 'cut' | 'stun' | 'push' | 'slow' | 'root' | 'blind' | 'mark' | 'fear' | 'silence' | 'grab' | 'poison' | 'confuse' | 'charm' | 'itch') =>
@@ -49,7 +50,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
       sim.later(T, () => {
         if (!s.alive) return;
         sim.fx('shock', s, s.x, s.y, { r: 120 });
-        sim.circle(s, s.x, s.y, 120, (o, x, y) => (sim.knock(o, Math.atan2(o.y - s.y, o.x - s.x), aw ? 180 : 130), aw && sim.stun(o, 0.6), hitFx(sim, x, y, 'push')));
+        sim.circle(s, s.x, s.y, 120, (o, x, y) => (sim.knock(o, datan2(o.y - s.y, o.x - s.x), aw ? 180 : 130), aw && sim.stun(o, 0.6), hitFx(sim, x, y, 'push')));
         s.rallyT = Math.max(s.rallyT, CONFIG.rallyTime); // 풀리자마자 빠져나간다
       });
       return;
@@ -62,7 +63,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
         return;
       }
       const T = 2 + sim.ab(s, 'longbody');
-      s.angle = Math.atan2(t.y - s.y, t.x - s.x);
+      s.angle = datan2(t.y - s.y, t.x - s.x);
       startDash(sim, s, 'wrap', Math.max(10, Math.min(40, dist(t.x, t.y, s.x, s.y) - s.r * 2)), 3);
       sim.root(t, T, s);
       sim.slow(s, T, 0.6);
@@ -74,7 +75,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
           sim.fx('coil', s, t.x, t.y, { r: 55 - k * 7 });
           sim.deal(s, t, B * 0.35, 'skill', t.x, t.y);
           hitFx(sim, t.x, t.y, 'cut');
-          if (aw && k === 0) sim.circle(s, t.x, t.y, 110, (o) => o.id !== t.id && sim.knock(o, Math.atan2(o.y - t.y, o.x - t.x), 110));
+          if (aw && k === 0) sim.circle(s, t.x, t.y, 110, (o) => o.id !== t.id && sim.knock(o, datan2(o.y - t.y, o.x - t.x), 110));
         });
       return;
     }
@@ -148,7 +149,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
         if (!s.alive) return;
         const v = 620;
         sim.addProj({
-          x: s.x, y: s.y, vx: Math.cos(s.angle) * v, vy: Math.sin(s.angle) * v, life: (280 * R) / v, owner: s.id, kind: 'glob',
+          x: s.x, y: s.y, vx: dcos(s.angle) * v, vy: dsin(s.angle) * v, life: (280 * R) / v, owner: s.id, kind: 'glob',
           onHit: (o, x, y) => {
             sim.deal(s, o, B * 0.9, 'skill', x, y);
             sim.slow(o, 2, 0.55);
@@ -167,13 +168,13 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
     case 'skip': {
       // 앞쪽 삼각형의 세 꼭짓점에 차례로 내려앉고, 세 번째 착지에서 삼각형 안 전체를 친다
       const a = s.angle, k = aw ? 1.4 : 1;
-      const cx = s.x + Math.cos(a) * 135 * k * R, cy = s.y + Math.sin(a) * 135 * k * R;
+      const cx = s.x + dcos(a) * 135 * k * R, cy = s.y + dsin(a) * 135 * k * R;
       const rr = 85 * k * R;
-      const pts = [a - (2 * PI) / 3, a + (2 * PI) / 3, a].map((t) => [cx + Math.cos(t) * rr, cy + Math.sin(t) * rr] as [number, number]);
+      const pts = [a - (2 * PI) / 3, a + (2 * PI) / 3, a].map((t) => [cx + dcos(t) * rr, cy + dsin(t) * rr] as [number, number]);
       pts.forEach(([px, py], i) =>
         sim.later(i * 0.25, () => {
           if (!s.alive) return;
-          s.dashAngle = Math.atan2(py - s.y, px - s.x);
+          s.dashAngle = datan2(py - s.y, px - s.x);
           startDash(sim, s, 'skip', Math.max(20, dist(px, py, s.x, s.y)), 4, true);
           sim.fx('hop', s, s.x, s.y, { angle: s.dashAngle, wk: 'jump', dur: s.dashT });
           sim.later(s.dashT, () => {
@@ -207,7 +208,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
         sim.later(k * 0.3, () => {
           if (!s.alive) return;
           sim.circle(s, s.x, s.y, 110 * R, (o, x, y) => {
-            sim.knock(o, Math.atan2(o.y - s.y, o.x - s.x), 45);
+            sim.knock(o, datan2(o.y - s.y, o.x - s.x), 45);
             if (aw && k === 0) (sim.stun(o, 0.3), hitFx(sim, x, y, 'stun'));
             else hitFx(sim, x, y, 'push');
           });
@@ -219,7 +220,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
       const t = nearestEnemy(sim, s, 320 * R) ?? null;
       pose(sim, s, 'lob', 0.4);
       const tx = t ? t.x : head(s, 200)[0], ty = t ? t.y : head(s, 200)[1];
-      if (t) s.angle = Math.atan2(t.y - s.y, t.x - s.x);
+      if (t) s.angle = datan2(t.y - s.y, t.x - s.x);
       sim.fx('mudpot', s, tx, ty, { r: 60, x1: s.x, y1: s.y });
       sim.later(0.36, () => {
         if (!s.alive) return;
@@ -268,7 +269,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
         if (!s.alive) return;
         pose(sim, s, 'emerge', 0.35);
         sim.fx('burrow', s, s.x, s.y, { r: 70 });
-        if (aw) sim.circle(s, s.x, s.y, 100, (o, x, y) => (sim.knock(o, Math.atan2(o.y - s.y, o.x - s.x), 120), hitFx(sim, x, y, 'push')));
+        if (aw) sim.circle(s, s.x, s.y, 100, (o, x, y) => (sim.knock(o, datan2(o.y - s.y, o.x - s.x), 120), hitFx(sim, x, y, 'push')));
       });
       return;
     }
@@ -320,7 +321,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
       // 앞에 흙더미 둥지: 4초 동안 밟은 적은 매초 따끔 + 느려짐
       pose(sim, s, 'digpile', 0.5);
       const put = (a: number) => {
-        const x = s.x + Math.cos(a) * 110 * R, y = s.y + Math.sin(a) * 110 * R;
+        const x = s.x + dcos(a) * 110 * R, y = s.y + dsin(a) * 110 * R;
         sim.later(0.25, () => {
           sim.fx('nest', s, x, y, { r: 100 * R });
           sim.addZone({ x, y, r: 100 * R, kind: 'firenest', life: 4, owner: s.id, dps: B * 0.3, mul: 0.65 });
@@ -336,7 +337,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
       const leap = (again: boolean) =>
         windup(sim, s, 0.2, 'thud', () => {
           const t = pickFront(sim, s, 200 * R, 0.6)?.o;
-          if (t) s.angle = Math.atan2(t.y - s.y, t.x - s.x);
+          if (t) s.angle = datan2(t.y - s.y, t.x - s.x);
           const L = t ? Math.max(40, Math.min(200 * R, dist(t.x, t.y, s.x, s.y) - s.r)) : 130 * R;
           startDash(sim, s, 'leap', L, 3.2, true);
           s.flyT = Math.max(s.flyT, s.dashT);
@@ -454,7 +455,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
         sim.cone(s, hx, hy, s.angle, 170 * R, 0.8, (o, x, y) => {
           sim.deal(s, o, B * 0.4, 'skill', x, y);
           sim.stun(o, aw ? 1 : 0.6);
-          sim.knock(o, Math.atan2(o.y - s.y, o.x - s.x), 130);
+          sim.knock(o, datan2(o.y - s.y, o.x - s.x), 130);
           hitFx(sim, x, y, 'stun');
         });
       });
@@ -535,7 +536,7 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
       sim.telegraph(s, { shape: 'line', x: x0, y: y0, r: 0, angle: a, len: L, w }, () => {
         const offs = aw ? [-70, 70] : [0];
         for (const off of offs) {
-          const ox = x0 - Math.sin(a) * off, oy = y0 + Math.cos(a) * off;
+          const ox = x0 - dsin(a) * off, oy = y0 + dcos(a) * off;
           sim.fx('antriver', s, ox, oy, { angle: a, len: L, half: 0.45 });
           sim.later(0.8, () => sim.fx('antriver', s, ox, oy, { angle: a, len: L, half: 0.45 }));
           for (let k = 0; k < 12; k++)
@@ -656,16 +657,16 @@ export function workerMove(sim: Simulation, m: Minion, owner: Snake, dt: number)
     tx = owner.segs[i * 2];
     ty = owner.segs[i * 2 + 1];
     const j = Math.max(0, i - 1);
-    const dir = Math.atan2(owner.segs[j * 2 + 1] - ty, owner.segs[j * 2] - tx);
+    const dir = datan2(owner.segs[j * 2 + 1] - ty, owner.segs[j * 2] - tx);
     const side = m.slot % 2 ? 1 : -1;
-    tx -= Math.sin(dir) * owner.r * 1.6 * side;
-    ty += Math.cos(dir) * owner.r * 1.6 * side;
+    tx -= dsin(dir) * owner.r * 1.6 * side;
+    ty += dcos(dir) * owner.r * 1.6 * side;
   }
-  const a = Math.atan2(ty - m.y, tx - m.x);
+  const a = datan2(ty - m.y, tx - m.x);
   const d = dist(tx, ty, m.x, m.y);
   const v = Math.min(d, Math.max(m.speed, sim.speedOf(owner) * 1.4) * dt);
-  m.x += Math.cos(a) * v;
-  m.y += Math.sin(a) * v;
+  m.x += dcos(a) * v;
+  m.y += dsin(a) * v;
   m.angle = a;
   if (t && t.alive && m.target >= 0) {
     // 적이 일개미를 물면 다친다

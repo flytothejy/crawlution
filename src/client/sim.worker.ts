@@ -7,6 +7,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let last = 0;
 let acc = 0;
 let paused = false;
+let sentReplay = false;
 
 function loop() {
   if (!sim) return;
@@ -27,6 +28,11 @@ function loop() {
   if (steps > 0) {
     const msg: HostOut = { type: 'snap', snap: sim.snapshot() };
     (self as unknown as Worker).postMessage(msg);
+    if (sim.state === 'ended' && !sentReplay) {
+      sentReplay = true;
+      const rep: HostOut = { type: 'replay', rec: sim.replayRecord() };
+      (self as unknown as Worker).postMessage(rep);
+    }
   }
 }
 
@@ -37,6 +43,7 @@ self.onmessage = (e: MessageEvent<HostIn>) => {
     last = performance.now();
     acc = 0;
     paused = false;
+    sentReplay = false;
     if (timer) clearInterval(timer);
     timer = setInterval(loop, 4);
   } else if (m.type === 'opts') {
