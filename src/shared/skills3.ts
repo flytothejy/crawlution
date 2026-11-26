@@ -500,6 +500,141 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
   const cap = new Map<number, number>();
   s.ultMap = cap;
   switch (id) {
+    // ---------- 사마귀 계열: 종마다 다른 필살기 ----------
+    case 'riposte': {
+      // 넓적배사마귀 '반격 자세': 2.5초 동안 받는 피해 −50%, 맞을 때마다 그 적을 바로 되벤다.
+      // 끝나면 되벤 횟수만큼 커지는 큰 베기(각성: 기절 0.6초). 손맛: 맞아 주며 버티다 한 번에 터뜨림
+      const T = 2.5;
+      s.counterT = T;
+      s.counterN = 0;
+      s.counterCd = 0;
+      s.reduceT = Math.max(s.reduceT, T);
+      s.reduceMul = Math.min(s.reduceMul, 0.5);
+      pose(sim, s, 'brace', T);
+      sim.fx('riposte', s, s.x, s.y, { r: 120, dur: T, awake: aw });
+      // 도발: 주변 적을 0.8초 홀려 나에게 덤비게 한다(덤비는 적을 되벤다)
+      sim.circle(s, s.x, s.y, 220, (o, x, y) => (sim.charm(o, 0.8, s), hitFx(sim, x, y, 'charm')));
+      sim.later(T, () => {
+        if (!s.alive) return;
+        const n = Math.min(4, s.counterN);
+        const R = 150 + n * 15;
+        sim.fx('reapslash', s, s.x, s.y, { r: R, awake: aw || n >= 3, n });
+        sim.circle(s, s.x, s.y, R, (o, x, y) => {
+          sim.deal(s, o, B * (0.9 + 0.3 * n), 'ult', x, y, 'ult', cap);
+          sim.hitstop(s, o, 0.06 + n * 0.02);
+          if (aw) (sim.stun(o, 0.6), hitFx(sim, x, y, 'stun'));
+          else hitFx(sim, x, y, 'cut');
+        });
+        s.counterT = 0;
+      });
+      return;
+    }
+    case 'blinkstab': {
+      // 좀사마귀 '번개 찌르기': 날아오른 채(맞지 않음) 0.3초마다 주변 적 뒤로 번개처럼 옮겨 다니며 찌른다.
+      // 5번(각성 7번), 같은 적은 되도록 피해 여러 마리를 돈다. 손맛: 화면을 가로지르는 연속 찌르기
+      const n = aw ? 7 : 5, gap = 0.3;
+      const T = n * gap + 0.2;
+      s.flyT = Math.max(s.flyT, T);
+      s.skyT = Math.max(s.skyT, T);
+      const hitN = new Map<number, number>();
+      for (let k = 0; k < n; k++)
+        sim.later(0.1 + k * gap, () => {
+          if (!s.alive) return;
+          let best: Snake | null = null, bs = Infinity;
+          for (const o of sim.snakes) {
+            if (o.id === s.id || !sim.hittable(o) || o.deadT > 0 || !o.alive) continue;
+            const d = dist(o.x, o.y, s.x, s.y);
+            if (d > 380) continue;
+            const sc = d + (hitN.get(o.id) ?? 0) * 260; // 이미 찌른 적은 뒤로
+            if (sc < bs) ((bs = sc), (best = o));
+          }
+          const x0 = s.x, y0 = s.y;
+          if (!best) {
+            sim.shove(s, s.angle, 140);
+            sim.fx('blink', s, s.x, s.y, { x1: x0, y1: y0, angle: s.angle });
+            return;
+          }
+          const o = best;
+          hitN.set(o.id, (hitN.get(o.id) ?? 0) + 1);
+          const a = datan2(o.y - s.y, o.x - s.x);
+          const d = dist(o.x, o.y, s.x, s.y) + o.r + s.r + 18;
+          s.angle = a;
+          sim.shove(s, a, d);
+          sim.fx('blink', s, s.x, s.y, { x1: x0, y1: y0, angle: a });
+          sim.deal(s, o, B * 0.75, 'ult', o.x, o.y, 'ult', cap);
+          sim.hitstop(s, o, 0.05);
+          hitFx(sim, o.x, o.y, 'cut');
+        });
+      return;
+    }
+    case 'bloom': {
+      // 난초사마귀 '꽃밭 유혹': 내 둘레에 꽃밭을 피워 2.5초 동안 안의 적을 홀려 나에게 끌어오고,
+      // 끝날 때 가운데에서 꽃잎이 터지며 큰 피해 + 1초 묶기(각성: 터질 때 체력 회복).
+      const R = 240, T = 2.5;
+      sim.telegraph(s, { shape: 'circle', x: s.x, y: s.y, r: R, angle: 0, len: 0, w: 0 }, () => {
+        sim.fx('bloom', s, s.x, s.y, { r: R, dur: T });
+        for (let k = 0; k < 10; k++)
+          sim.later(k * 0.25, () => {
+            if (!s.alive) return;
+            sim.circle(s, s.x, s.y, R, (o, x, y) => {
+              sim.charm(o, 0.4, s);
+              sim.deal(s, o, B * 0.08, 'ult', x, y, 'ult', cap); // 꽃잎에 베이는 작은 피해
+              if (k % 3 === 0) hitFx(sim, x, y, 'charm');
+            });
+          });
+        sim.later(T, () => {
+          if (!s.alive) return;
+          sim.fx('bloomburst', s, s.x, s.y, { r: 175, awake: aw });
+          let hitN = 0;
+          sim.circle(s, s.x, s.y, 175, (o, x, y) => {
+            sim.deal(s, o, B * 1.9, 'ult', x, y, 'ult', cap);
+            sim.root(o, 1, s);
+            sim.hitstop(s, o, 0.08);
+            hitFx(sim, x, y, 'root');
+            hitN++;
+          });
+          if (aw && hitN) sim.heal(s, s.maxHp * 0.06 * Math.min(4, hitN));
+        });
+      });
+      return;
+    }
+    case 'reap': {
+      // 유령사마귀 '유령 처형': 마른 잎처럼 사라졌다가(1초, 맞지 않음) 가장 많이 다친 적 뒤에 나타나 벤다.
+      // 적의 남은 체력이 적을수록 피해가 크고, 쓰러뜨리면 필살기 게이지 절반을 돌려받는다(각성: 전부).
+      const T = 1;
+      sim.fx('playdead', s, s.x, s.y, {});
+      s.hiddenT = Math.max(s.hiddenT, T);
+      s.flyT = Math.max(s.flyT, T);
+      s.skyT = Math.max(s.skyT, T);
+      sim.later(T, () => {
+        if (!s.alive) return;
+        let best: Snake | null = null, br = Infinity;
+        for (const o of sim.snakes) {
+          if (o.id === s.id || !sim.hittable(o) || o.deadT > 0 || !o.alive) continue;
+          if (dist(o.x, o.y, s.x, s.y) > 480) continue;
+          const r = o.hp / o.maxHp;
+          if (r < br) ((br = r), (best = o));
+        }
+        if (!best) {
+          sim.fx('reapslash', s, s.x, s.y, { r: 90, n: 0 });
+          return;
+        }
+        const o = best;
+        const x0 = s.x, y0 = s.y;
+        const a = datan2(o.y - s.y, o.x - s.x);
+        sim.shove(s, a, dist(o.x, o.y, s.x, s.y) + o.r + s.r + 14);
+        s.angle = a + PI; // 돌아서서 벤다
+        sim.fx('blink', s, s.x, s.y, { x1: x0, y1: y0, angle: a, wk: 'ghost' });
+        const miss = 1 - o.hp / o.maxHp;
+        sim.fx('reapslash', s, o.x, o.y, { r: 110, awake: true, n: 4, wk: 'ghost' });
+        const before = o.alive;
+        sim.deal(s, o, B * (1.3 + 2.4 * miss), 'ult', o.x, o.y, 'ult', cap);
+        sim.hitstop(s, o, 0.12);
+        hitFx(sim, o.x, o.y, 'cut');
+        if (before && !o.alive) sim.addUlt(s, CONFIG.ultMax * (aw ? 0.6 : 0.3));
+      });
+      return;
+    }
     case 'vortex': {
       // 큰 원을 그리며 질주해 안쪽 적들을 가운데로 끌어 모으고 3초 동안 조여 지속 피해
       const [cx, cy] = head(s, 150);
@@ -686,4 +821,21 @@ export function workersBite(sim: Simulation, a: Snake, b: Snake, dealt: number) 
     m.bite = 0;
   }
   if (n > 0) sim.deal(a, b, dealt * 0.1 * n * (1 + sim.ab(a, 'formic')) * sim.tm(a, 'minionDmg'), 'minion', b.x, b.y, 'bite', null, false);
+}
+
+/** 반격 자세: 맞으면 그 적을 바로 되벤다(0.25초에 한 번) */
+export function riposteHit(sim: Simulation, s: Snake, a: Snake) {
+  if (s.counterCd > 0 || !a.alive || a.deadT > 0 || dist(a.x, a.y, s.x, s.y) > 260) return;
+  s.counterCd = 0.25;
+  // 맞는 순간은 때린 쪽 기술로 돌고 있으므로, 되베기는 내 필살기로 따로 돌린다
+  sim.as(s, () => sim.later(0.06, () => {
+    if (!s.alive || s.counterT <= 0 || !a.alive) return;
+    const ang = datan2(a.y - s.y, a.x - s.x);
+    s.angle = ang;
+    s.counterN++;
+    sim.fx('combo', s, s.x, s.y, { angle: ang, r: 150, half: 0.5, awake: true });
+    sim.deal(s, a, sim.B(s) * 0.6, 'ult', a.x, a.y, 'ult', s.ultMap);
+    sim.hitstop(s, a, 0.04);
+    hitFx(sim, a.x, a.y, 'cut');
+  }), 'ult');
 }

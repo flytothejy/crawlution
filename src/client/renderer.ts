@@ -58,7 +58,7 @@ export interface Frame {
 }
 
 interface Aura {
-  kind: 'whirl' | 'circle' | 'lantern' | 'compound' | 'sky';
+  kind: 'whirl' | 'circle' | 'lantern' | 'compound' | 'sky' | 'stance' | 'bloom';
   life: number;
   max: number;
   r: number;
@@ -2160,6 +2160,81 @@ export class GameRenderer {
         hit(6, 0.02);
         break;
       }
+      // ---------- 종 고유 필살기(사마귀) ----------
+      case 'riposte': {
+        // 반격 자세: 흰 칼날 고리가 맥동하며 몸을 감싼다(맞으면 되베는 연출은 combo)
+        this.ringFx(e.x, e.y, r, 0xffffff);
+        this.afterMs(() => this.ringFx(e.x, e.y, r * 0.7, P(0, 0xb8ff7a)), 120);
+        this.addAura(e.snake, 'stance', e.dur ?? 2.5, r * 0.8, P(0, 0xd8ff9a));
+        hit(6, 0.03);
+        break;
+      }
+      case 'reapslash': {
+        // 큰 초승달 칼날: n(모은 반격 수)이 클수록 크고 여러 겹. ghost는 보랏빛
+        const ghost = e.wk === 'ghost';
+        const c = ghost ? 0xc8b8ff : P(0, 0xd8ff9a);
+        const layers = 1 + Math.min(4, e.n ?? 0);
+        for (let j = 0; j < layers; j++)
+          later(j * 0.05, () => {
+            const rr = r * (0.75 + j * 0.08);
+            const a0 = a + j * 1.3;
+            this.addShape((g, q) => {
+              const sweep = (1 - q) * Math.PI * 2;
+              g.arc(e.x, e.y, rr, a0, a0 + Math.max(0.2, sweep)).stroke({ width: 10 - j, color: j % 2 ? 0xffffff : c, alpha: Math.min(1, q * 2.5), cap: 'round' });
+            }, 0.35);
+          });
+        this.aoeFx(e.x, e.y, r, c, false);
+        if (ghost) for (let i = 0; i < 14; i++) this.spawnBit('leaf', e.x, e.y, DRY[i % DRY.length], 160 + rnd() * 120, 0.6, 0.8, rnd() * Math.PI * 2, Math.PI);
+        if (e.awake && near) this.screenFlash = Math.max(this.screenFlash, 0.3);
+        hit(e.awake ? 14 : 9, e.awake ? 0.08 : 0.05);
+        break;
+      }
+      case 'blink': {
+        // 번개 궤적: 출발점 → 도착점을 지그재그로 잇고 잔상
+        if (e.x1 === undefined || e.y1 === undefined) break;
+        const ghost = e.wk === 'ghost';
+        const c = ghost ? 0xb8a8ff : P(0, 0xe8d890), x0 = e.x1, y0 = e.y1;
+        const dx = e.x - x0, dy = e.y - y0, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+        const pts: number[] = [x0, y0];
+        for (let k = 1; k < 6; k++) {
+          const t = k / 6, j = (k % 2 ? 1 : -1) * (12 + rnd() * 14);
+          pts.push(x0 + dx * t + nx * j, y0 + dy * t + ny * j);
+        }
+        pts.push(e.x, e.y);
+        this.addShape((g, q) => {
+          g.moveTo(pts[0], pts[1]);
+          for (let k = 2; k < pts.length; k += 2) g.lineTo(pts[k], pts[k + 1]);
+          g.stroke({ width: 9, color: c, alpha: q * 0.55, cap: 'round', join: 'round' });
+          g.moveTo(pts[0], pts[1]);
+          for (let k = 2; k < pts.length; k += 2) g.lineTo(pts[k], pts[k + 1]);
+          g.stroke({ width: 3, color: 0xffffff, alpha: q, cap: 'round', join: 'round' });
+        }, 0.3);
+        this.lineFx(e.x - cos(a) * 30, e.y - sin(a) * 30, a, 60, 18, 0xffffff, c);
+        for (let i = 0; i < 8; i++) this.spawnParticle(x0, y0, c, 40 + rnd() * 60, 0.35, 0.4);
+        hit(8, 0.04);
+        break;
+      }
+      case 'bloom': {
+        // 꽃밭: 분홍 꽃잎이 원을 그리며 피고 안쪽으로 소용돌이
+        const c = P(0, 0xff9ad8);
+        this.ringFx(e.x, e.y, r, c);
+        this.addAura(e.snake, 'bloom', e.dur ?? 2.5, r, c);
+        for (let i = 0; i < 24; i++) {
+          const aa = (i / 24) * Math.PI * 2;
+          this.spawnBit('petal', e.x + cos(aa) * r, e.y + sin(aa) * r, i % 2 ? c : 0xffe0f0, 30, 1.2, 1, aa + Math.PI, 0.3);
+        }
+        hit(5, 0.02);
+        break;
+      }
+      case 'bloomburst': {
+        const c = P(0, 0xff9ad8);
+        this.aoeFx(e.x, e.y, r, c, false);
+        this.ringFx(e.x, e.y, r, 0xffffff);
+        for (let i = 0; i < 40; i++) this.spawnBit('petal', e.x, e.y, [c, 0xffe0f0, 0xffffff][i % 3], 160 + rnd() * 200, 0.8, 0.9 + rnd() * 0.5, rnd() * Math.PI * 2, Math.PI);
+        if (near) this.screenFlash = Math.max(this.screenFlash, 0.3);
+        hit(13, 0.07);
+        break;
+      }
     }
   }
 
@@ -3171,6 +3246,21 @@ export class GameRenderer {
           if (Math.random() < 0.5) {
             const ang = Math.random() * Math.PI * 2, d = Math.random() * a.r;
             this.spawnParticle(hx + Math.cos(ang) * d, hy + Math.sin(ang) * d, a.col, 10, 0.8, 0.4);
+          }
+        } else if (a.kind === 'stance') {
+          // 반격 자세: 흰 칼날 둘이 천천히 돌며 몸을 지킨다
+          const pulse = 0.5 + 0.5 * Math.sin(this.time * 10);
+          g.circle(hx, hy, a.r * (0.95 + 0.05 * pulse)).stroke({ width: 3, color: 0xffffff, alpha: (0.4 + 0.3 * pulse) * k });
+          for (let j = 0; j < 2; j++) {
+            const ang = this.time * 3 + j * Math.PI;
+            g.moveTo(hx + Math.cos(ang - 0.5) * a.r, hy + Math.sin(ang - 0.5) * a.r).arc(hx, hy, a.r, ang - 0.5, ang + 0.5).stroke({ width: 7, color: a.col, alpha: 0.9 * k });
+          }
+        } else if (a.kind === 'bloom') {
+          // 꽃밭: 둘레에 꽃잎이 돌며 안쪽으로 빨려 든다
+          g.circle(hx, hy, a.r).fill({ color: a.col, alpha: 0.07 * k }).stroke({ width: 3, color: a.col, alpha: 0.5 * k });
+          if (Math.random() < 0.9) {
+            const ang = Math.random() * Math.PI * 2;
+            this.spawnBit('petal', hx + Math.cos(ang) * a.r, hy + Math.sin(ang) * a.r, Math.random() < 0.5 ? a.col : 0xffe0f0, a.r * 0.9, 1, 0.8, ang + Math.PI + 0.6, 0.2);
           }
         } else if (a.kind === 'compound') {
           g.circle(hx, hy, a.r + 10 * Math.sin(this.time * 6)).stroke({ width: 2.5, color: a.col, alpha: 0.6 * k });

@@ -74,6 +74,11 @@ export const NEW_SKILLS: Record<string, { id: string; ai: AiKind; range: number;
   '눈알 무늬': { id: 'eyespot', ai: 'cone', range: 170 },
   '푸른 섬광': { id: 'morpho', ai: 'cone', range: 200 },
   '독털 흩뿌리기': { id: 'hairs', ai: 'cone', range: 190 },
+  // 종 고유 필살기(사마귀)
+  '반격 자세': { id: 'riposte', ai: 'aoe', range: 220, ult: true },
+  '번개 찌르기': { id: 'blinkstab', ai: 'aoe', range: 360, ult: true },
+  '꽃밭 유혹': { id: 'bloom', ai: 'aoe', range: 240, ult: true },
+  '유령 처형': { id: 'reap', ai: 'target', range: 460, ult: true },
 };
 
 function toKitSkill(slot: V3Slot, v: V3Skill): KitSkill {

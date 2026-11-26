@@ -461,7 +461,7 @@ function drawV3() {
     })
     .join('');
   $('v3sps').querySelectorAll<HTMLButtonElement>('button').forEach((b) => (b.onclick = () => pickV3Sp(b.dataset.s!)));
-  const swapTxt = sp.base ? '대표 종 · 계열 기술 그대로' : `${SLOT_NAME[sp.swap!]} 칸 → <b>${sp.skill!.icon} ${sp.skill!.name}</b>`;
+  const swapTxt = (sp.base ? '대표 종 · 계열 기술 그대로' : `${SLOT_NAME[sp.swap!]} 칸 → <b>${sp.skill!.icon} ${sp.skill!.name}</b>`) + (sp.ult ? ` · 필살기 → <b>${sp.ult.icon} ${sp.ult.name}</b>` : '');
   $('v3hero').innerHTML = `<div class="pic" style="--c:${hex(F.color)}"><img src="${renderer.portrait(sp.id + '@' + v3stage)}" alt=""></div>
     <div><div class="nm">${sp.name} <small>${F.name}${sp.isNew ? ' · 3판 새 종' : ''}</small></div>
     <div class="rl">${swapTxt}</div>
@@ -483,7 +483,7 @@ function drawV3Tables() {
   $('v3spTable').innerHTML = `<table class="cmp v3t"><tr><th>종</th><th>바뀐 칸 → 종 기술</th><th>본능</th></tr>${V3_FAMILIES.map(
     (f) => `<tr class="grp"><td colspan="3" style="color:${hex(f.color)}">${f.icon} ${f.name}</td></tr>` + f.species.map((id) => {
       const s = V3_BY_ID.get(id)!;
-      return `<tr data-s="${id}"><td class="nm"><img src="${renderer.portrait(id + '@3')}" alt="">${s.name}${s.isNew ? ' 🆕' : ''}</td><td class="fm">${s.base ? '⭐ 대표 · 그대로' : `${SLOT_NAME[s.swap!]} → ${s.skill!.icon} ${s.skill!.name}`}</td><td class="fm"><b class="in">${s.instinct.name}</b> ${s.instinct.desc}</td></tr>`;
+      return `<tr data-s="${id}"><td class="nm"><img src="${renderer.portrait(id + '@3')}" alt="">${s.name}${s.isNew ? ' 🆕' : ''}</td><td class="fm">${s.base ? '⭐ 대표 · 그대로' : `${SLOT_NAME[s.swap!]} → ${s.skill!.icon} ${s.skill!.name}`}${s.ult ? `<br>필살기 → ${s.ult.icon} ${s.ult.name}` : ''}</td><td class="fm"><b class="in">${s.instinct.name}</b> ${s.instinct.desc}</td></tr>`;
     }).join(''),
   ).join('')}</table>`;
   $('v3spTable').querySelectorAll<HTMLElement>('tr[data-s]').forEach((tr) => (tr.onclick = () => (pickV3Sp(tr.dataset.s!), window.scrollTo({ top: 0, behavior: 'smooth' }))));
