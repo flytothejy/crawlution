@@ -1,5 +1,6 @@
 // 시작점: 화면·조작·시뮬레이션 호스트를 연결하고, 받은 상태를 보간해서 그린다.
 import './fonts.css';
+import './flow.css';
 import { CONFIG } from '../shared/config';
 import { FAMILIES, FAMILY, ROLE_LIST, ROLES, SPECIAL_FOODS, SPECIES_BY_ID, SUBS_BY_ID, formsOf, type Family, type FamilyId, type Role } from '../shared/species';
 import { ABILITY_BY_ID, BONUS_CARDS, MAIN_UPS, SUB_UP } from '../shared/cards';
@@ -12,6 +13,10 @@ import { Input } from './input';
 import { famColor, GameRenderer, lookKey, type Frame, type FrameSnake } from './renderer';
 import { fxSound, MOTION_FX, Sfx } from './sfx';
 import { loadSettings, saveSettings, SECTIONS, SON_POWER, type Settings } from './settings';
+import { platform } from './platform';
+import { applyMatch, evoNode, levelInfo, parseProfile, stars, unlock, unlockState, type Gains, type Profile } from '../shared/progress';
+import { LocalMatchService, MAPS, MAP_IDS, optsFor, type MatchRequest, type MatchTicket } from '../shared/match';
+import { tierOf } from '../shared/tiers';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
@@ -35,32 +40,39 @@ let tagTimer: ReturnType<typeof setInterval> | undefined;
 let host: SimHost | null = null;
 let input: Input;
 
-// ---------- 들어가기 전에 고른 것 ----------
-const LO_KEY = 'crawlution.loadout2';
-function loadLoadout(): Loadout {
+// ---------- 저장 데이터(프로필) ----------
+// 판 밖 성장·고른 크롤러·최고 기록은 모두 프로필 하나에(플랫폼 저장소). 규칙은 shared/progress.ts
+const PROFILE_KEY = 'crawlution.profile';
+function loadProfile(): Profile {
+  const raw = platform.get(PROFILE_KEY);
+  if (raw) return parseProfile(raw);
+  // 예전 저장(고른 종·최고 점수·신기록)을 옮긴다
+  let species: string | undefined, records: Record<string, number> | undefined;
   try {
-    const raw = localStorage.getItem(LO_KEY);
-    if (raw) {
-      const l = JSON.parse(raw) as Loadout;
-      if (SPECIES_BY_ID.has(l.species) && kitOf(l.species)) return l;
-    }
+    species = (JSON.parse(platform.get('crawlution.loadout2') ?? 'null') as Loadout | null)?.species;
+    records = JSON.parse(platform.get('crawlution.records') ?? 'null') ?? undefined;
   } catch {
-    /* 저장 불가 환경 */
+    /* 깨진 예전 저장 */
   }
-  return { species: 'rhino', form: 'charge', traits: [] };
+  const p = parseProfile(null, { best: Number(platform.get('crawlution.best') || 0) || undefined, species, records });
+  p.createdAt = Date.now();
+  return p;
 }
-/** 3판: 출전 전 특성 칸은 없다(예전 저장값의 특성은 지운다) */
+let PF: Profile = loadProfile();
+function saveProfile() {
+  platform.set(PROFILE_KEY, JSON.stringify(PF));
+}
+/** 3판: 출전 전 특성 칸은 없다 */
 function normTraits() {
   LO.traits = [];
 }
 function saveLoadout() {
-  try {
-    localStorage.setItem(LO_KEY, JSON.stringify(LO));
-  } catch {
-    /* 저장 불가 환경 */
-  }
+  if (PF.unlocked.includes(LO.species)) PF.lastSpecies = LO.species;
+  saveProfile();
 }
-let LO: Loadout = loadLoadout();
+let LO: Loadout = { species: PF.lastSpecies, form: kitOf(PF.lastSpecies) ? formsOf(PF.lastSpecies)[0].id : 'charge', traits: [] };
+const matches = new LocalMatchService();
+let ticket: MatchTicket | null = null;
 
 // 받은 상태(스냅샷) 버퍼와 시간 맞추기
 const snaps: Snapshot[] = [];
@@ -85,18 +97,7 @@ let ultWas = false;
 const segBuf = new Map<number, Float32Array>();
 
 function bestScore(): number {
-  try {
-    return Number(localStorage.getItem('crawlution.best') || 0);
-  } catch {
-    return 0;
-  }
-}
-function saveBest(v: number) {
-  try {
-    localStorage.setItem('crawlution.best', String(v));
-  } catch {
-    /* 저장 불가 환경 */
-  }
+  return PF.best.score;
 }
 
 function banner(text: string, c1 = '#ffb52e', c2 = '#f27b1c', ms = 2600) {
@@ -740,7 +741,10 @@ function showResult(latest: Snapshot) {
   const timeUp = latest.timeLeft <= 0.5;
   const prevBest = bestScore();
   const isNew = me.score > prevBest;
-  saveBest(Math.max(prevBest, me.score));
+  platform.gameplayStop();
+  // 판 결과 → 성장 반영(바로 저장: 결과 화면에서 나가도 남게)
+  lastGains = applyMatch(PF, { species: LO.species, rank, total, score: me.score, kills: me.killsAll, deaths: me.deaths, maxLevel: me.level, tier: ticket?.tier ?? 1, ended: latest.timeLeft <= 0.5 });
+  saveProfile();
   const over = $('over');
   over.classList.toggle('win', won);
   over.classList.toggle('mid', !won && rank <= 3);
@@ -801,17 +805,11 @@ const STAT_DEFS: StatDef[] = [
   { k: 'len', icon: '📏', name: '최대 길이', val: (s) => s.stats!.maxLen, fmt: (v) => `${n0(v)}마디`, title: '왕꼬리' },
   { k: 'ult', icon: '🌟', name: '필살기', val: (s) => s.stats!.ultCasts, fmt: (v) => `${n0(v)}번` },
 ];
-const BEST_KEY = 'crawlution.records';
 
 function drawStats(latest: Snapshot, me: SnakeView) {
   const t = Math.max(1, CONFIG.roundTime - latest.timeLeft);
   const all = latest.snakes.filter((s) => !s.isBoss && s.stats);
-  let rec: Record<string, number> = {};
-  try {
-    rec = JSON.parse(localStorage.getItem(BEST_KEY) ?? '{}');
-  } catch {
-    rec = {};
-  }
+  const rec = PF.records;
   const titles: string[] = [];
   const tiles = STAT_DEFS.map((d) => {
     const v = d.val(me, t);
@@ -825,11 +823,7 @@ function drawStats(latest: Snapshot, me: SnakeView) {
     const meaningful = d.low || v > 0; // 0은 순위를 매기지 않음(모두 같으면 1위가 되므로)
     return `<div class="st${meaningful && rank <= 3 ? ' top' : ''}"><em>${d.icon} ${d.name}</em><b>${d.fmt(v)}</b><small>${meaningful ? `${rank}위/${vals.length}` : '—'}${isRec ? ' · <i>내 신기록</i>' : ''}</small></div>`;
   });
-  try {
-    localStorage.setItem(BEST_KEY, JSON.stringify(rec));
-  } catch {
-    /* 저장 안 돼도 괜찮음 */
-  }
+  saveProfile();
   $('oTitles').innerHTML = titles.length ? titles.map((x) => `<span>${x}</span>`).join('') : '';
   $('oStats').innerHTML = `<div class="sts">${tiles.join('')}</div><p class="sn">순위는 이번 판 곤충 ${all.length}마리 중. DPS = 준 피해 ÷ 시간(초). 명중률 = 기술을 써서 누군가 맞힌 비율.</p>`;
   showOTab('stats');
@@ -850,22 +844,13 @@ function statBar(label: string, v: number) {
   return `<div class="sbar"><em>${label}</em><i><b style="width:${k * 100}%"></b></i></div>`;
 }
 
-// 단계별 크롤러 고르기(3판): 계열 → 종 → 기술(4칸 보기) → 확인
-const STEPS = ['계열', '종', '기술', '확인'] as const;
-const STEP_TITLE = ['계열 고르기', '종 고르기', '기술 보기', '이대로 시작할까요?'];
-const LAST = STEPS.length - 1;
-let step = 0;
-
+// 진화 계보 고르기(한 화면): 계열 탭 → 계보(대표 → 두 갈래 → 끝 종) → 고른 종의 기술 → 시작/진화시키기
+let selFam: V3FamId = 'beetle';
+let selId = '';
+const SLOT_COL: Record<string, string> = { atk: '#f0703a', def: '#5a9ad8', spc: '#9a6ad8', ult: '#e8b830' };
 function v3Of(id: string) {
   return V3_BY_ID.get(id) ?? V3_BY_ID.get(V3_ROSTER[0])!;
 }
-function setV3Family(fid: V3FamId) {
-  if (v3Of(LO.species).fam === fid) return;
-  LO.species = V3_FAMILY[fid].species[0];
-  LO.form = formsOf(LO.species)[0].id;
-  normTraits();
-}
-const SLOT_COL: Record<string, string> = { atk: '#f0703a', def: '#5a9ad8', spc: '#9a6ad8', ult: '#e8b830' };
 function kitRows(id: string) {
   const kit = kitOf(id)!;
   const v = v3Of(id);
@@ -877,88 +862,129 @@ function kitRows(id: string) {
     })
     .join('');
 }
-
-function buildSelect() {
-  if (!kitOf(LO.species)) LO.species = V3_ROSTER[0];
-  const F = famOf(LO.species);
-  const v = v3Of(LO.species);
-  const VF = V3_FAMILY[v.fam];
-  const sp = SPECIES_BY_ID.get(LO.species)!;
-  normTraits();
-  $('selTitle').textContent = STEP_TITLE[step];
-  $('stepDots').innerHTML = STEPS.map((n, i) => `<button class="sd${i === step ? ' on' : i < step ? ' done' : ''}" data-st="${i}">${i + 1}. ${n}</button>`).join('');
-  $('selCur').innerHTML = step === LAST ? '' : `<img src="${renderer.portrait(LO.species + '@3')}" alt=""><span>${VF.icon} ${VF.name} · ${sp.name}</span>`;
-  const like = SPECIAL_FOODS[F.likes], hate = SPECIAL_FOODS[F.hates];
-  let body = '';
-  if (step === 0) {
-    body = `<div class="list">${V3_FAMILIES.map((f) => {
-      const eng = famOf(f.species[0]);
-      return `<button class="opt big${f.id === v.fam ? ' on' : ''}" data-vf="${f.id}" style="--c:${hex(f.color)}"><span class="pic"><img src="${renderer.portrait(f.species[0] + '@3')}" alt=""></span><span class="ot"><b>${f.icon} ${f.name}</b><small>${f.seat} · 제어 ${f.cc}</small><small class="inst">✨ <em>${f.trait.name}</em> ${f.trait.desc}</small>${statBar('❤ 체력', eng.hp)}${statBar('🦷 공격', eng.atk)}${statBar('⚡ 속도', eng.spd)}<small class="mt">강함 ${f.strong.split('.')[0]}</small></span></button>`;
-    }).join('')}</div>`;
-  } else if (step === 1) {
-    body = `<div class="list">${VF.species.map((id) => {
-      const s2 = v3Of(id);
-      const kit = kitOf(id)!;
-      return `<button class="opt big${id === LO.species ? ' on' : ''}" data-s="${id}" style="--c:${hex(VF.color)}"><span class="pic"><img src="${renderer.portrait(id + '@3')}" alt=""></span><span class="ot"><b>${s2.name}${s2.base ? ' <em>대표</em>' : ''}${s2.isNew ? ' 🆕' : ''}</b><small class="inst">🧬 <em>${s2.instinct.name}</em> ${s2.instinct.desc}</small>${s2.swap ? `<small class="mt">${SLOT_NAME[s2.swap]} → ${kit[s2.swap].icon} ${kit[s2.swap].name}</small>` : '<small class="mt">계열 기본 기술 그대로</small>'}<small class="fact">${s2.fact}</small></span></button>`;
-    }).join('')}</div>`;
-  } else if (step === 2) {
-    body = `<p class="hint">기술은 종마다 정해져 있어요. 방어는 Lv3, 특수는 Lv5에 열리고, 필살기는 게이지가 차면 써요.</p><div class="kitlist">${kitRows(LO.species)}</div>
-      <div class="ultline">✨ 계열 특성 <b>${VF.trait.icon} ${VF.trait.name}</b> — ${VF.trait.desc}<br>🧬 본능 <b>${sp.instinct.name}</b> — ${sp.instinct.desc}</div>`;
-  } else {
-    const row = (st: number, label: string, val: string) => `<button class="sumrow" data-st="${st}"><em>${label}</em><span>${val}</span><i>바꾸기 ›</i></button>`;
-    const kit = kitOf(LO.species)!;
-    body = `<div class="selinfo"><div class="big" style="--c:${hex(VF.color)}"><img src="${renderer.portrait(LO.species + '@3')}" alt=""></div>
-      <div class="tx"><div class="nm ol">${sp.name}</div><div class="rl">${VF.icon} ${VF.name} · ${VF.stages.join(' → ')}</div>
-      <div class="inst"><b>🧬 ${sp.instinct.name}</b> ${sp.instinct.desc}</div>
-      <div class="tst"><span class="lk">♥ ${like.icon} ${like.name}</span> <span class="ht">✖ ${hate.icon} ${hate.name}</span></div></div></div>
-      <div class="sum">${row(0, '계열', `${VF.icon} ${VF.name}`)}${row(1, '종', sp.name)}${row(2, '기술', `${kit.atk.icon}${kit.def.icon}${kit.spc.icon}${kit.ult.icon}`)}</div>`;
-  }
-  $('stepBody').innerHTML = body;
-  $('goBtn').textContent = step === LAST ? '시작!' : '다음 ▶';
-  $('goBtn').classList.toggle('pulse', step === LAST);
-  const pick = (fn: () => void) => () => (fn(), sfx.play('click'), saveLoadout(), buildSelect());
-  $('stepDots').querySelectorAll<HTMLButtonElement>('.sd').forEach((el) => (el.onclick = () => ((step = Number(el.dataset.st)), sfx.play('click'), buildSelect())));
-  $('stepBody').querySelectorAll<HTMLButtonElement>('[data-st]').forEach((el) => (el.onclick = () => ((step = Number(el.dataset.st)), sfx.play('click'), buildSelect())));
-  $('stepBody').querySelectorAll<HTMLButtonElement>('[data-vf]').forEach((el) => (el.onclick = pick(() => setV3Family(el.dataset.vf as V3FamId))));
-  $('stepBody').querySelectorAll<HTMLButtonElement>('[data-s]').forEach((el) => (el.onclick = pick(() => (LO.species = el.dataset.s!))));
-  $('stepBody').scrollTop = 0;
+const starStr = (n: number) => '★'.repeat(n) + '☆'.repeat(5 - n);
+const amberHtml = (n: number) => `<span class="amb"><i class="am"></i>${n.toLocaleString('ko-KR')}</span>`;
+function nodeLine(id: string) {
+  const st = unlockState(PF, id);
+  const n = evoNode(id)!;
+  const par = n.parent ? v3Of(n.parent).name : '';
+  if (st === 'open') return `<small class="stars">${starStr(stars(PF.mastery[id] ?? 0).stars)}</small>`;
+  if (st === 'ready') return `<small class="rdy">진화 가능 · ${amberHtml(n.cost)}</small>`;
+  if (st === 'needAmber') return `<small class="nd">${amberHtml(n.cost)} 필요</small>`;
+  if (st === 'needStars') return `<small class="nd">${par} ★1 필요</small>`;
+  return `<small class="nd">${par}에서 진화</small>`;
 }
-
+function buildSelect() {
+  const VF = V3_FAMILY[selFam];
+  if (!selId || v3Of(selId).fam !== selFam) selId = VF.species.includes(LO.species) ? LO.species : VF.species[0];
+  $('sAmber').innerHTML = amberHtml(PF.amber);
+  $('famTabs').innerHTML = V3_FAMILIES.map((f) => {
+    const open = f.species.filter((id) => PF.unlocked.includes(id)).length;
+    return `<button class="ft${f.id === selFam ? ' on' : ''}" data-vf="${f.id}" style="--c:${hex(f.color)}"><span>${f.icon}</span>${f.name}<small>${open}/5</small></button>`;
+  }).join('');
+  $('evoTree').innerHTML = VF.species
+    .map((id, i) => {
+      const st = unlockState(PF, id);
+      const cls = `en n${i}${id === selId ? ' on' : ''}${st === 'open' ? '' : ' lk'}${st === 'ready' ? ' rd' : ''}${id === LO.species ? ' cur' : ''}`;
+      return `<button class="${cls}" data-s="${id}" style="--c:${hex(VF.color)}"><img src="${renderer.portrait(id + '@3')}" alt=""><b>${v3Of(id).name}</b>${nodeLine(id)}</button>`;
+    })
+    .join('');
+  const v = v3Of(selId);
+  const sp = SPECIES_BY_ID.get(selId)!;
+  const st = unlockState(PF, selId);
+  const best = PF.best.bySpecies[selId];
+  $('stepBody').innerHTML = `<div class="seldet" style="--c:${hex(VF.color)}"><div class="nm"><b class="ol">${v.name}</b><small>${VF.icon} ${VF.name} · ${VF.seat}</small></div>
+    <div class="inst">🧬 <b>${sp.instinct.name}</b> ${sp.instinct.desc}</div>
+    ${st === 'open' ? `<div class="mst">숙련 ${starStr(stars(PF.mastery[selId] ?? 0).stars)}${best ? ` · 최고 ${best.toLocaleString('ko-KR')}점` : ''}</div>` : ''}
+    <div class="kitlist">${kitRows(selId)}</div><div class="ultline">✨ 계열 특성 <b>${VF.trait.icon} ${VF.trait.name}</b> — ${VF.trait.desc}</div><small class="fact">${v.fact}</small></div>`;
+  const go = $('goBtn') as HTMLButtonElement;
+  const n = evoNode(selId)!;
+  go.disabled = st !== 'open' && st !== 'ready';
+  go.classList.toggle('evo', st === 'ready');
+  go.innerHTML = st === 'open' ? '이 크롤러로 시작' : st === 'ready' ? `🧬 진화시키기 · ${amberHtml(n.cost)}` : st === 'needAmber' ? `앰버가 ${(n.cost - PF.amber).toLocaleString('ko-KR')} 모자라요` : st === 'needStars' ? `${v3Of(n.parent!).name} 숙련 ★1이 필요해요` : `먼저 ${v3Of(n.parent!).name}로 진화해요`;
+  $('famTabs').querySelectorAll<HTMLButtonElement>('[data-vf]').forEach((el) => (el.onclick = () => ((selFam = el.dataset.vf as V3FamId), (selId = ''), sfx.play('click'), buildSelect())));
+  $('evoTree').querySelectorAll<HTMLButtonElement>('[data-s]').forEach(
+    (el) =>
+      (el.onclick = () => {
+        selId = el.dataset.s!;
+        if (PF.unlocked.includes(selId)) {
+          LO.species = selId;
+          LO.form = formsOf(selId)[0].id;
+          saveLoadout();
+        }
+        sfx.play('click');
+        buildSelect();
+      }),
+  );
+}
 function selNext() {
+  const st = unlockState(PF, selId);
+  if (st === 'ready') {
+    if (unlock(PF, selId)) {
+      LO.species = selId;
+      LO.form = formsOf(selId)[0].id;
+      saveLoadout();
+      sfx.play('molt');
+      platform.happyTime();
+      buildSelect();
+      const el = $('evoTree').querySelector<HTMLElement>(`[data-s="${selId}"]`);
+      el?.classList.add('born');
+    }
+    return;
+  }
+  if (st !== 'open') return;
   sfx.play('click');
-  if (step >= LAST) return startGame();
-  step++;
-  buildSelect();
+  startGame();
 }
 function selBack() {
   sfx.play('click');
-  if (step > 0) {
-    step--;
-    buildSelect();
-    return;
-  }
   $('select').classList.add('hidden');
-  $(selFrom).classList.remove('hidden');
+  showHome();
 }
-let selFrom = 'start';
-
-function openSelect(from: 'start' | 'over' = 'start') {
+function openSelect() {
   sfx.unlock();
-  selFrom = from;
-  // 처음이면 1단계부터, 전에 고른 적이 있으면 확인 단계에서(단계를 눌러 바꿀 수 있음)
-  step = localStorage.getItem(LO_KEY) && kitOf(LO.species) ? LAST : 0;
-  $('start').classList.add('hidden');
-  $('over').classList.add('hidden');
+  selFam = v3Of(LO.species).fam;
+  selId = LO.species;
+  for (const id of ['start', 'over', 'gain']) $(id).classList.add('hidden');
   $('select').classList.remove('hidden');
   buildSelect();
+  $('stepBody').scrollTop = 0;
 }
 
-function startGame() {
+// ---------- 홈 ----------
+function showHome() {
+  for (const id of ['over', 'gain', 'select']) $(id).classList.add('hidden');
+  $('start').classList.remove('hidden');
+  buildHome();
+}
+function buildHome() {
+  const L = levelInfo(PF.xp);
+  $('hLv').textContent = String(L.level);
+  ($('hXp') as HTMLElement).style.width = `${Math.round((L.into / L.need) * 100)}%`;
+  $('hLvTxt').textContent = `레벨 ${L.level} · ${L.into}/${L.need}`;
+  $('hAmber').innerHTML = amberHtml(PF.amber);
+  const v = v3Of(LO.species);
+  const VF = V3_FAMILY[v.fam];
+  const best = PF.best.bySpecies[LO.species];
+  const ready = V3_FAMILIES.flatMap((f) => f.species).filter((id) => unlockState(PF, id) === 'ready').length;
+  $('hCrawler').innerHTML = `<img src="${renderer.portrait(LO.species + '@3')}" alt=""><span class="tx"><small>지금 크롤러 · 누르면 바꾸기</small><b class="ol">${v.name}</b><small>${VF.icon} ${VF.name} · ${starStr(stars(PF.mastery[LO.species] ?? 0).stars)}${best ? ` · 최고 ${best.toLocaleString('ko-KR')}` : ''}</small></span>${ready ? `<em class="evo">🧬 진화 가능 ${ready}</em>` : '<i class="chev">›</i>'}`;
+  ($('hCrawler').style as CSSStyleDeclaration).setProperty('--c', hex(VF.color));
+  const T = tierOf(PF.tier);
+  $('hTier').innerHTML = `<b>${T.n}단계 ${T.name}</b> · ${T.desc}${T.scoreMul > 1 ? ` · 순위 점수 ×${T.scoreMul}` : ''}<small>3등 안이면 다음 판 한 단계 위</small>`;
+  const maps: (string)[] = ['random', ...MAP_IDS];
+  $('hMaps').innerHTML = maps.map((m) => `<button data-m="${m}" class="${PF.map === m ? 'on' : ''}">${m === 'random' ? '🎲 무작위' : MAPS[m as keyof typeof MAPS].name}</button>`).join('');
+  $('hMaps').querySelectorAll<HTMLButtonElement>('[data-m]').forEach((el) => (el.onclick = () => ((PF.map = el.dataset.m as Profile['map']), saveProfile(), sfx.play('click'), buildHome())));
+  $('startBest').textContent = PF.best.rankScore > 0 ? `🏆 내 최고 순위 점수 ${PF.best.rankScore.toLocaleString('ko-KR')} · ${PF.games}판` : '';
+}
+
+// ---------- 판 시작 ----------
+let starting = false;
+async function startGame() {
+  if (starting) return;
+  starting = true;
   normTraits();
   saveLoadout();
-  $('start').classList.add('hidden');
-  $('select').classList.add('hidden');
-  $('over').classList.add('hidden');
+  for (const id of ['start', 'select', 'over', 'gain']) $(id).classList.add('hidden');
   for (const id of ['stats', 'board', 'minimap', 'gauge', 'hpbar', 'lives', 'abil', 'timer', 'setBtnG']) $(id).classList.remove('hidden');
   sfx.unlock();
   $('feed').innerHTML = '';
@@ -973,28 +999,66 @@ function startGame() {
   lastCmd = { ...lastCmd, skillSeq: 0, subSeq: 0, spcSeq: 0, ultSeq: 0, cardSeq: 0, rerollSeq: 0 };
   kitReady = {};
   for (const k of Object.keys(kitKeys)) delete kitKeys[k];
-  const seed = (Math.random() * 2 ** 31) | 0;
-  const opts = gameOpts();
+  // 판 표 받기: 지금은 기기가 바로 발급(멀티·순위 서버가 생기면 같은 자리에서 서버가 발급)
+  const req: MatchRequest = { name: platform.user().name, loadout: { ...LO, traits: [] }, map: PF.map, tier: PF.tier, bots: S.bots, power: S.son ? SON_POWER : 1 };
+  ticket = await matches.find(req);
+  const opts = optsFor(ticket, req);
   try {
     const lv = Number(new URLSearchParams(location.search).get('level'));
     if (lv > 1) opts.startLevel = lv;
   } catch {
     /* 주소를 못 읽는 환경 */
   }
-  if (!host) host = createHost(seed, '나', onSnap, opts);
-  else host.start(seed, '나', opts);
+  if (!host) host = createHost(ticket.seed, req.name, onSnap, opts);
+  else host.start(ticket.seed, req.name, opts);
   applySettings();
   playing = true;
+  starting = false;
   document.body.classList.add('playing');
+  platform.gameplayStart();
+  const T = tierOf(ticket.tier);
+  // 첫 판은 조작 한 줄, 그 뒤로는 맵·단계
+  if (!PF.seenIntro) banner(input.touch ? '끌어서 방향 · 먹고 커져서 물기!' : '마우스로 방향 · 먹고 커져서 물기!', '#ffb52e', '#f27b1c', 3500);
+  else banner(`${MAPS[ticket.map].name} · ${T.n}단계 ${T.name}`, '#7fb24a', '#3f7a2e', 2200);
   const tag = () => ($('hostTag').textContent = `sim: ${host?.kind} · 화질 ${renderer.qualityLabel}`);
   setTimeout(tag, 1500);
   clearInterval(tagTimer);
   tagTimer = setInterval(tag, 3000);
 }
 
+// ---------- 결과 둘째 장: 이번 판 성장 ----------
+let lastGains: Gains | null = null;
+function showGain() {
+  const g = lastGains;
+  $('over').classList.add('hidden');
+  $('gain').classList.remove('hidden');
+  if (!g) return;
+  const L = levelInfo(PF.xp);
+  const v = v3Of(LO.species);
+  const Tb = tierOf(g.tierBefore), Ta = tierOf(g.tierAfter);
+  const rows: string[] = [];
+  rows.push(`<div class="gr lv"><span class="k">레벨 ${g.levelAfter}${g.levelAfter > g.levelBefore ? ' <em>레벨 업!</em>' : ''}</span><i class="bar"><b style="width:${Math.round((L.into / L.need) * 100)}%"></b></i><span class="v">+${g.xp} 경험치</span></div>`);
+  rows.push(`<div class="gr"><span class="k">앰버</span><span class="v">${amberHtml(g.amber + g.levelAmber)}${g.levelAmber ? ` <small>(레벨 업 +${g.levelAmber})</small>` : ''} → ${amberHtml(PF.amber)}</span></div>`);
+  rows.push(`<div class="gr"><span class="k">${v.name} 숙련</span><span class="v stars">${starStr(g.starsAfter)}${g.starsAfter > g.starsBefore ? ' <em>★ 올랐어요</em>' : ''}</span></div>`);
+  rows.push(`<div class="gr"><span class="k">순위 점수</span><span class="v"><b>${g.rankScore.toLocaleString('ko-KR')}</b>${Tb.scoreMul > 1 ? ` <small>(×${Tb.scoreMul} ${Tb.n}단계)</small>` : ''}${g.newBest ? ' <em>최고 기록!</em>' : ''}</span></div>`);
+  rows.push(`<div class="gr"><span class="k">다음 판</span><span class="v">${g.tierAfter > g.tierBefore ? `<em>▲ ${Ta.n}단계 ${Ta.name}</em> ${Ta.desc}` : g.tierAfter < g.tierBefore ? `▼ ${Ta.n}단계 ${Ta.name}` : `${Ta.n}단계 ${Ta.name} 그대로`}</span></div>`);
+  $('gRows').innerHTML = rows.join('');
+  $('gUnlock').innerHTML = g.newlyReady.length
+    ? `<button class="evoready" id="gEvo">🧬 진화할 수 있어요: ${g.newlyReady.map((id) => `<b>${v3Of(id).name}</b>`).join(', ')}</button>`
+    : '';
+  const ge = document.getElementById('gEvo');
+  if (ge) ge.onclick = () => (sfx.play('click'), openSelect(), (selFam = v3Of(g.newlyReady[0]).fam), (selId = g.newlyReady[0]), buildSelect());
+  if (g.newBest || g.newlyReady.length || g.levelAfter > g.levelBefore) platform.happyTime();
+}
+async function againGame() {
+  sfx.play('click');
+  await platform.midgameAd(); // 자연스러운 쉼에서만(빈도는 플랫폼이 조절)
+  startGame();
+}
+
 // ---------- 설정 ----------
 function gameOpts(): GameOpts {
-  return { power: S.son ? SON_POWER : 1, bots: S.bots, map: S.map, loadout: { ...LO, traits: [] }, v3: true };
+  return { power: S.son ? SON_POWER : 1, bots: ticket?.bots ?? S.bots, map: ticket?.map ?? 'random', loadout: { ...LO, traits: [] }, v3: true, tier: ticket?.tier };
 }
 
 function applySettings() {
@@ -1071,13 +1135,13 @@ function openSettings() {
   $('settings').classList.remove('hidden');
   $('setNote').textContent = playing ? '⏸ 게임이 멈춰 있어요' : '';
   input.resetHolds();
-  if (playing) host?.pause(true);
+  if (playing) (host?.pause(true), platform.gameplayStop());
 }
 
 function closeSettings() {
   settingsOpen = false;
   $('settings').classList.add('hidden');
-  if (playing) host?.pause(document.hidden);
+  if (playing) (host?.pause(document.hidden), platform.gameplayStart());
   sfx.play('click');
 }
 
@@ -1100,10 +1164,14 @@ async function boot() {
   how.push(['🎯', '강한 상대는 <b>꼬리 끝</b>을 물면 급소! 한 바퀴 감싸면 <b>압착</b>']);
   how.push(['🍯', '좋아하는 먹이 <b>♥ 폭풍 성장</b> · 황금 꿀방울은 <b>다시 뽑기</b>']);
   $('howto').innerHTML = how.map(([i, t]) => `<div><span class="i">${i}</span><span>${t}</span></div>`).join('');
-  $('lineup').innerHTML = ['rhino', 'kingmantis', 'hornet', 'orbspider', 'honeybee'].map((id) => `<img src="${renderer.portrait(id + '@2')}" alt="">`).join('');
-  const best = bestScore();
-  $('startBest').textContent = best > 0 ? `🏆 최고 점수 ${best}` : '';
-  $('arenaBtn').onclick = () => openSelect('start');
+  $('arenaBtn').onclick = () => startGame();
+  $('hCrawler').onclick = () => (sfx.play('click'), openSelect());
+  $('friendBtn').onclick = () => {
+    sfx.play('click');
+    const n = $('advNote');
+    n.classList.remove('hidden');
+    n.textContent = '👥 친구와 하기는 준비 중이에요. 방을 만들고 초대 링크로 같이 들어오는 방식이에요.';
+  };
   $('advBtn').onclick = () => {
     sfx.play('click');
     const n = $('advNote');
@@ -1127,10 +1195,17 @@ async function boot() {
   const unlock = () => sfx.unlock();
   document.addEventListener('pointerdown', unlock, { passive: true });
   document.addEventListener('keydown', unlock);
-  $('againBtn').onclick = startGame;
-  $('pickBtn').onclick = () => openSelect('over');
+  $('againBtn').onclick = againGame;
+  $('overNext').onclick = () => (sfx.play('click'), showGain());
+  $('pickBtn').onclick = () => (sfx.play('click'), openSelect());
+  $('homeBtn').onclick = () => (sfx.play('click'), showHome());
   document.querySelectorAll<HTMLButtonElement>('.otabs button').forEach((b) => (b.onclick = () => showOTab(b.dataset.ot as 'rank' | 'stats')));
   document.addEventListener('visibilitychange', () => host?.pause(document.hidden || settingsOpen));
+  // 첫 실행은 홈도 건너뛰고 바로 판(크레이지게임스: 바로 플레이로). 두 번째부터는 홈
+  if (!PF.seenIntro) {
+    $('start').classList.add('hidden');
+    startGame();
+  } else buildHome();
 
   renderer.app.ticker.add((tk) => {
     const dt = Math.min(0.05, tk.deltaMS / 1000);
@@ -1154,7 +1229,7 @@ async function boot() {
       const cmd = input.update(hx, hy);
       const now = performance.now();
       if (
-        cmd.boost !== lastCmd.boost || cmd.sneak !== lastCmd.sneak || cmd.skillSeq !== lastCmd.skillSeq || cmd.subSeq !== lastCmd.subSeq || cmd.cardSeq !== lastCmd.cardSeq || cmd.rerollSeq !== lastCmd.rerollSeq ||
+        cmd.boost !== lastCmd.boost || cmd.sneak !== lastCmd.sneak || cmd.skillSeq !== lastCmd.skillSeq || cmd.subSeq !== lastCmd.subSeq || cmd.spcSeq !== lastCmd.spcSeq || cmd.ultSeq !== lastCmd.ultSeq || cmd.cardSeq !== lastCmd.cardSeq || cmd.cardChoice !== lastCmd.cardChoice || cmd.rerollSeq !== lastCmd.rerollSeq ||
         Math.abs(cmd.angle - lastCmd.angle) > 0.005 || now - lastCmdAt > 100
       ) {
         host.send(cmd);

@@ -3,6 +3,7 @@ import { CONFIG } from './config';
 import type { Simulation, Snake } from './sim';
 import type { EnemyKind, EnemyView } from './types';
 import { datan2, dcos, dhypot, dsin } from './dmath';
+import { tierOf } from './tiers';
 
 interface Shadow {
   x: number;
@@ -153,7 +154,7 @@ export class Enemies {
     this.shadows = [];
     this.drops = [];
     this.aim = this.tongue = this.strip = null;
-    this.next = sim.time + sim.rng.range(CONFIG.enemyGapMin, CONFIG.enemyGapMax);
+    this.next = sim.time + sim.rng.range(CONFIG.enemyGapMin, CONFIG.enemyGapMax) * tierOf(sim.opts.tier).enemyGap;
   }
 
   /** 왕지네가 죽었을 때 sim이 알려 준다 */

@@ -285,6 +285,8 @@ export interface GameOpts {
   map: MapTheme | 'random';
   loadout: Loadout;
   startLevel?: number; // 시험용
+  /** 단계(봇 난이도 사다리) 1~4, 없으면 1 */
+  tier?: number;
   /** 3판(8계열 40종, 4칸 기술)으로 한 판 */
   v3?: boolean;
 }

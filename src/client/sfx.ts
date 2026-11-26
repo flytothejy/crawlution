@@ -1,4 +1,5 @@
 // 효과음·진동. 소리 파일 없이 WebAudio로 즉석에서 합성한다(한 파일 빌드를 가볍게).
+import { platform } from './platform';
 // 진동은 navigator.vibrate가 있는 기기(안드로이드 등)에서만 동작한다.
 
 export type SoundName =
@@ -43,18 +44,10 @@ const KEY_SND = 'crawlution.sound';
 const KEY_VIB = 'crawlution.vibe';
 
 function load(key: string): boolean {
-  try {
-    return localStorage.getItem(key) !== '0';
-  } catch {
-    return true;
-  }
+  return platform.get(key) !== '0';
 }
 function save(key: string, on: boolean) {
-  try {
-    localStorage.setItem(key, on ? '1' : '0');
-  } catch {
-    /* 저장 불가 환경 */
-  }
+  platform.set(key, on ? '1' : '0');
 }
 
 export class Sfx {

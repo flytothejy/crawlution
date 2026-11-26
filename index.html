@@ -624,20 +624,27 @@
 
     <div id="start" class="overlay">
       <div class="rays"></div>
-      <div class="logo">크롤<span>루션</span></div>
-      <div class="tag">곤충 진화 스네이크 · 3판 시험판</div>
-      <div class="lineup" id="lineup"></div>
-      <div class="box">
-        <div class="goal"><b>8계열 40종</b> 곤충 중 하나로<br />키우고 싸워 <b>1등</b>을 노리세요!</div>
-        <div class="modes">
-          <button class="mode adv" id="advBtn"><span class="mi">🗺️</span><span class="mt"><b class="ol">모험</b><small>혼자 지역을 넘으며 보스를 잡고 크롤러를 모아요</small></span><em>준비 중</em></button>
-          <button class="mode arena pulse" id="arenaBtn"><span class="mi">⚔️</span><span class="mt"><b class="ol">아레나</b><small>5분 동안 곤충 20마리와 겨뤄요</small></span></button>
+      <div class="hometop">
+        <div class="lvchip"><b id="hLv">1</b><span><small id="hLvTxt">레벨 1</small><i><em id="hXp"></em></i></span></div>
+        <div class="hamber" id="hAmber"></div>
+        <button id="setBtn" class="iconbtn" aria-label="설정">⚙️</button>
+      </div>
+      <div class="logo sm">크롤<span>루션</span></div>
+      <div class="box home">
+        <button class="crawler" id="hCrawler"></button>
+        <button class="gbtn ol big pulse" id="arenaBtn">⚔️ 아레나 시작</button>
+        <div class="htier" id="hTier"></div>
+        <div class="hmaps" id="hMaps"></div>
+        <div class="modes2">
+          <button class="mode2 adv" id="advBtn"><b class="ol">🗺️ 모험</b><em>준비 중</em></button>
+          <button class="mode2 friend" id="friendBtn"><b class="ol">👥 친구와</b><em>준비 중</em></button>
         </div>
         <div id="advNote" class="hidden"></div>
-        <div class="legend"><span><i style="border-color:#7dff5a"></i>나보다 약함</span><span><i style="border-color:#bbb"></i>비슷</span><span><i style="border-color:#ff4a3a"></i>나보다 셈</span></div>
-        <div class="how" id="howto"></div>
-        <div class="opts"><button id="setBtn">⚙️ 설정</button></div>
         <div class="best" id="startBest"></div>
+        <details class="help"><summary>조작법 · 색 테두리 뜻</summary>
+          <div class="legend"><span><i style="border-color:#7dff5a"></i>나보다 약함</span><span><i style="border-color:#bbb"></i>비슷</span><span><i style="border-color:#ff4a3a"></i>나보다 셈</span></div>
+          <div class="how" id="howto"></div>
+        </details>
       </div>
     </div>
 
@@ -661,17 +668,27 @@
         <div id="oRank" class="hidden"></div>
         <div id="oFact"></div>
         <div id="oBest"></div>
-        <button class="gbtn ol" id="againBtn">다시 하기</button>
-        <div class="opts"><button id="pickBtn">🐞 크롤러 바꾸기</button><button id="setBtnO">⚙️ 설정</button></div>
+        <button class="gbtn ol" id="overNext">성장 보기 ▶</button>
+        <div class="opts"><button id="setBtnO">⚙️ 설정</button></div>
+      </div>
+    </div>
+    <div id="gain" class="overlay hidden">
+      <div class="rays"></div>
+      <div class="stitle ol">이번 판 성장</div>
+      <div class="box gainbox">
+        <div id="gRows"></div>
+        <div id="gUnlock"></div>
+        <button class="gbtn ol big" id="againBtn">다시 하기</button>
+        <div class="opts"><button id="pickBtn">🧬 크롤러 바꾸기</button><button id="homeBtn">🏠 홈</button></div>
       </div>
     </div>
     <div id="select" class="overlay hidden">
       <div class="selbox">
-        <div class="selhd"><button id="selBack" class="back">◀</button><div class="stitle ol" id="selTitle">크롤러 고르기</div></div>
-        <div class="stepdots" id="stepDots"></div>
-        <div class="selcur" id="selCur"></div>
+        <div class="selhd"><button id="selBack" class="back">◀</button><div class="stitle ol" id="selTitle">진화 계보</div><div class="hamber" id="sAmber"></div></div>
+        <div class="famtabs" id="famTabs"></div>
+        <div class="evotree" id="evoTree"></div>
         <div class="stepbody" id="stepBody"></div>
-        <button class="gbtn ol go" id="goBtn">다음 ▶</button>
+        <button class="gbtn ol go" id="goBtn">이 크롤러로 시작</button>
       </div>
     </div>
     <div id="settings" class="overlay hidden">

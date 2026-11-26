@@ -15,6 +15,7 @@ import { KIT_SLOTS, KIT_UNLOCK, kitOf, V3_ROSTER, type Kit, type KitSlot } from 
 import { V3_FAMILIES, type V3FamId } from './v3';
 import { datan2, dcos, dexp, dhypot, dsin } from './dmath';
 import { SIM_BUILD } from './build';
+import { tierOf } from './tiers';
 import {
   defaultOpts, emptyCommand, emptyStats,
   type CardView, type Command, type DeathCause, type EnemyKind, type FxKind, type GameEvent, type GameOpts, type HitKind, type MapTheme, type MapView,
@@ -455,7 +456,7 @@ export class Simulation {
         const bsp = SPECIES_BY_ID.get(this.rng.pick(vf.species))!;
         const b = this.makeSnake(i + 1, BOT_NAMES[i % BOT_NAMES.length], false, bsp, formsOf(bsp.id)[0].id, [], kitOf(bsp.id));
         this.snakes.push(b);
-        this.respawnBot(b, 1);
+        this.respawnBot(b, tierOf(this.opts.tier).botLevel);
       }
     }
     const famCount = new Map<string, number>([[p.fam.id, 1]]);
@@ -534,7 +535,7 @@ export class Simulation {
     const okForms = formsOf(sp.id);
     const form = okForms.find((f) => f.id === formId) ?? okForms[0];
     let acc = this.rng.next(), persona: Personality = 'gatherer';
-    for (const [p, w] of PERSONAS) {
+    for (const [p, w] of isPlayer ? PERSONAS : tierOf(this.opts.tier).personas) {
       if (acc < w) {
         persona = p;
         break;
@@ -807,7 +808,7 @@ export class Simulation {
     b.store = b.pack = 0;
     b.longLifeUsed = false;
     // 난이도: 반응 지연 0.2 / 0.4 / 0.6초
-    b.react = this.rng.pick([0.2, 0.4, 0.4, 0.6]);
+    b.react = this.rng.pick(tierOf(this.opts.tier).react);
     this.clearStatus(b);
     if (level > 1) this.autoLevel(b, level - 1);
     const segs = Math.max(CONFIG.startSegments, Math.round(this.rng.range(0.7, 1.3) * (CONFIG.startSegments + (level - 1) * 6)));

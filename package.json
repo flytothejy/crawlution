@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "tsx test/sim.test.ts && tsx test/v3.test.ts && tsx test/determinism.test.ts",
+    "test": "tsx test/sim.test.ts && tsx test/v3.test.ts && tsx test/determinism.test.ts && tsx test/progress.test.ts",
     "typecheck": "tsc --noEmit",
     "balance": "tsx balance/run.ts",
     "duel": "tsx scripts/duel.ts",

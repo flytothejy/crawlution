@@ -1,5 +1,6 @@
 // 설정 값과 저장. 화면(설정 창)은 main.ts에서 이 목록으로 만든다.
 import type { MapTheme } from '../shared/types';
+import { platform } from './platform';
 
 export interface Settings {
   son: boolean; // 아들 모드: 내 곤충 5배 강하게(출시 전 삭제 예정)
@@ -27,7 +28,7 @@ export function defaultSettings(): Settings {
 export function loadSettings(): Settings {
   const d = defaultSettings();
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = platform.get(KEY);
     if (raw) {
       const saved = JSON.parse(raw);
       // 자동 화질이 생기기 전 기본값(선명하게)은 자동으로 옮긴다
@@ -35,20 +36,16 @@ export function loadSettings(): Settings {
       return { ...d, ...saved };
     }
     // 예전 효과음·진동 저장값을 이어받는다
-    if (localStorage.getItem('crawlution.sound') === '0') d.sound = false;
-    if (localStorage.getItem('crawlution.vibe') === '0') d.vibe = false;
+    if (platform.get('crawlution.sound') === '0') d.sound = false;
+    if (platform.get('crawlution.vibe') === '0') d.vibe = false;
   } catch {
-    /* 저장 불가 환경 */
+    /* 깨진 저장 */
   }
   return d;
 }
 
 export function saveSettings(s: Settings) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify({ ...s, v: 2 }));
-  } catch {
-    /* 저장 불가 환경 */
-  }
+  platform.set(KEY, JSON.stringify({ ...s, v: 2 }));
 }
 
 type Opt<T> = [T, string];
@@ -62,8 +59,7 @@ export const SECTIONS: { title: string; rows: Row[] }[] = [
     title: '🎮 게임',
     rows: [
       { key: 'son', kind: 'toggle', icon: '🦸', label: '아들 모드', desc: '내 곤충이 5배 강해져요: 주는 피해 ×5, 받는 피해 ÷5 (시험용)', special: true },
-      { key: 'bots', kind: 'seg', icon: '🐛', label: '다른 곤충 수', desc: '다음 판부터 적용', options: [[10, '적게'], [20, '보통'], [30, '많이']] },
-      { key: 'map', kind: 'seg', icon: '🗺️', label: '맵', desc: '다음 판부터 적용', options: [['random', '무작위'], ['grass', '풀밭'], ['sand', '모래밭'], ['forest', '낙엽 숲']] },
+      { key: 'bots', kind: 'seg', icon: '🐛', label: '다른 곤충 수', desc: '다음 판부터 · 순위 기록은 보통(20)일 때만', options: [[10, '적게'], [20, '보통'], [30, '많이']] },
     ],
   },
   {
