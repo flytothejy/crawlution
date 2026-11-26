@@ -4,8 +4,8 @@
 //   npm run balance -- --only=none    지표를 모아 보고서의 '실유저' 탭을 다시 만든다(측정은 안 돌림)
 //
 // 기록은 같은 버전 도장(SIM_BUILD)의 코드로만 똑같이 재현된다. 그래서 받은 즉시(같은 버전일 때) 한 번 돌려
-// 지표를 뽑아 runs/에 남긴다 — 지표는 코드가 바뀐 뒤에도 그대로 쓸 수 있다. 원본 기록은 서버 저장소에 남기고,
-// 출시한 버전마다 git 태그(sim-<도장>)를 달아 두면 옛 기록도 그 버전으로 다시 돌려 새 지표를 뽑을 수 있다.
+// 지표를 뽑아 runs/에 남긴다 — 지표는 코드가 바뀐 뒤에도 그대로 쓸 수 있다. 옛 기록을 그 버전으로 다시 돌리려면
+// 도장이 src/shared/build.ts에 커밋되어 있으니 `git log -S "<도장>" -- src/shared/build.ts`로 그 커밋을 찾아 checkout.
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
@@ -92,7 +92,7 @@ if (process.argv[1] && import.meta.filename === process.argv[1]) {
     let allDone = true;
     for (const rec of recs) {
       if (rec.build !== SIM_BUILD && !other) {
-        console.log(`· ${f}: 버전 도장이 다름(${rec.build}, 지금 ${SIM_BUILD}) — git checkout sim-${rec.build} 뒤 다시 돌리거나 --allow-other-build(근사)`);
+        console.log(`· ${f}: 버전 도장이 다름(${rec.build}, 지금 ${SIM_BUILD}) — git log -S "${rec.build}" -- src/shared/build.ts 로 그 커밋을 찾아 checkout 뒤 다시 돌리거나 --allow-other-build(근사)`);
         skip++;
         allDone = false;
         continue;

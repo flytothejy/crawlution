@@ -60,7 +60,7 @@ npm run balance -- --only=none         # 측정 없이 보고서만 다시 만�
 
 1. 판이 끝나면 게임이 판 기록(`ReplayRecord`)을 만든다(`src/client/host.ts`의 `lastReplay`, 브라우저에서는 `window.__lastReplay`). 출시 뒤에는 순위 서버가 모은다.
 2. 기록 JSON(하나 또는 배열)을 `balance/replays/inbox/`에 넣고 `npm run balance:ingest`.
-   - 같은 버전 도장(`SIM_BUILD`)의 기록만 다시 돌린다. 다른 도장이면 `git checkout sim-<도장>` 뒤 다시 돌리거나 `-- --allow-other-build`(근사, 결과가 어긋날 수 있음).
+   - 같은 버전 도장(`SIM_BUILD`)의 기록만 다시 돌린다. 다른 도장이면 `git log -S "<도장>" -- src/shared/build.ts`로 그 버전 커밋을 찾아 checkout 뒤 다시 돌리거나 `-- --allow-other-build`(근사, 결과가 어긋날 수 있음).
    - 다시 돌려 뽑은 지표를 `balance/replays/runs/<id>.json`에 남기고, 처리한 기록은 `inbox/done/`으로 옮긴다. 지표는 코드가 바뀐 뒤에도 그대로 쓴다.
 3. `npm run balance -- --only=none` → 보고서 '실유저' 탭: 사람 K/D·붙잡힌 뒤 생존·쓰러지기까지·방어 기술 사용·판 순위를 같은 판 봇과, 종별로는 봇끼리 아레나의 같은 종과 나란히.
 

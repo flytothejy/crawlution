@@ -47,7 +47,7 @@
 - **입력 기록** `Simulation.replayRecord()`: 시드·설정·시뮬레이션 버전 도장(`SIM_BUILD`) + 사람이 조종한 곤충의 명령이 바뀐 틱만 `[틱, id, 칸, 값, …]`. 방향은 한 바퀴 4096칸 정수로 잘라 기록과 실제가 같다. 5분 판 약 170KB, gzip 약 47KB. 판 중 설정(힘)을 바꾸면 기록에 남고 순위 판에서 뺀다. 판이 끝나면 게임이 기록을 만든다(`host.ts`의 `lastReplay`).
 - **다시 돌리기** `src/shared/replay.ts`의 `replayRun()`: 순위 서버·밸런스 측정·버그 재현이 같은 함수를 쓴다.
 - **결정적 수학 함수** `src/shared/dmath.ts`: 공유 코드의 `Math.sin·cos·atan2·hypot·exp`를 모두 바꿈(오차 1e-9 수준). 테스트가 `Math.sin`·`Math.random`·`Date.now` 등 직접 사용을 막는다.
-- **버전 도장**: `scripts/stamp.mjs`가 `src/shared` 내용으로 해시를 만들어 `src/shared/build.ts`에 쓴다(시험·빌드 전에 자동). 기록은 같은 도장의 코드로만 똑같이 재현된다 → 게임을 내보낼 때마다 git 태그 `sim-<도장>`을 단다.
+- **버전 도장**: `scripts/stamp.mjs`가 `src/shared` 내용으로 해시를 만들어 `src/shared/build.ts`에 쓴다(시험·빌드 전에 자동). 기록은 같은 도장의 코드로만 똑같이 재현된다. 도장 파일이 커밋되므로 `git log -S "<도장>" -- src/shared/build.ts`로 그 버전 코드를 언제든 찾는다.
 - `npm test`의 `test/determinism.test.ts`가 '기록 → 다시 돌리기 → 같은 판'을 매번 확인한다. 만들면서 실제로 어긋남 하나를 잡았다: 부활할 때 판이 방향을 새로 잡는데, 같은 명령을 다시 보낸 효과가 기록에서 빠졌음 → 바뀐 칸을 '곤충이 지금 들고 있는 명령' 기준으로 기록해 해결.
 
 ### 서버 구성
