@@ -1,5 +1,6 @@
 // 3판에서 새로 만든 기술 29개 + 개미 계열 특성 '일개미 행렬'.
 // 화면 연출(fx)은 도감 3판 연출과 같은 이름·값으로 보내 몸 동작이 그대로 이어진다.
+import { CONFIG } from './config';
 import type { Minion, Simulation, Snake, Zone } from './sim';
 import { dist, head, nearestEnemy, pickFront, startDash, windup } from './skills';
 
@@ -39,18 +40,18 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
       return;
     }
     case 'coil': {
-      // 1.5초 똬리: 받는 피해 −40%, 나를 문 적은 중독. 각성: 풀릴 때 주변을 밀어낸다
+      // 1.5초 똬리: 받는 피해 −70%, 나를 문 적은 중독. 풀릴 때 주변을 밀어낸다(각성: 더 멀리 + 0.6초 기절)
       const T = 1.5 * D;
       s.coilT = T;
       s.coilPoison = true;
       pose(sim, s, 'curl', T);
       sim.later(0.2, () => sim.fx('coil', s, s.x, s.y, { r: 70 }));
-      if (aw)
-        sim.later(T, () => {
-          if (!s.alive) return;
-          sim.fx('shock', s, s.x, s.y, { r: 120 });
-          sim.circle(s, s.x, s.y, 120, (o, x, y) => (sim.knock(o, Math.atan2(o.y - s.y, o.x - s.x), 130), hitFx(sim, x, y, 'push')));
-        });
+      sim.later(T, () => {
+        if (!s.alive) return;
+        sim.fx('shock', s, s.x, s.y, { r: 120 });
+        sim.circle(s, s.x, s.y, 120, (o, x, y) => (sim.knock(o, Math.atan2(o.y - s.y, o.x - s.x), aw ? 180 : 130), aw && sim.stun(o, 0.6), hitFx(sim, x, y, 'push')));
+        s.rallyT = Math.max(s.rallyT, CONFIG.rallyTime); // 풀리자마자 빠져나간다
+      });
       return;
     }
     case 'wrap': {
@@ -369,6 +370,7 @@ export function castNew(sim: Simulation, s: Snake, id: string) {
         s.decoyT = 2;
         s.decoyX = s.x;
         s.decoyY = s.y;
+        s.hiddenT = Math.max(s.hiddenT, 1); // 새끼들 틈에 1초 숨는다
       });
       return;
     }

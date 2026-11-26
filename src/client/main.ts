@@ -873,7 +873,7 @@ function kitRows(id: string) {
     .map((sl) => {
       const k = kit[sl];
       const mine = v.swap === sl;
-      return `<div class="kitrow" style="--k:${SLOT_COL[sl]}"><span class="ki">${k.icon}</span><span class="kt"><b>${k.name}${mine ? ' <em>종 기술</em>' : ''}</b><small class="ks">${SLOT_NAME[sl]} · ${sl === 'atk' ? 'Lv1' : sl === 'def' ? 'Lv3' : sl === 'spc' ? 'Lv5' : '게이지'}${k.cd ? ` · ${k.cd}초` : ''}</small><small>${k.desc}</small>${k.awake ? `<small class="aw">각성: ${k.awake}</small>` : ''}</span></div>`;
+      return `<div class="kitrow" style="--k:${SLOT_COL[sl]}"><span class="ki">${k.icon}</span><span class="kt"><b>${k.name}${mine ? ' <em>종 기술</em>' : ''}</b><small class="ks">${SLOT_NAME[sl]} · ${sl === 'atk' ? 'Lv1' : sl === 'def' ? 'Lv3' : sl === 'spc' ? 'Lv5' : '게이지'}${k.cd ? ` · ${k.cd}초` : ''}</small><small>${k.desc}</small>${sl === 'def' ? '<small class="aw">공통: 쓰면 느려짐·묶임이 풀리고 1.2초 동안 이동 속도 +30%</small>' : ''}${k.awake ? `<small class="aw">각성: ${k.awake}</small>` : ''}</span></div>`;
     })
     .join('');
 }

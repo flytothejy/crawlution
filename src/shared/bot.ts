@@ -174,6 +174,8 @@ export function botThink(sim: Simulation, s: Snake, dt: number): Command {
       s.thinkAcc = wantAtk ? s.thinkAcc + dt : 0;
       if (wantAtk && s.thinkAcc >= s.react) ((skill = true), (s.thinkAcc = 0));
       if (s.level >= 3 && s.subCd <= 0 && wantAi(sim, s, k.def.ai, k.def.range * sim.rangeMul(s, true), scared, target) && sim.rng.next() < 0.5) sub = true;
+      // 위기(쫓기며 체력 40% 아래)에는 방어 기술 종류와 상관없이 꺼낸다 — 방어 칸 공통 '몸 추스르기'로 빠져나갈 틈이 생긴다
+      if (s.level >= 3 && s.subCd <= 0 && scared && s.hp < s.maxHp * 0.4) sub = true;
       if (s.level >= 5 && s.spcCd <= 0 && wantAi(sim, s, k.spc.ai, k.spc.range * sim.rangeMul(s, true), scared, target) && sim.rng.next() < 0.5) spc = true;
       if (s.ult >= CONFIG.ultMax && wantUlt(sim, s)) ult = true;
     } else if (s.level >= 3 && s.subCd <= 0 && k.def.ai === 'escape' && (s.rootT > 0 || s.grabbedBy >= 0 || s.slowT > 0.5 || s.charmT > 0)) sub = true;

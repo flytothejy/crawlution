@@ -5,10 +5,11 @@ import { V3_ROSTER, shard } from './lib';
 import { benchSpecies } from './bench';
 import { duel, duelJobs } from './duel';
 import { arenaRound } from './arena';
+import { escapeRun, escapeJobs } from './escape';
 
 const [layer, si, sn, cfgRaw, out] = process.argv.slice(2);
 const i = Number(si), n = Number(sn);
-const cfg = JSON.parse(cfgRaw) as { roster?: string[]; benchLevels: number[]; benchSeeds: number[]; duelLevels: number[]; duelSeeds: number[]; arenaRounds: number; arenaSeed0: number };
+const cfg = JSON.parse(cfgRaw) as { roster?: string[]; benchLevels: number[]; benchSeeds: number[]; duelLevels: number[]; duelSeeds: number[]; arenaRounds: number; arenaSeed0: number; escapeSeeds: number[] };
 const roster = cfg.roster ?? V3_ROSTER;
 const t0 = Date.now();
 const tick = (k: number, total: number) => {
@@ -25,5 +26,8 @@ if (layer === 'bench') {
 } else if (layer === 'arena') {
   const seeds = shard(Array.from({ length: cfg.arenaRounds }, (_, k) => cfg.arenaSeed0 + k), i, n);
   result = seeds.map((s, k) => (tick(k, seeds.length), arenaRound(s)));
+} else if (layer === 'escape') {
+  const mine = shard(escapeJobs(roster, cfg.escapeSeeds), i, n);
+  result = mine.map((j, k) => (tick(k, mine.length), escapeRun(...j)));
 } else throw new Error(`모르는 층: ${layer}`);
 writeFileSync(out, JSON.stringify(result));

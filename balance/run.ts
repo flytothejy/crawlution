@@ -3,7 +3,7 @@
 //
 //   npm run balance                 전체(기본, 2코어 약 20분)
 //   npm run balance -- --quick      빠른 점검(약 4분)
-//   npm run balance -- --only=bench 한 층만(bench·duel·arena, 쉼표로 여럿)
+//   npm run balance -- --only=bench 한 층만(bench·duel·arena·escape, 쉼표로 여럿)
 //   npm run balance -- --baseline   이번 결과를 기준선(balance/baseline.json)으로 저장
 //   npm run balance -- --jobs=4     일꾼 수(기본: CPU 수)
 //   npm run balance -- --only=none  측정 없이 지난 결과로 보고서만 다시 만든다
@@ -19,11 +19,11 @@ const args = new Map(process.argv.slice(2).map((a) => {
 }));
 const quick = args.has('quick');
 const jobs = Number(args.get('jobs') ?? Math.max(1, cpus().length));
-const only = (args.get('only') ?? 'bench,duel,arena').split(',');
+const only = (args.get('only') ?? 'bench,duel,arena,escape').split(',');
 
 export const PROFILE = quick
-  ? { name: 'quick', benchLevels: [9], benchSeeds: [1], duelLevels: [10], duelSeeds: [1], arenaRounds: 8, arenaSeed0: 0 }
-  : { name: 'full', benchLevels: [6, 12], benchSeeds: [1, 2], duelLevels: [7, 12], duelSeeds: [1, 2], arenaRounds: 40, arenaSeed0: 0 };
+  ? { name: 'quick', benchLevels: [9], benchSeeds: [1], duelLevels: [10], duelSeeds: [1], arenaRounds: 8, arenaSeed0: 0, escapeSeeds: [1] }
+  : { name: 'full', benchLevels: [6, 12], benchSeeds: [1, 2], duelLevels: [7, 12], duelSeeds: [1, 2], arenaRounds: 40, arenaSeed0: 0, escapeSeeds: [1, 2, 3, 4, 5, 6] };
 
 const OUT = join(import.meta.dirname, 'out');
 mkdirSync(OUT, { recursive: true });
@@ -48,7 +48,7 @@ function runLayer(layer: string): Promise<unknown[]> {
 const t0 = Date.now();
 const prev = existsSync(join(OUT, 'latest.json')) ? JSON.parse(readFileSync(join(OUT, 'latest.json'), 'utf8')) : null;
 const data: Record<string, unknown> = { profile: PROFILE, at: new Date().toISOString() };
-for (const layer of ['bench', 'duel', 'arena']) {
+for (const layer of ['bench', 'duel', 'arena', 'escape']) {
   if (only.includes(layer)) data[layer] = await runLayer(layer);
   else if (prev && prev.profile?.name === PROFILE.name) data[layer] = prev[layer]; // 안 돌린 층은 지난 결과를 쓴다
 }

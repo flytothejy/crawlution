@@ -117,12 +117,12 @@ const GRUB = (head: number, body = 0xf2e6c8, stripe = 0xe2d0aa): Look => ({ body
 // ---------- 계열 ----------
 export const FAMILIES: Family[] = [
   {
-    id: 'rhino', name: '장수풍뎅이', role: 'tank', hp: 1.3, atk: 1.1, spd: 0.9, cdMul: 1, knockTaken: 0.5,
+    id: 'rhino', name: '장수풍뎅이', role: 'tank', hp: 1.3, atk: 1.2, spd: 0.9, cdMul: 1, knockTaken: 0.5,
     color: 0xc8843a, color2: 0x7a4a1e, stages: ['애벌레', '성충', '각성'], skill: '뿔 들이받기',
     forms: [
       { id: 'charge', name: '돌진', icon: '🐂', desc: '앞으로 돌진해 부딪힌 적을 밀어내며 피해', awake: '돌진이 끝난 자리에 충격파', cd: 10, ai: 'dash', range: 260 },
       { id: 'lift', name: '퍼 올리기', icon: '⤴️', desc: '앞의 적을 뿔로 들어 뒤로 넘김(0.5초 기절)', awake: '넘긴 적이 떨어진 자리에 피해', cd: 9, ai: 'melee', range: 90 },
-      { id: 'push', name: '버티고 밀기', icon: '🧱', desc: '2초 동안 버티며 앞의 적을 계속 밀어냄, 받는 피해 −30%', awake: '밀려난 적이 바위·벽에 부딪히면 추가 피해', cd: 12, ai: 'melee', range: 100 },
+      { id: 'push', name: '버티고 밀기', icon: '🧱', desc: '가까운 적을 향해 2초 동안 버티며 계속 밀어냄, 받는 피해 −50%', awake: '밀려난 적이 바위·벽에 부딪히면 추가 피해', cd: 12, ai: 'melee', range: 100 },
     ],
     sub: { id: 'thud', name: '묵직한 착지', icon: '💥', desc: '날아올랐다 내려앉으며 주변 적을 밀어내고 0.5초 기절', cd: 14, ai: 'aoe', range: 140 },
     ult: { name: '대지 진동 돌진', icon: '🌋', desc: '길게 돌진해 길 위의 모든 적을 밀어내고 1초 기절', awake: '돌진이 끝난 자리에 큰 충격파', range: 420 },
@@ -143,14 +143,14 @@ export const FAMILIES: Family[] = [
     species: ['flatstag', 'kingstag', 'sawstag', 'giraffe'],
   },
   {
-    id: 'mantis', name: '사마귀', role: 'charge', hp: 0.8, atk: 1.2, spd: 1.0, cdMul: 1, knockTaken: 1,
+    id: 'mantis', name: '사마귀', role: 'charge', hp: 0.8, atk: 1.3, spd: 1.0, cdMul: 1, knockTaken: 1,
     color: 0x8ad04a, color2: 0xd8e8f0, stages: ['약충', '성충', '각성'], skill: '낫 베기',
     forms: [
       { id: 'sweep', name: '넓게 베기', icon: '🌙', desc: '앞쪽 부채꼴, 피해 보통. 여럿과 싸울 때', awake: '베인 자리에 칼날 자국이 2초 남음', cd: 9, ai: 'cone', range: 120 },
       { id: 'stab', name: '찌르기', icon: '🗡️', desc: '앞으로 긴 직선, 피해 높음, 폭 좁음', awake: '2마리까지 관통', cd: 10, ai: 'line', range: 220 },
       { id: 'combo', name: '연속 베기', icon: '⚔️', desc: '짧은 범위 3연타, 3타째는 꼬리 급소 판정', awake: '마지막 타격에 0.5초 기절', cd: 9, ai: 'cone', range: 110 },
     ],
-    sub: { id: 'threat', name: '날개 펼쳐 위협', icon: '🦋', desc: '주변 적을 1초 겁먹게 해 느려지고 기술을 못 씀', cd: 14, ai: 'aoe', range: 160 },
+    sub: { id: 'threat', name: '날개 펼쳐 위협', icon: '🦋', desc: '주변 적을 1.3초 겁먹게 해 느려지고 기술을 못 씀', cd: 14, ai: 'aoe', range: 160 },
     ult: { name: '천 개의 낫', icon: '🌪️', desc: '2초 동안 주변을 난도질, 그동안 받는 피해 −30%', awake: '끝나면 주 기술 재사용 초기화', range: 140 },
     larva: 'derive', likes: 2, hates: 1, strong: '사격, 지원', weak: '방어, 함정',
     species: ['kingmantis', 'widemantis', 'smallmantis', 'orchid', 'ghost'],
@@ -226,7 +226,7 @@ export const FAMILIES: Family[] = [
     color: 0xf6c94a, color2: 0x3a2a10, stages: ['애벌레', '성충', '각성'], skill: '벌 떼 부르기',
     forms: [
       { id: 'workers', name: '일벌 부르기', icon: '🐝', desc: '작은 벌 3마리가 5초 동안 함께 싸움', awake: '5마리', cd: 12, ai: 'summon', range: 300 },
-      { id: 'honey', name: '꿀 나누기', icon: '🍯', desc: '주변에 꿀을 떨어뜨려 안에 있으면 회복', awake: '꿀 위에 선 적은 끈적여 느려짐', cd: 14, ai: 'heal', range: 100 },
+      { id: 'honey', name: '꿀 나누기', icon: '🍯', desc: '5초 동안 꿀이 나를 따라다니며 회복', awake: '꿀 위에 선 적은 끈적여 느려짐', cd: 14, ai: 'heal', range: 100 },
       { id: 'heatball', name: '열 공', icon: '🔥', desc: '벌들이 적 하나를 둘러싸 열로 3초 지속 피해', awake: '둘러싸인 적이 움직이지 못함', cd: 12, ai: 'target', range: 200 },
     ],
     sub: { id: 'waggle', name: '8자 춤', icon: '💃', desc: '주변 먹이를 끌어오고, 가까운 특별 먹이·황금 꿀방울을 표시', cd: 15, ai: 'self', range: 300 },
@@ -268,7 +268,7 @@ export const NEW_FAMILIES: Family[] = [
     larva: GRUB(0xd8c8a8, 0xfaf4e6, 0xece2c8), likes: 8, hates: 5, strong: '지네·딱정벌레', weak: '거미·벌', species: ['v3:wangant', 'v3:armyant', 'v3:leafant', 'v3:bulldog', 'v3:fireant'],
   },
   {
-    id: 'butterfly', name: '나비', role: 'trap', hp: 1.08, atk: 1.0, spd: 1.08, cdMul: 1, knockTaken: 1.1,
+    id: 'butterfly', name: '나비', role: 'trap', hp: 1.08, atk: 1.1, spd: 1.08, cdMul: 1, knockTaken: 1.1,
     color: 0xe07ad8, color2: 0x7ad8ff, stages: ['애벌레', '나비', '각성'], skill: '인분', forms: kitForm('인분 흩뿌리기', '🌫️'),
     sub: { id: 'v3def', name: '팔랑 비행', icon: '🪽', desc: '', cd: 11, ai: 'move', range: 0 },
     ult: { name: '나비 떼 폭풍', icon: '🌪️', desc: '넓은 범위에 나비 떼가 휘몰아쳐 4초 동안 지속 피해 + 혼란.', awake: '폭풍이 나를 따라다님', range: 300 },

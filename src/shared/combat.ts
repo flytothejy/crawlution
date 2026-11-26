@@ -26,7 +26,7 @@ export function biteOf(f: Fighter): number {
 /** 최대 체력: (60 × (1 + 0.1 × (L−1)) × E + 마디 × 0.6) × 계열 체력 */
 export function maxHpOf(f: Fighter, segCount: number, extra = 1): number {
   if (f.isBoss || !f.family) return CONFIG.bossHp;
-  return Math.round((CONFIG.hpBase * (1 + CONFIG.hpPerLevel * (f.level - 1)) * E(f.stage) + segCount * CONFIG.hpPerSeg) * FAMILY[f.family].hp * extra);
+  return Math.round((CONFIG.hpBase * (1 + CONFIG.hpPerLevel * (f.level - 1)) * E(f.stage) + segCount * CONFIG.hpPerSeg) * FAMILY[f.family].hp * extra * CONFIG.hpScale);
 }
 
 /** 내 기준 상대와의 관계: 1 내가 셈(레벨 3 이상 높음), 0 비슷, -1 상대가 셈 */

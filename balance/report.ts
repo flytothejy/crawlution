@@ -6,10 +6,11 @@ import { V3_FAMILY, V3_FAMILIES } from '../src/shared/v3';
 import { kitOf, v3FamOf, V3_ROSTER, nameOf, SLOTS, avg, median, type Slot } from './lib';
 import type { BenchRow } from './bench';
 import type { DuelRow } from './duel';
+import type { EscapeRow } from './escape';
 import { mergeArena, type ArenaAgg } from './arena';
-import { W, FLAG } from './weights';
+import { W, FLAG, TARGET } from './weights';
 
-type Data = { profile: { name: string; benchLevels: number[]; duelLevels: number[]; arenaRounds: number }; at: string; bench?: BenchRow[]; duel?: DuelRow[]; arena?: Record<string, ArenaAgg>[] };
+type Data = { profile: { name: string; benchLevels: number[]; duelLevels: number[]; arenaRounds: number }; at: string; bench?: BenchRow[]; duel?: DuelRow[]; arena?: Record<string, ArenaAgg>[]; escape?: EscapeRow[] };
 
 export interface SkillA {
   sp: string;
@@ -21,6 +22,9 @@ export interface SkillA {
   usePerMin: number; // 실전(아레나) 분당 사용
   useRatio: number; // 같은 칸 중간값 대비
   dmgShare: number; // 실전 피해 중 이 칸 몫
+  survLift: number; // 방어 칸: 붙잡힌 교전에서 이 기술을 쓴 경우 생존율 − 안 쓴 경우(%p). 질 때 꺼내는 기술일수록 낮게 나온다(참고용)
+  escLift: number; // 방어 칸: 탈출 실험에서 기술이 준비된 경우 생존율 − 대기 중(%p). 이게 기술 효과
+  escBase: number; // 대기 중일 때 생존율
   flags: string[];
 }
 export interface SpeciesA {
@@ -59,7 +63,7 @@ export function analyze(d: Data) {
   for (const sp of V3_ROSTER)
     for (const slot of SLOTS) {
       const kit = kitOf(sp)!;
-      const sk: SkillA = { sp, slot, name: kit[slot].name, fam: v3FamOf(sp)!, byLv: {}, ratio: 0, usePerMin: 0, useRatio: 0, dmgShare: 0, flags: [] };
+      const sk: SkillA = { sp, slot, name: kit[slot].name, fam: v3FamOf(sp)!, byLv: {}, ratio: 0, usePerMin: 0, useRatio: 0, dmgShare: 0, survLift: NaN, escLift: NaN, escBase: NaN, flags: [] };
       for (const lv of levels) {
         const rs = (d.bench ?? []).filter((r) => r.sp === sp && r.slot === slot && r.level === lv);
         if (!rs.length) continue;
@@ -93,6 +97,11 @@ export function analyze(d: Data) {
     s.usePerMin = (a.casts[s.slot] ?? 0) / Math.max(1e-6, mins);
     const tot = Object.values(a.dmg).reduce((x, y) => x + y, 0);
     s.dmgShare = (a.dmg[s.slot] ?? 0) / Math.max(1, tot);
+    if (s.slot === 'def' && a.eng) {
+      const withN = a.engDef ?? 0, withLived = a.engDefLived ?? 0, lived = a.eng - a.engDied;
+      const woN = a.eng - withN, woLived = lived - withLived;
+      if (withN >= 15 && woN >= 15) s.survLift = withLived / withN - woLived / woN;
+    }
   }
   for (const slot of SLOTS) {
     const same = skills.filter((s) => s.slot === slot && arena[s.sp]);
@@ -110,6 +119,15 @@ export function analyze(d: Data) {
     else if (s.ratio > 0 && s.ratio <= FLAG.skillLow) s.flags.push(`약한 ${SLOTK[s.slot]} 기술(칸 중간값의 ${s.ratio.toFixed(2)}배)`);
     if (arena[s.sp] && s.useRatio < FLAG.rarelyUsed) s.flags.push(`봇이 거의 안 씀(분당 ${s.usePerMin.toFixed(2)}회)`);
     if (s.dmgShare >= FLAG.oneSkill) s.flags.push(`실전 피해의 ${Math.round(s.dmgShare * 100)}%가 이 기술`);
+    if (s.slot === 'def' && d.escape?.length) {
+      const rs = d.escape.filter((r) => r.sp === s.sp);
+      const on = rs.filter((r) => r.ready), off = rs.filter((r) => !r.ready);
+      if (on.length && off.length) {
+        s.escBase = off.filter((r) => r.lived).length / off.length;
+        s.escLift = on.filter((r) => r.lived).length / on.length - s.escBase;
+        if (s.escLift < FLAG.escapeMin) s.flags.push(`탈출 실험: 써도 생존율 ${sign(s.escLift, 0, 100) || '±0'}%p`);
+      }
+    }
   }
 
   // ---- 1:1 ----
@@ -163,7 +181,8 @@ export function analyze(d: Data) {
     const a = mergeArena(ss.map((s) => (arena[s.sp] ? { [s.sp]: arena[s.sp] } : {})));
     const sum = Object.values(a).reduce((o, r) => ((o.k += r.kills), (o.d += r.deaths), (o.sec += r.secs), (o.l += r.lives), (o.dm += Object.values(r.dmg).reduce((x, y) => x + y, 0)), (o.rp += r.rankPct), (o.rn += r.rankN), o), { k: 0, d: 0, sec: 0, l: 0, dm: 0, rp: 0, rn: 0 });
     const fw = Object.entries(famM[f.id] ?? {}).filter(([k]) => k !== f.id).reduce((o, [, v]) => ((o.w += v.w), (o.n += v.n), o), { w: 0, n: 0 });
-    return { fam: f.id, name: f.name, icon: f.icon, duel: fw.n ? fw.w / fw.n : NaN, kd: sum.k / Math.max(1, sum.d), dpm: sum.dm / Math.max(1e-6, sum.sec / 60), life: sum.sec / Math.max(1, sum.l), rank: sum.rn ? sum.rp / sum.rn : NaN, strength: avg(ss.map((s) => s.strength)), skillIdx: avg(ss.map((s) => s.skillIdx)) };
+    const eg = Object.values(a).reduce((o, r) => ((o.n += r.eng ?? 0), (o.d += r.engDied ?? 0), o.t.push(...(r.ttd ?? [])), o), { n: 0, d: 0, t: [] as number[] });
+    return { surv: eg.n ? 1 - eg.d / eg.n : NaN, ttd: median(eg.t), fam: f.id, name: f.name, icon: f.icon, duel: fw.n ? fw.w / fw.n : NaN, kd: sum.k / Math.max(1, sum.d), dpm: sum.dm / Math.max(1e-6, sum.sec / 60), life: sum.sec / Math.max(1, sum.l), rank: sum.rn ? sum.rp / sum.rn : NaN, strength: avg(ss.map((s) => s.strength)), skillIdx: avg(ss.map((s) => s.skillIdx)) };
   });
 
   // ---- 전체 건강 지표 ----
@@ -178,7 +197,16 @@ export function analyze(d: Data) {
   const mixTot = Object.values(mix).reduce((x, y) => x + y, 0) || 1;
   for (const k of Object.keys(mix)) mix[k] /= mixTot;
 
-  return { at: d.at, profile: d.profile, levels, duelLevels: dLv, skills, species, families, famM, global: { ttk, draw, mix, duels: duels.length, rounds: d.arena?.length ?? 0 } };
+  const all = Object.values(arena);
+  const sum = (k: 'eng' | 'engDied' | 'engCc' | 'engTime' | 'engDef' | 'engDefLived') => all.reduce((x, r) => x + (r[k] ?? 0), 0);
+  const ttdAll = all.flatMap((r) => r.ttd ?? []);
+  const eng = {
+    n: sum('eng'), survive: 1 - sum('engDied') / Math.max(1, sum('eng')), ttd: median(ttdAll), ccShare: sum('engCc') / Math.max(1e-6, sum('engTime')),
+    defUse: sum('engDef') / Math.max(1, sum('eng')), defLived: sum('engDefLived') / Math.max(1, sum('engDef')),
+    ttdHist: [0, 1, 2, 3, 4, 6, 8, 12, 99].slice(0, -1).map((lo, i, arr) => ({ lo, hi: [1, 2, 3, 4, 6, 8, 12, 99][i], n: ttdAll.filter((x) => x >= lo && x < [1, 2, 3, 4, 6, 8, 12, 99][i]).length / Math.max(1, ttdAll.length) })),
+  };
+  const ttkAll = median(duels.filter((r) => r.win !== 0 && r.t < 60).map((r) => r.t));
+  return { at: d.at, profile: d.profile, levels, duelLevels: dLv, skills, species, families, famM, global: { ttk, ttkAll, draw, mix, eng, duels: duels.length, rounds: d.arena?.length ?? 0 } };
 }
 type A = ReturnType<typeof analyze>;
 
@@ -222,13 +250,13 @@ function html(A: A, B: A | null) {
       if (!x) return '';
       const o = bSk.get(s.sp + s.slot);
       const cc = Object.entries(x.cc).filter(([, v]) => v >= 0.05).map(([k, v]) => `${CCN[k] ?? k} ${v.toFixed(1)}`).join(' ');
-      return `<tr data-slot="${s.slot}"><td class="n" style="--c:${fc(s.fam)}">${esc(nameOf(s.sp))}</td><td>${SLOTN[s.slot]}</td><td>${esc(s.name)}</td><td>${s.slot === 'ult' ? '–' : f1(x.cd, 0)}</td><td>${pct(x.dmgPct)}</td><td>${pct(x.dmg1Pct)}</td><td>${f1(x.targets, 1)}</td><td class="cc">${cc}</td><td>${x.knock >= 30 ? f1(x.knock, 0) : ''}</td><td>${x.guard >= 0.02 ? pct(x.guard) : ''}</td><td>${x.move >= 20 ? f1(x.move, 0) : ''}</td><td>${f1(x.value, 2)}</td><td style="${heat(s.ratio, 0.6, 1.4)}"><b>${f1(s.ratio, 2)}</b>${delta(s.ratio, o?.ratio, 1, 2)}</td><td style="${heat(s.useRatio, 0.4, 1.6)}">${f1(s.usePerMin, 2)}</td><td>${pct(s.dmgShare)}</td><td class="fl">${esc(s.flags.join(' · '))}</td></tr>`;
+      return `<tr data-slot="${s.slot}"><td class="n" style="--c:${fc(s.fam)}">${esc(nameOf(s.sp))}</td><td>${SLOTN[s.slot]}</td><td>${esc(s.name)}</td><td>${s.slot === 'ult' ? '–' : f1(x.cd, 0)}</td><td>${pct(x.dmgPct)}</td><td>${pct(x.dmg1Pct)}</td><td>${f1(x.targets, 1)}</td><td class="cc">${cc}</td><td>${x.knock >= 30 ? f1(x.knock, 0) : ''}</td><td>${x.guard >= 0.02 ? pct(x.guard) : ''}</td><td>${x.move >= 20 ? f1(x.move, 0) : ''}</td><td>${f1(x.value, 2)}</td><td style="${heat(s.ratio, 0.6, 1.4)}"><b>${f1(s.ratio, 2)}</b>${delta(s.ratio, o?.ratio, 1, 2)}</td><td style="${heat(s.useRatio, 0.4, 1.6)}">${f1(s.usePerMin, 2)}</td><td>${pct(s.dmgShare)}</td><td style="${heat(s.escLift, 0, 0.3)}">${Number.isFinite(s.escLift) ? sign(s.escLift, 0, 100) || '0' : ''}</td><td class="fl">${esc(s.flags.join(' · '))}</td></tr>`;
     })
     .join('');
   const famRows = A.families
     .map((f) => {
       const o = bFam.get(f.fam);
-      return `<tr><td class="n" style="--c:${fc(f.fam)}">${f.icon} ${esc(f.name)}</td><td style="${heat(f.duel, 0.4, 0.6)}">${pct(f.duel)}${delta(f.duel, o?.duel)}</td><td style="${heat(f.kd, 0.6, 1.4)}">${f1(f.kd, 2)}${delta(f.kd, o?.kd, 1, 2)}</td><td style="${heat(f.rank, 0.4, 0.6)}">${pct(f.rank)}${delta(f.rank, o?.rank)}</td><td>${f1(f.dpm, 0)}</td><td>${f1(f.life, 0)}</td><td>${f1(f.skillIdx, 2)}</td><td style="${heat(f.strength, -0.8, 0.8)}"><b>${f1(f.strength, 2)}</b></td></tr>`;
+      return `<tr><td class="n" style="--c:${fc(f.fam)}">${f.icon} ${esc(f.name)}</td><td style="${heat(f.duel, 0.4, 0.6)}">${pct(f.duel)}${delta(f.duel, o?.duel)}</td><td style="${heat(f.kd, 0.6, 1.4)}">${f1(f.kd, 2)}${delta(f.kd, o?.kd, 1, 2)}</td><td style="${heat(f.rank, 0.4, 0.6)}">${pct(f.rank)}${delta(f.rank, o?.rank)}</td><td>${f1(f.dpm, 0)}</td><td>${f1(f.life, 0)}</td><td>${f1(f.skillIdx, 2)}</td><td>${pct(f.surv)}</td><td>${f1(f.ttd)}</td><td style="${heat(f.strength, -0.8, 0.8)}"><b>${f1(f.strength, 2)}</b></td></tr>`;
     })
     .join('');
   const fams = V3_FAMILIES.map((f) => f.id);
@@ -263,17 +291,25 @@ p.note{color:var(--mut);font-size:12.5px}
 <nav><button data-t="sum" class="on">요약</button><button data-t="fam">계열</button><button data-t="sp">종</button><button data-t="sk">기술</button><button data-t="how">방법</button></nav>
 <section id="sum" class="on">
 <div class="card"><h3>전체 지표</h3><div class="kv">${A.duelLevels.map((l) => `<div><small>1:1 결판 시간(Lv${l})</small><b>${f1(A.global.ttk[l])}초</b><small>무승부 ${pct(A.global.draw[l])}</small></div>`).join('')}<div><small>계열 1:1 승률 폭</small><b>${pct(Math.min(...A.families.map((f) => f.duel)))}–${pct(Math.max(...A.families.map((f) => f.duel)))}</b></div><div><small>계열 K/D 폭</small><b>${f1(Math.min(...A.families.map((f) => f.kd)), 2)}–${f1(Math.max(...A.families.map((f) => f.kd)), 2)}</b></div></div><p class="note">실전 피해 출처: ${mix}</p></div>
+<div class="card"><h3>전투 시간 기준(balance/weights.ts)</h3><div class="kv">${[
+    ['1:1 결판 시간', A.global.ttkAll, TARGET.ttk, (x: number) => `${f1(x)}초`],
+    ['붙잡혀 쓰러지기까지', A.global.eng.ttd, TARGET.ttd, (x: number) => `${f1(x)}초`],
+    ['붙잡힌 뒤 살아남음', A.global.eng.survive, TARGET.survive, pct],
+    ['쓰러질 때 제어에 묶인 비율', A.global.eng.ccShare, TARGET.ccShare, pct],
+  ].map(([n, v, t, fmt]) => { const x = v as number, [lo, hi] = t as [number, number], ok = x >= lo && x <= hi; return `<div><small>${n}</small><b style="color:${ok ? '#2f8a3e' : '#c0442c'}">${ok ? '✓' : '✗'} ${(fmt as (x: number) => string)(x)}</b><small>목표 ${(fmt as (x: number) => string)(lo)}~${(fmt as (x: number) => string)(hi)}</small></div>`; }).join('')}</div>
+<p class="note">붙잡힌 교전 ${A.global.eng.n}번 · 방어 기술을 쓴 비율 ${pct(A.global.eng.defUse)} · 그중 살아남음 ${pct(A.global.eng.defLived)} · 쓰러지기까지 분포 ${A.global.eng.ttdHist.map((h) => `${h.lo}~${h.hi === 99 ? '' : h.hi}초 ${pct(h.n)}`).join(' · ')}</p></div>
 <div class="card"><h3>살펴볼 것 ${flagsAll.length}개 <small>(센 순서)</small></h3><ul class="fl">${flagsAll.map((f) => `<li>${f.t}</li>`).join('') || '<li>없음</li>'}</ul></div>
 </section>
-<section id="fam"><div class="tw"><table class="st"><tr><th>계열</th><th>1:1 승률</th><th>K/D</th><th>판 순위</th><th>분당 피해</th><th>한 생(초)</th><th>기술 지수</th><th>강함 지수</th></tr>${famRows}</table></div>
+<section id="fam"><div class="tw"><table class="st"><tr><th>계열</th><th>1:1 승률</th><th>K/D</th><th>판 순위</th><th>분당 피해</th><th>한 생(초)</th><th>기술 지수</th><th>붙잡혀 생존</th><th>쓰러지기까지(초)</th><th>강함 지수</th></tr>${famRows}</table></div>
 <div class="card"><h3>계열 상성(행이 열을 이긴 비율)</h3><div class="tw">${matrix}</div></div></section>
 <section id="sp"><p class="note">표 머리를 누르면 정렬. 강함 지수 = 1:1 승률·판 순위·K/D 표준점수 평균(0이 보통, ±${FLAG.z} 넘으면 표시).</p><div class="tw"><table class="st"><tr><th>종</th><th>계열</th>${lvH}<th>1:1 전체</th><th>K/D</th><th>판 순위</th><th>분당 피해</th><th>한 생(초)</th><th>기술 지수</th><th>강함 지수</th><th>표시</th></tr>${spRows}</table></div></section>
 <section id="sk"><p class="note">Lv${lv} 실측. 가치 = 기술 한 번이 낸 효과를 '상대 체력 비율'로 환산(방법 탭). 칸 대비 = 10초당 가치 ÷ 같은 칸 중간값(필살기는 한 번당). 실전 = 아레나 분당 사용·피해 비중.</p>
 <div class="chips"><button data-f="all" class="on">전체</button><button data-f="atk">공격</button><button data-f="def">방어</button><button data-f="spc">특수</button><button data-f="ult">필살기</button></div>
-<div class="tw"><table class="st" id="skt"><tr><th>종</th><th>칸</th><th>기술</th><th>쿨</th><th>피해 합</th><th>1명 최대</th><th>대상</th><th>제어(초)</th><th>밀기</th><th>지킴</th><th>이동</th><th>가치</th><th>칸 대비</th><th>실전 분당</th><th>실전 비중</th><th>표시</th></tr>${skRows}</table></div></section>
+<div class="tw"><table class="st" id="skt"><tr><th>종</th><th>칸</th><th>기술</th><th>쿨</th><th>피해 합</th><th>1명 최대</th><th>대상</th><th>제어(초)</th><th>밀기</th><th>지킴</th><th>이동</th><th>가치</th><th>칸 대비</th><th>실전 분당</th><th>실전 비중</th><th>탈출 기여(%p)</th><th>표시</th></tr>${skRows}</table></div></section>
 <section id="how"><div class="card"><h3>세 층</h3><ul class="fl">
 <li><b>기술 실측</b>: 레벨 ${A.levels.join('·')}, 고정 장면에서 기술 하나를 한 번 쓴다. 공격 장면(앞에 허수아비 3마리) · 방어 장면(세 방향에서 0.5초마다 최대 체력 4%) · 이동 장면(혼자 직진). 안 쓴 판과의 차이로 잰다. 봇 판단이 끼지 않는 순수 수치.</li>
 <li><b>1:1 대전표</b>: 레벨 ${A.duelLevels.join('·')}, 40종 모든 쌍 × 시드 × 자리 바꿈, 봇 AI(싸움꾼). 60초 넘으면 남은 체력으로 판정.</li>
+<li><b>탈출 실험</b>: 체력 35%로 쫓기는 곤충(봇 AI)과 같은 레벨 공격자(계열 대표 8종)를 붙여, 방어 기술이 준비된 경우와 재사용 대기 중인 경우의 10초 생존율 차이를 잰다. 방어 기술이 실제로 살려 주는지 보는 통제 실험.</li>
 <li><b>아레나 판</b>: 21마리 모두 봇 AI로 5분 판 ${A.global.rounds}번. 피해는 '어느 기술 칸에서 나왔나'를 시뮬레이션이 표시한다(장판·투사체·소환수·독까지 이어짐).</li></ul>
 <p class="note">1:1·아레나는 봇 AI 실력이 섞인다. 기술 실측은 강한데 실전 성적이 낮으면 봇이 그 기술을 잘 못 쓰는 것일 수 있다('봇이 거의 안 씀' 표시 참고).</p></div>
 <div class="card"><h3>기술 가치 환산(balance/weights.ts)</h3><p>피해: 상대 최대 체력 비율 그대로 · 1초당 ${Object.entries(W.cc).filter(([, v]) => v > 0).map(([k, v]) => `${CCN[k] ?? k} ${v}`).join(', ')} · 밀기 100당 ${W.knock} · 지킨 체력·회복: 내 최대 체력 비율 그대로 · 이동 100당 ${W.move} · 숨기 1초 ${W.hide} · 무적 1초 ${W.safe}</p>
@@ -293,6 +329,8 @@ function md(A: A, B: A | null) {
   lines.push('보기용 보고서: `npm run balance` 뒤 `balance/out/report.html`. 방법은 `balance/README.md`.', '');
   lines.push('## 전체 지표', '');
   for (const l of A.duelLevels) lines.push(`- 1:1 결판 시간 중간값 Lv${l}: ${f1(A.global.ttk[l])}초 (무승부 ${pct(A.global.draw[l])})`);
+  const g = A.global.eng;
+  lines.push(`- 1:1 결판 시간 중간값 ${f1(A.global.ttkAll)}초 (목표 ${TARGET.ttk.join('~')}초)`, `- 붙잡혀 쓰러지기까지 중간값 ${f1(g.ttd)}초 (목표 ${TARGET.ttd.join('~')}초) · 붙잡힌 뒤 살아남음 ${pct(g.survive)} (목표 ${TARGET.survive.map(pct).join('~')}) · 쓰러질 때 제어에 묶인 비율 ${pct(g.ccShare)} (목표 ${pct(TARGET.ccShare[1])} 이하)`);
   lines.push(`- 실전 피해 출처: ${Object.entries(A.global.mix).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${pct(v)}`).join(', ')}`, '');
   lines.push('## 계열', '', '| 계열 | 1:1 승률 | K/D | 판 순위 | 분당 피해 | 강함 지수 |', '|---|---|---|---|---|---|');
   for (const f of [...A.families].sort((a, b) => b.strength - a.strength)) lines.push(`| ${f.icon} ${f.name} | ${pct(f.duel)} | ${f1(f.kd, 2)} | ${pct(f.rank)} | ${f1(f.dpm, 0)} | ${f1(f.strength, 2)} |`);

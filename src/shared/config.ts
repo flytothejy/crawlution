@@ -42,6 +42,7 @@ export const CONFIG = {
   rerolls: 1,
 
   // 체력·싸움 (기술 수치표 공통 공식)
+  hpScale: 1.6, // 전체 체력 배율(2026-11-26: 1 → 1.6, 1:1 결판 4.4초 → 약 9초)(공격:체력 비율 손잡이). 기준은 balance/weights.ts의 TARGET
   hpBase: 60,
   hpPerLevel: 0.1,
   hpPerSeg: 0.6,
@@ -59,7 +60,10 @@ export const CONFIG = {
   tailDropPerDmg: 1 / 12,
   knockback: 10,
   wallDamage: 0.15,
-  invulnTime: 3,
+  invulnTime: 3, // 부활 직후 무적(먼저 공격하면 풀림)
+  rallyTime: 1.2, // 방어 칸 공통 '몸 추스르기': 방어 기술을 쓰면 느려짐·묶임 해제 + 이 시간 동안 이동 속도 ×rallySpeed
+  rallySpeed: 1.3,
+  respawnSafeDist: 900, // 부활 자리: 다른 곤충에게서 이만큼 먼 곳을 찾는다
   lives: 0, // 0 = 목숨 제한 없음(쓰러져도 판 끝까지 다시 나옴, 부활은 쓰러질수록 늦어짐)
   respawnDelay: 2,
   evolveTime: 1, // 진화 연출(무적)

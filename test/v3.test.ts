@@ -178,6 +178,26 @@ const statusSeen = new Set<string>();
   }
 }
 
+// 2c) 부활 규칙: 플레이어·봇 모두 레벨 유지, 적에게서 먼 곳, 부활 무적은 공격하면 풀림
+{
+  const sim = new Simulation(31, '나', opts('rhino', { bots: 6, startLevel: 1 }));
+  sim.enemies.update = () => {};
+  const b = sim.snakes[1];
+  sim.autoLevel(b, 7);
+  const lv = b.level, ab = b.abilities.length;
+  sim.kill(b, 2, 'skill');
+  for (let t = 0; t < 60 * 5 && !b.alive; t++) sim.step();
+  check('봇 부활: 레벨·카드 유지', b.alive && b.level === lv && b.abilities.length === ab, `Lv${b.level}/${lv}`);
+  const near = Math.min(...sim.snakes.filter((o) => o !== b && o.alive).map((o) => Math.hypot(o.x - b.x, o.y - b.y)));
+  check('봇 부활: 다른 곤충에게서 떨어진 곳', near > 300, `${near.toFixed(0)}`);
+  check('부활 직후 무적', b.invulnT > 0 && b.spawnShield);
+  b.isPlayer = true;
+  b.skillCd = 0;
+  sim.setCommand(b.id, { ...emptyCommand(0), angle: b.angle, skillSeq: b.lastSkillSeq + 1 });
+  sim.step();
+  check('부활 무적은 기술을 쓰면 풀림', b.invulnT <= 0 && !b.spawnShield);
+}
+
 // 3) 한 판 통계
 {
   const allNames = new Set<string>();

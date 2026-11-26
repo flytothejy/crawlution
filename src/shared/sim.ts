@@ -90,6 +90,8 @@ export interface Snake {
   hurtT: number;
   biteCd: number;
   invulnT: number;
+  spawnShield: boolean;
+  rallyT: number; // 방어 칸 공통 '몸 추스르기': 이동 속도 +30% // 부활 직후 무적: 내가 공격(기술·물기)하면 바로 풀린다
   wallCd: number;
   dropAcc: number;
   poisonT: number;
@@ -516,7 +518,7 @@ export class Simulation {
       sp, fam, form, sub: null, traits: new Set(traits.slice(0, 2)),
       level: 1, evo: 1, nut: 0, lastSrc: null, lastSrcT: -99, totalNut: 0, nutAll: 0, crushAll: 0, maxLevel: 1, abilities: [], mainLv: 0, subLv: 0, offer: null, pending: 0, subPending: false, newGiven: 0, rerolls: CONFIG.rerolls, evolveT: 0,
       kills: 0, killsAll: 0, deaths: 0, st: emptyStats(), dmgBins: [], castT: -99, castOpen: false, lifeStart: 0, hitBy: new Map(), crushes: 0, score: 0, ultUses: 0, respawnT: 0, loopCd: 0,
-      hp: 1, maxHp: 1, hurtT: 99, biteCd: 0, invulnT: 0, wallCd: 0, dropAcc: 0, poisonT: 0, poisonDps: 0, poisonBy: -1, poisonSrc: null, itchSrc: null, poisonAcc: 0, lives: 1, ult: 0, netT: 0, feastT: 0, yuckT: 0,
+      hp: 1, maxHp: 1, hurtT: 99, biteCd: 0, invulnT: 0, spawnShield: false, rallyT: 0, wallCd: 0, dropAcc: 0, poisonT: 0, poisonDps: 0, poisonBy: -1, poisonSrc: null, itchSrc: null, poisonAcc: 0, lives: 1, ult: 0, netT: 0, feastT: 0, yuckT: 0,
       lastSkillSeq: 0, lastSubSeq: 0, lastCardSeq: 0, lastRerollSeq: 0, skillCd: 0, subCd: 0,
       kit, v3fam: kit ? kit.v3fam : null, spcCd: 0, lastSpcSeq: 0, lastUltSeq: 0, coilT: 0, coilPoison: false, leafT: 0, leafHeal: false, flutterT: 0, bitterPoison: false, bitterMul: 0.5,
       charmBy: -1, itchBy: -1, itchDps: 0, itchAcc: 0, glowT: 0, workerCd: 0, raidT: 0, raidN: 0, pounceCd: 0, fungusT: 0, autoCurlCd: 0, osmCd: 0, bigeyeCd: 0, shimmerCd: 0, wasBoosting: false, jumpT: 0, paraT: new Map(),
@@ -681,7 +683,7 @@ export class Simulation {
   }
 
   private clearStatus(s: Snake) {
-    s.stunT = s.slowT = s.rootT = s.silenceT = s.blindT = s.markT = s.fearT = s.confuseT = s.charmT = s.itchT = s.hiddenT = s.ghostT = s.flyT = s.dashT = 0;
+    s.rallyT = s.stunT = s.slowT = s.rootT = s.silenceT = s.blindT = s.markT = s.fearT = s.confuseT = s.charmT = s.itchT = s.hiddenT = s.ghostT = s.flyT = s.dashT = 0;
     s.reduceT = s.backT = s.bitterT = s.curlT = s.deadT = s.escapeT = s.feastT = s.yuckT = 0;
     s.chanT = s.whirlT = s.skyT = s.ambushT = s.trailT = s.lanternT = s.compoundT = s.decoyT = 0;
     s.coilT = s.leafT = s.flutterT = s.glowT = s.jumpT = s.spcCd = 0;
@@ -727,15 +729,18 @@ export class Simulation {
   private safeSpot(avoid: Snake | null, minDist = 600): [number, number] {
     const R = CONFIG.arenaRadius * 0.85;
     let bx = 0, by = 0, best = -1;
-    for (let tries = 0; tries < 30; tries++) {
+    for (let tries = 0; tries < 40; tries++) {
       const a = this.rng.range(0, Math.PI * 2);
       const d = Math.sqrt(this.rng.next()) * R;
       const x = Math.cos(a) * d, y = Math.sin(a) * d;
       let near = Infinity;
       for (const o of this.snakes) {
         if (!o.alive || o === avoid) continue;
+        // 머리는 그대로, 몸은 절반 거리로 친다(몸 근처도 위험하지만 머리가 더 위험)
         near = Math.min(near, Math.hypot(x - o.x, y - o.y));
+        for (let k = 8; k < o.segN; k += 8) near = Math.min(near, Math.hypot(x - o.segs[k * 2], y - o.segs[k * 2 + 1]) * 1.6);
       }
+      for (const z of this.zones) near = Math.min(near, Math.hypot(x - z.x, y - z.y) - z.r + 200);
       if (near > best) ((best = near), (bx = x), (by = y));
       if (near > minDist) break;
     }
@@ -800,17 +805,35 @@ export class Simulation {
   }
 
   /** 플레이어 부활: 레벨·카드·진화 단계는 그대로, 길이 절반, 모으던 영양·필살기 게이지·목숨 1개를 잃는다 */
-  private respawnPlayer(p: Snake, deathLen: number) {
+  /** 쓰러진 뒤 부활(플레이어·봇 공통): 레벨·카드·필살기 게이지 유지, 길이 절반, 적에게서 먼 곳, 잠깐 무적 */
+  private respawnKeep(p: Snake, deathLen: number) {
     p.lifeStart = this.time;
-    p.totalNut = 0; // 쓰러질 때 남기는 먹이는 이번 생에 먹은 만큼(봇과 같은 기준)
-    const [x, y] = this.safeSpot(p, 700);
+    p.totalNut = 0; // 쓰러질 때 남기는 먹이는 이번 생에 먹은 만큼
+    p.modeT = 0;
+    p.hunting = false;
+    const [x, y] = this.safeSpot(p, CONFIG.respawnSafeDist);
     this.clearStatus(p);
     const segs = Math.max(CONFIG.startSegments, Math.floor(deathLen / 2));
-    this.spawnAt(p, x, y, this.rng.range(0, Math.PI * 2), segs);
+    // 가장 가까운 적을 등지고 나온다
+    let away = this.rng.range(0, Math.PI * 2), nd = Infinity;
+    for (const o of this.snakes) {
+      if (!o.alive || o === p) continue;
+      const d = Math.hypot(o.x - x, o.y - y);
+      if (d < nd) ((nd = d), (away = Math.atan2(y - o.y, x - o.x)));
+    }
+    this.spawnAt(p, x, y, away, segs);
     this.fullHeal(p);
     p.invulnT = CONFIG.invulnTime;
+    p.spawnShield = true;
     this.startBonus(p);
     this.events.push({ type: 'respawn', snake: p.id });
+  }
+
+  /** 부활 무적은 내가 먼저 공격하면 풀린다(무적인 채 싸우기 방지) */
+  private breakShield(s: Snake) {
+    if (!s.spawnShield) return;
+    s.spawnShield = false;
+    s.invulnT = 0;
   }
 
   private newFood(kind: 0 | 1 | 3 | 4, sub = -1): Food {
@@ -967,12 +990,9 @@ export class Simulation {
       if (s.alive || s.isBoss) continue;
       s.respawnT -= dt;
       if (s.respawnT > 0) continue;
-      if (s.isPlayer) {
-        if ((CONFIG.lives <= 0 || s.lives > 0) && this.state === 'playing') this.respawnPlayer(s, s.segCount);
-      } else {
-        const lv = this.joinLevel();
-        this.respawnBot(s, lv);
-      }
+      // 플레이어·봇 같은 규칙: 레벨·카드·필살기 게이지는 지키고 길이는 절반, 적에게서 먼 곳에서 잠깐 무적
+      if (s.isPlayer && !((CONFIG.lives <= 0 || s.lives > 0) && this.state === 'playing')) continue;
+      this.respawnKeep(s, s.segCount);
     }
     this.refillFoods(dt);
     for (const s of this.snakes) if (!s.isBoss) ((s.maxLevel = Math.max(s.maxLevel, s.level)), (s.score = this.scoreOf(s)));
@@ -985,14 +1005,6 @@ export class Simulation {
     const C = CONFIG;
     const v = s.nutAll + s.killsAll * C.scoreKill + s.st.assists * C.scoreAssist + s.crushAll * C.scoreCrush + (s.maxLevel - 1) * C.scoreLevel - s.deaths * C.scoreDeath;
     return Math.max(0, Math.floor(v));
-  }
-
-  /** 중간에 들어오는 봇의 레벨: 판 평균 레벨 − 2 */
-  private joinLevel() {
-    let sum = 0, n = 0;
-    for (const s of this.snakes) if (s.alive && !s.isBoss) ((sum += s.level), n++);
-    const avg = n ? sum / n : 1;
-    return Math.max(1, Math.min(CONFIG.maxLevel - 2, Math.round(avg - 2 + this.rng.range(-1, 1))));
   }
 
   /** 특성 '천적 감지': 경보 2초 전에 미리 알림 */
@@ -1255,8 +1267,11 @@ export class Simulation {
   actor: Snake | null = null;
 
   private castKit(s: Snake, slot: KitSlot) {
+    this.breakShield(s);
     const sk = s.kit![slot];
     const cd = this.kitCdMax(s, slot);
+    // 방어 칸 공통 '몸 추스르기': 느려짐·묶임이 풀리고 1.2초 동안 이동 속도 +30%(모든 방어 기술이 빠져나갈 틈을 준다)
+    if (slot === 'def') ((s.slowT = 0), (s.rootT = 0), (s.rallyT = CONFIG.rallyTime));
     if (slot === 'atk') s.skillCd = cd;
     else if (slot === 'def') s.subCd = cd;
     else s.spcCd = cd;
@@ -1330,6 +1345,7 @@ export class Simulation {
   }
 
   private castUlt(s: Snake) {
+    this.breakShield(s);
     s.ult = 0;
     s.ultUses++;
     const un = s.kit ? s.kit.ult : s.fam.ult;
@@ -1662,7 +1678,7 @@ export class Simulation {
       if (this.tsp(t, 'sandbody') && t.sneaking) d *= 0.7;
       if (t.reduceT > 0) d *= t.reduceMul;
       if (t.curlT > 0) d *= 0.4;
-      if (t.coilT > 0) d *= 0.6; // 몸 말기 −40%
+      if (t.coilT > 0) d *= 0.3; // 몸 말기 −70%
       if (t.v3fam === 'beetle') d *= 0.9; // 무거운 껍질
       if (t.flutterT > 0 && kind !== 'bite' && kind !== 'crit') d *= 0.5; // 팔랑 비행: 기술 피해 절반
       if (t.boosting && this.ab(t, 'glide') > 0) d *= 1 - this.ab(t, 'glide');
@@ -1679,7 +1695,7 @@ export class Simulation {
           // 큰 눈(올빼미나비): 정면 첫 공격 −50%(8초에 한 번)
           d *= 0.5;
           t.bigeyeCd = 8;
-        }
+        } else if (t.leafT > 0) d *= 0.6; // 잎 방패: 옆·뒤는 몸을 반쯤 가려 −40%
       }
       if (this.inst(t, 'segment') && kind === 'bite' && atk) {
         // 단단한 마디(왕지네): 몸 가운데를 물리면 −20%
@@ -1902,6 +1918,7 @@ export class Simulation {
     s.workerCd = dec(s.workerCd);
     s.raidT = dec(s.raidT);
     s.pounceCd = dec(s.pounceCd);
+    s.rallyT = dec(s.rallyT);
     if (s.raidT <= 0) s.raidN = 0;
     if (s.bitterT <= 0) ((s.bitterPoison = false), (s.bitterMul = 0.5));
     if (s.charmT <= 0) s.charmBy = -1;
@@ -2028,6 +2045,7 @@ export class Simulation {
         if (this.inst(s, 'groundhunt')) speed *= 1.15; // 땅 사냥꾼
         if (this.inst(s, 'waterdance') && this.nearPuddle(s, 90)) speed *= 1.15; // 물가의 춤
       }
+      if (s.rallyT > 0) speed *= CONFIG.rallySpeed;
       if (s.charmT > 0) speed *= 0.5;
       else if (s.sneaking) speed *= CONFIG.sneakMul;
       if (s.dashT > 0) speed *= s.dashMul;
@@ -2336,6 +2354,7 @@ export class Simulation {
   }
 
   private bite(a: Snake, b: Snake, x: number, y: number, i: number) {
+    this.breakShield(a);
     let dmg = biteOf(this.fighter(a));
     if (!a.isBoss) {
       dmg *= 1 + this.ab(a, 'jaw');

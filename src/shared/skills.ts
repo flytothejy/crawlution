@@ -97,14 +97,17 @@ export function castMain(sim: Simulation, s: Snake, famId?: FamilyId) {
         });
         });
       } else {
-        // 버티고 밀기: 2초 채널
+        // 버티고 밀기: 2초 채널. 가장 가까운 적을 향해 돌아서 버틴다(쫓길 때도 뒤의 적을 밀어낸다)
+        const foe = nearestEnemy(sim, s, 260);
+        if (foe) s.angle = Math.atan2(foe.y - s.y, foe.x - s.x);
         s.chanT = 2;
         s.chanKind = 'push';
         s.chanAcc = 0.25;
         s.chanDmg = B;
         s.chanHits.clear();
         s.reduceT = 2;
-        s.reduceMul = 0.7;
+        s.reduceMul = 0.5;
+        sim.later(2, () => s.alive && (s.rallyT = Math.max(s.rallyT, CONFIG.rallyTime))); // 다 버티면 빠져나간다
         sim.fx('push', s, hx, hy, { angle: s.angle, r: 100 * R, dur: 2 });
       }
       return;
@@ -306,7 +309,7 @@ export function castMain(sim: Simulation, s: Snake, famId?: FamilyId) {
         for (let k = 0; k < n; k++) sim.addMinion(s, 'bee', 5 + sim.ab(s, 'swarm'), raw * 0.25);
         sim.fx('summon', s, s.x, s.y, { r: 60 });
       } else if (form === 'honey') {
-        sim.addZone({ x: s.x, y: s.y, r: 100 * R, kind: 'honey', life: 5, owner: s.id, mul: 0.7, awake: aw });
+        sim.addZone({ x: s.x, y: s.y, r: 100 * R, kind: 'honey', life: 5, owner: s.id, mul: 0.7, awake: aw, follow: true }); // 꿀이 나를 따라다닌다
         sim.fx('honey', s, s.x, s.y, { r: 100 * R });
         sim.fx('lifted', s, s.x, s.y, { angle: s.angle, wk: 'drip', dur: 0.9 });
       } else {
@@ -461,9 +464,9 @@ export function castSub(sim: Simulation, s: Snake) {
       sim.fx('playdead', s, s.x, s.y, { dur: s.deadT });
       return;
     case 'threat':
-      sim.fx('threat', s, s.x, s.y, { r: 160 * R, dur: 0.9 });
-      sim.circle(s, s.x, s.y, 160 * R, (o, x, y) => {
-        sim.fear(o, 1 * D);
+      sim.fx('threat', s, s.x, s.y, { r: 180 * R, dur: 0.9 });
+      sim.circle(s, s.x, s.y, 180 * R, (o, x, y) => {
+        sim.fear(o, 1.3 * D);
         sim.events.push({ type: 'skillHit', x, y, kind: 'fear' });
       });
       return;
@@ -484,14 +487,17 @@ export function castSub(sim: Simulation, s: Snake) {
       s.fangT = 5 * D;
       sim.fx('fang', s, s.x, s.y, { dur: s.fangT });
       return;
-    case 'backstep':
-      s.dashAngle = s.angle + PI;
+    case 'backstep': {
+      // 줄을 타듯 물러난다: 가까운 적이 있으면 그 반대쪽으로(쫓길 때 적 쪽으로 뛰어들지 않게)
+      const foe = nearestEnemy(sim, s, 420);
+      s.dashAngle = foe ? Math.atan2(s.y - foe.y, s.x - foe.x) : s.angle + PI;
       startDash(sim, s, 'backstep', 200 * R, Math.max(1.2, 200 / Math.max(80, sim.speedOf(s))), false);
       s.ghostT = Math.max(s.ghostT, s.dashT);
       sim.fx('backstep', s, s.x, s.y, { angle: s.angle });
       // 물러난 길에 끈끈한 줄을 남긴다(쫓아오는 적이 느려짐)
       if (s.trailT <= 0) ((s.trailT = 1.5), (s.trailAwake = false), (s.chanAcc = 0), (s.trailHits = new Set()));
       return;
+    }
     case 'waggle': {
       const r = 300 * R;
       for (const f of sim.foods) {
@@ -898,7 +904,7 @@ export function tickSkills(sim: Simulation, s: Snake, dt: number) {
           const heavy = 1 + sim.ab(s, 'heavy');
           sim.cone(s, s.x, s.y, s.angle, 100 * R, 0.7, (o, x, y) => {
             sim.deal(s, o, s.chanDmg * 0.1, 'skill', x, y);
-            sim.knock(o, s.angle, 40 * heavy);
+            sim.knock(o, s.angle, 55 * heavy);
             o.pushedBy = s.id;
             o.pushedT = 0.5;
           });
