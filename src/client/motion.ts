@@ -86,6 +86,21 @@ export const PROGS: Record<string, Prog> = {
   fling: (k) => ({ headZ: 22 + 26 * bump(Math.min(1, k * 1.8)) - 22 * k, jaw: k < 0.25 ? -0.45 + 1.3 * outQ(k / 0.25) : 0.85 * (1 - k), lean: -16 * bump(Math.min(1, k * 1.5)), headScale: 1 + 0.15 * bump(k), stretch: 1 - 0.12 * bump(k), horn: 0.6 * (1 - k) }),
   // 들려 있음(잡힌 쪽): 퍼 올리기보다 낮게 들린 채 버둥거림
   held: (k) => ({ z: 40 * outQ(Math.min(1, k * 2)), tilt: 0.25 * Math.sin(k * 30), stretch: 1 - 0.12 * k, headScale: 1 + 0.1 * k }),
+  // 하늘 던지기(헤라클레스, 1초): 뿔로 집어 아주 높이 들어 올린 채 버티다가 수직으로 내리꽂힘
+  skyhurl: (k) => {
+    const H = 300;
+    const z = k < 0.32 ? H * outQ(k / 0.32) : k < 0.8 ? H + 14 * Math.sin((k - 0.32) * 20) : H * (1 - inQ((k - 0.8) / 0.2));
+    const hang = k > 0.32 && k < 0.8 ? 1 : 0;
+    return { z, tilt: 0.45 * Math.sin(k * 42) * hang + (k >= 0.8 ? 1.6 * ((k - 0.8) / 0.2) : 0), stretch: 1 - 0.18 * hang, headScale: 1 + 0.12 * bump(k), jitter: 2.5 * hang, ghost: k >= 0.8 ? 1 : 0.4 };
+  },
+  // 하늘 던지기(던지는 쪽): 뿔을 치켜든 채 함께 날아올랐다가 같이 떨어진다
+  skyjump: (k) => {
+    const H = 110;
+    const z = k < 0.3 ? H * outQ(k / 0.3) : k < 0.8 ? H + 8 * Math.sin((k - 0.3) * 14) : H * (1 - inQ((k - 0.8) / 0.2));
+    return { z, headZ: 26 * bump(Math.min(1, k * 1.25)), horn: 1, lean: k < 0.8 ? -10 : 18 * (1 - (k - 0.8) / 0.2), wingSpread: k < 0.95 ? 1 : 0, wingRate: 3, headScale: 1 + 0.12 * bump(k), stretch: 1 + (k >= 0.8 ? 0.15 : 0) };
+  },
+  // 내던져짐(톱사슴벌레 연쇄): 낮은 포물선으로 빙글빙글 돌며 날아감
+  thrown: (k) => ({ z: 85 * bump(k), tilt: 6.5 * k, stretch: 1 - 0.22 * bump(k), headScale: 1 + 0.15 * bump(k), ghost: 1 }),
   // 내던져짐(잡힌 쪽): 머리 위로 호를 그리며 뒤로 날아가 떨어짐
   tossed: (k) => ({ z: 40 + 45 * bump(k) - 40 * k, tilt: 3.2 * outQ(k), stretch: 1 - 0.15 * bump(k), headScale: 1 + 0.15 * bump(k), ghost: 0.8 }),
 

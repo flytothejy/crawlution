@@ -510,15 +510,23 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
         const d = dist(e.x, e.y, s.x, s.y);
         if (d < bd) ((bd = d), (o = e));
       }
-      sim.fx('burst', s, s.x, s.y, { r: 90, wk: 'herc' });
       s.flyT = Math.max(s.flyT, 1);
       s.skyT = Math.max(s.skyT, 1);
+      sim.fx('lifted', s, s.x, s.y, { angle: s.angle, wk: 'skyjump', dur: 1 });
       if (!o) return;
       const t = o;
       sim.stun(t, 1.4);
       t.flyT = Math.max(t.flyT, 1); // 들려 있는 동안 다른 공격도 안 맞음
       sim.shove(t, datan2(s.y - t.y, s.x - t.x), Math.max(0, dist(t.x, t.y, s.x, s.y) - s.r - t.r - 6));
+      sim.fx('lifted', t, t.x, t.y, { angle: s.angle, wk: 'skyhurl', dur: 1 });
       hitFx(sim, t.x, t.y, 'stun');
+      // 높이 들린 채 뿔 끝에 매달려 따라온다(땅의 그림자도 함께)
+      for (let k = 1; k <= 9; k++)
+        sim.later(k * 0.1, () => {
+          if (!s.alive || !t.alive) return;
+          const fx = s.x + dcos(s.angle) * (s.r + t.r + 8), fy = s.y + dsin(s.angle) * (s.r + t.r + 8);
+          sim.shove(t, datan2(fy - t.y, fx - t.x), dist(fx, fy, t.x, t.y));
+        });
       sim.later(1, () => {
         if (!s.alive) return;
         const lx = s.x + dcos(s.angle) * (s.r + t.r + 40), ly = s.y + dsin(s.angle) * (s.r + t.r + 40);
@@ -530,7 +538,7 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
           sim.hitstop(s, t, 0.14);
         }
         const R = aw ? 170 : 130;
-        sim.fx('burst', s, lx, ly, { r: R, wk: 'herc', awake: true });
+        sim.fx('quake', s, lx, ly, { r: R, wk: 'herc', awake: aw });
         sim.circle(s, lx, ly, R, (e, x, y) => {
           if (e === t) return;
           sim.deal(s, e, B * (aw ? 1.0 : 0.7), 'ult', x, y, 'ult', cap);
@@ -576,38 +584,58 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
         const d = dist(e.x, e.y, s.x, s.y);
         if (d < bd) ((bd = d), (cur = e));
       }
-      sim.fx('burst', s, s.x, s.y, { r: 80, wk: 'saw' });
       if (!cur) return;
+      sim.stun(cur, 0.6);
+      sim.fx('lifted', s, s.x, s.y, { angle: s.angle, wk: 'heft', dur: 0.15 });
       const used = new Set<number>([cur.id]);
       let a = cur;
+      // 던지기 한 번: 0.24초 동안 포물선으로 날아가(몸이 빙글) 맞을 적에게 쾅
+      const FLY = 0.24, STEPS = 6;
+      const toss = (o: Snake, ang: number, d: number, done: () => void) => {
+        sim.fx('lifted', o, o.x, o.y, { angle: ang, wk: 'thrown', dur: FLY, x1: o.x + dcos(ang) * d, y1: o.y + dsin(ang) * d });
+        sim.fx('blink', s, o.x + dcos(ang) * d, o.y + dsin(ang) * d, { x1: o.x, y1: o.y, angle: ang, wk: 'saw', dur: FLY });
+        o.flyT = Math.max(o.flyT, FLY);
+        for (let j = 1; j <= STEPS; j++)
+          sim.later((FLY * j) / STEPS, () => {
+            if (!o.alive) return;
+            sim.shove(o, ang, d / STEPS);
+            if (j === STEPS) ((o.flyT = 0), done());
+          });
+      };
       for (let k = 0; k < n; k++)
-        sim.later(0.15 + k * 0.35, () => {
+        sim.later(0.15 + k * 0.36, () => {
           if (!s.alive || !a.alive) return;
+          if (k === 0) sim.fx('lifted', s, s.x, s.y, { angle: s.angle, wk: 'fling', dur: 0.3 });
           let b: Snake | null = null, bb = 440;
           for (const e of sim.snakes) {
             if (e.id === s.id || used.has(e.id) || !sim.hittable(e) || e.deadT > 0 || !e.alive) continue;
             const d = dist(e.x, e.y, a.x, a.y);
             if (d < bb) ((bb = d), (b = e));
           }
-          const x0 = a.x, y0 = a.y;
+          const o = a;
           if (!b) {
-            sim.shove(a, s.angle, 260);
-            sim.fx('blink', s, a.x, a.y, { x1: x0, y1: y0, angle: s.angle, wk: 'saw' });
-            sim.deal(s, a, B * 0.9, 'ult', a.x, a.y, 'ult', cap);
-            sim.stun(a, 0.5);
+            toss(o, s.angle, 260, () => {
+              sim.deal(s, o, B * 0.9, 'ult', o.x, o.y, 'ult', cap);
+              sim.stun(o, 0.5);
+              hitFx(sim, o.x, o.y, 'stun');
+            });
             return;
           }
-          const ang = datan2(b.y - a.y, a.x === b.x && a.y === b.y ? 1 : b.x - a.x);
-          sim.shove(a, ang, Math.max(0, bb - a.r - b.r));
-          sim.fx('blink', s, a.x, a.y, { x1: x0, y1: y0, angle: ang, wk: 'saw' });
-          for (const e of [a, b]) {
-            sim.deal(s, e, B * 0.9, 'ult', e.x, e.y, 'ult', cap);
-            sim.stun(e, 0.5);
-            hitFx(sim, e.x, e.y, 'stun');
-          }
-          sim.hitstop(s, b, 0.08);
-          used.add(b.id);
-          a = b;
+          const tb = b;
+          used.add(tb.id);
+          a = tb;
+          sim.stun(tb, 0.5); // 날아오는 동안 맞을 적도 굳는다
+          const ang = datan2(tb.y - o.y, o.x === tb.x && o.y === tb.y ? 1 : tb.x - o.x);
+          toss(o, ang, Math.max(0, bb - o.r - tb.r), () => {
+            for (const e of [o, tb]) {
+              if (!e.alive) continue;
+              sim.deal(s, e, B * 0.9, 'ult', e.x, e.y, 'ult', cap);
+              sim.stun(e, 0.5);
+              hitFx(sim, e.x, e.y, 'stun');
+            }
+            sim.knock(tb, ang, 40);
+            sim.hitstop(s, tb, 0.08);
+          });
         });
       return;
     }
@@ -617,7 +645,7 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
       const used = new Set<number>();
       let px = s.x, py = s.y, reach = 320;
       for (let k = 0; k < n; k++)
-        sim.later(0.05 + k * 0.12, () => {
+        sim.later(0.05 + k * 0.15, () => {
           if (!s.alive) return;
           let b: Snake | null = null, bb = reach;
           for (const e of sim.snakes) {
@@ -627,7 +655,7 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
           }
           if (!b) return;
           used.add(b.id);
-          sim.fx('blink', s, b.x, b.y, { x1: px, y1: py, angle: datan2(b.y - py, b.x - px), wk: 'firefly' });
+          sim.fx('blink', s, b.x, b.y, { x1: px, y1: py, angle: datan2(b.y - py, b.x - px), wk: 'firefly', n: k + 1 });
           sim.deal(s, b, B * Math.max(0.5, 1.0 - 0.08 * k), 'ult', b.x, b.y, 'ult', cap);
           sim.blind(b, 1.5);
           sim.markOn(b, 3);
@@ -817,7 +845,7 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
           sim.later(w * 1.3 + k * 0.15, () => {
             if (!s.alive) return;
             const a = base + (w % 2 ? 1 : -1) * (-1.05 + (2.1 * k) / steps);
-            sim.fx('beam', s, s.x + dcos(a) * L, s.y + dsin(a) * L, { x1: s.x, y1: s.y, angle: a, wk: 'morpho', dur: 0.18, r: 34 });
+            sim.fx('beam', s, s.x + dcos(a) * L, s.y + dsin(a) * L, { x1: s.x, y1: s.y, angle: a, wk: 'morpho', dur: 0.34, r: 40 });
             sim.line(s, s.x, s.y, a, L, 60, 99, (o, x, y) => {
               if (hit.has(o.id)) return;
               hit.add(o.id);
@@ -833,7 +861,7 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
       // 독나방 '독가루 안개': 큰 독가루 구름(반지름 260, 5초)을 남긴다. 안의 적은 0.5초마다 피해 + 가려움, 가끔 헷갈림.
       // 각성: 구름이 나를 따라다닌다
       sim.addZone({ x: s.x, y: s.y, r: 260, kind: 'itchcloud', life: 5, owner: s.id, dps: B * 0.24, mul: 0.6, ult: cap, follow: aw, target: -1 });
-      sim.fx('burst', s, s.x, s.y, { r: 260, wk: 'tussock' });
+      sim.fx('burst', s, s.x, s.y, { r: 120, wk: 'tussock' });
       return;
     }
     // ---------- 사마귀 계열: 종마다 다른 필살기 ----------

@@ -40,7 +40,7 @@ export type FxKind =
   | 'windup' | 'lifted' | 'trizone' | 'baitset' | 'aimline' | 'legwhip' | 'stain' | 'antrun' | 'spiderlings' | 'warhorn'
   | 'fangstab' | 'coil' | 'vortex' | 'acid' | 'burrow' | 'antcall' | 'antriver' | 'leafwall' | 'nest' | 'buzz' | 'mudpot' | 'powder' | 'flutter' | 'charm' | 'bstorm' | 'eyespot' | 'morpho' | 'hairs'
   // 종 고유 필살기
-  | 'riposte' | 'reapslash' | 'blink' | 'bloom' | 'bloomburst' | 'burst' | 'beam' | 'territory' | 'tide' | 'bigeye' | 'armor';
+  | 'riposte' | 'reapslash' | 'blink' | 'bloom' | 'bloomburst' | 'burst' | 'beam' | 'territory' | 'tide' | 'bigeye' | 'armor' | 'quake';
 
 export type GameEvent =
   | { type: 'eat'; snake: number; x: number; y: number; big: boolean; gold?: boolean; special?: number; taste?: number }

@@ -64,7 +64,7 @@ export interface Frame {
 }
 
 interface Aura {
-  kind: 'whirl' | 'circle' | 'lantern' | 'compound' | 'sky' | 'stance' | 'bloom';
+  kind: 'whirl' | 'circle' | 'lantern' | 'compound' | 'sky' | 'stance' | 'bloom' | 'plates';
   life: number;
   max: number;
   r: number;
@@ -216,6 +216,13 @@ export class GameRenderer {
   private headLayer = new Container();
   private statusGfx = new Graphics();
   private shapeGfx = new Graphics();
+  /** 땅에 남는 연출(갈라진 땅): 몸 아래에 그린다 */
+  private crackGfx = new Graphics();
+  private grounds: Shape[] = [];
+  /** 몸 위에 떠 있는 구름(독가루 안개) */
+  private cloudGfx = new Graphics();
+  /** 화면 전체 안개(구름 안에 들어갔을 때) */
+  private hazeGfx = new Graphics();
   private fxLayer = new Container();
   private enemyGfx = new Graphics();
   private mapLayer = new Container();
@@ -312,12 +319,12 @@ export class GameRenderer {
     this.glowLayer.blendMode = 'add';
 
     this.world.addChild(
-      this.bg, mask, this.deco, border, this.mapLayer, this.decalLayer, this.zoneGfx, this.teleGfx, this.foodBackLayer, this.foodLayer, this.ringGfx, this.markGfx,
-      this.shadowLayer, this.glowLayer, this.legLayer, this.bodyLayer, this.ghostLayer, this.headLayer, this.minionGfx, this.statusGfx, this.shapeGfx,
+      this.bg, mask, this.deco, border, this.mapLayer, this.decalLayer, this.crackGfx, this.zoneGfx, this.teleGfx, this.foodBackLayer, this.foodLayer, this.ringGfx, this.markGfx,
+      this.shadowLayer, this.glowLayer, this.legLayer, this.bodyLayer, this.ghostLayer, this.headLayer, this.cloudGfx, this.minionGfx, this.statusGfx, this.shapeGfx,
       this.fxSpriteLayer, this.fxLayer, this.enemyGfx, this.hpGfx, this.iconLayer, this.iconGfx, this.labelLayer, this.popupLayer,
     );
     this.fxSpriteLayer.blendMode = 'add';
-    this.app.stage.addChild(this.world, this.screenGfx, this.screenFx);
+    this.app.stage.addChild(this.world, this.screenGfx, this.hazeGfx, this.screenFx);
   }
 
   private makeTextures() {
@@ -958,7 +965,8 @@ export class GameRenderer {
     /** 종 테마 색: 대표 종(base)은 원래 색, 다른 종은 테마 색 [0 주색, 1 보조, 2 강조] */
     const C = (def: number, k: 0 | 1 | 2) => (th && !th.base ? th.pal[k] : def);
     const c = C(famColor(e.fam), 0), c2 = C(famColor(e.fam, 2), 1);
-    const near = this.isNear(e.x, e.y);
+    // 긴 띠·궤적은 끝점이 화면 밖이어도 출발점이 보이면 그린다
+    const near = this.isNear(e.x, e.y) || (e.x1 !== undefined && e.y1 !== undefined && this.isNear(e.x1, e.y1));
     const mine = e.snake === playerId;
     const r = e.r ?? 100, a = e.angle ?? 0, len = e.len ?? 200, half = e.half ?? 0.6;
     const hit = (shake: number, punch: number) => {
@@ -1416,6 +1424,49 @@ export class GameRenderer {
         }
         if (e.wk === 'heft' || e.wk === 'fling' || e.wk === 'held') {
           this.motion.play(id, e.wk, d, now);
+          return true;
+        }
+        if (e.wk === 'skyhurl') {
+          // 하늘 높이 들린 적: 솟구치는 굵은 속도선 → 매달려 버둥 → 수직 낙하 속도선
+          this.motion.play(id, 'skyhurl', d, now);
+          if (!near) return true;
+          for (let j = 0; j < 10; j++) {
+            const ox = (rnd() - 0.5) * 70;
+            this.afterMs(() => this.addShape((g, q) => g.moveTo(e.x + ox, e.y + 20 - (1 - q) * 80).lineTo(e.x + ox, e.y - 60 - (1 - q) * 260).stroke({ width: 5 * q + 1, color: 0xffffff, alpha: q * 0.8, cap: 'round' }), 0.3), j * 25);
+          }
+          this.dustRing(e.x, e.y, 40, DUST, 18);
+          // 떨어지기 직전: 위에서 아래로 내리꽂는 속도선
+          this.afterMs(() => {
+            const [lx, ly] = this.lastHead.get(id) ?? [e.x, e.y];
+            for (let j = 0; j < 9; j++) {
+              const ox = (rnd() - 0.5) * 80;
+              this.afterMs(() => this.addShape((g, q) => g.moveTo(lx + ox, ly - 340 + (1 - q) * 160).lineTo(lx + ox, ly - 120 + (1 - q) * 200).stroke({ width: 6 * q + 1, color: 0xfff0c0, alpha: q * 0.85, cap: 'round' }), 0.18), j * 15);
+            }
+          }, d * 780);
+          return true;
+        }
+        if (e.wk === 'skyjump') {
+          this.motion.play(id, 'skyjump', d, now);
+          if (near) {
+            this.dustRing(e.x, e.y, 50, DUST, 22);
+            for (let i = 0; i < 12; i++) this.spawnBit('sand', e.x, e.y, 0x8a6a4a, 160 + rnd() * 180, 0.5, 1.1, -Math.PI / 2, 2.4);
+          }
+          return true;
+        }
+        if (e.wk === 'thrown') {
+          // 내던져짐: 빙글 돌며 날아가 쾅 — 떨어진 자리에 흙먼지·금·별
+          this.motion.play(id, 'thrown', d, now);
+          this.afterMs(() => {
+            this.motion.play(id, 'slammed', 0.3, this.time);
+            const [lx, ly] = this.lastHead.get(id) ?? [e.x1 ?? e.x, e.y1 ?? e.y];
+            if (!this.isNear(lx, ly)) return;
+            this.dustRing(lx, ly, 44, DUST, 20);
+            this.cracks(lx, ly, 46);
+            this.fx('ring', lx, ly, 0xe8a850, 14, 120, 0.3, 0, 0, 0.8);
+            for (let i = 0; i < 10; i++) this.spawnBit('star', lx, ly - 24, 0xffe066, 60 + rnd() * 60, 0.6, 0.8);
+            for (let i = 0; i < 8; i++) this.spawnBit('shard', lx, ly, 0x8a6a4a, 140 + rnd() * 140, 0.45, 0.7);
+            this.shake = Math.max(this.shake, 9);
+          }, d * 1000);
           return true;
         }
         if (e.wk === 'tossed') {
@@ -2198,6 +2249,28 @@ export class GameRenderer {
       case 'blink': {
         // 번개 궤적: 출발점 → 도착점을 지그재그로 잇고 잔상
         if (e.x1 === undefined || e.y1 === undefined) break;
+        if (e.wk === 'firefly') {
+          this.fireflyZap(e.x1, e.y1, e.x, e.y, e.n ?? 1, hit);
+          break;
+        }
+        if (e.wk === 'saw') {
+          // 내던지기 궤적: 포물선 점선 + 뒤로 튀는 흙
+          const x0 = e.x1, y0 = e.y1, x1 = e.x, y1 = e.y, dur = e.dur ?? 0.24;
+          const c = WK_COL.saw;
+          this.addShape((g, q) => {
+            const p = Math.min(1, (1 - q) * 1.6);
+            const N = 14;
+            for (let k = 0; k < N * p; k++) {
+              const t = k / N, hz = 85 * Math.sin(Math.PI * t) * 0.85;
+              const x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t - hz;
+              g.circle(x, y, 5 - 3 * t).fill({ color: k % 2 ? c : 0xffffff, alpha: 0.75 * q });
+            }
+          }, dur + 0.35);
+          this.dustRing(x0, y0, 26, DUST, 12);
+          for (let i = 0; i < 6; i++) this.spawnBit('puff', x0, y0, DUST, 80 + rnd() * 60, 0.5, 0.6, a + Math.PI, 1);
+          hit(6, 0.03);
+          break;
+        }
         const c = e.wk ? (WK_COL[e.wk] ?? P(0, 0xe8d890)) : P(0, 0xe8d890), x0 = e.x1, y0 = e.y1;
         const dx = e.x - x0, dy = e.y - y0, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
         const pts: number[] = [x0, y0];
@@ -2240,9 +2313,90 @@ export class GameRenderer {
         hit(13, 0.07);
         break;
       }
+      case 'quake': {
+        // 내리꽂기: 땅이 쩍 갈라져 오래 남고, 흙덩이가 솟고, 먼지 고리
+        const c = WK_COL[e.wk ?? ''] ?? 0xffc060, x0 = e.x, y0 = e.y;
+        const cr: number[][] = [];
+        const nC = e.awake ? 10 : 8;
+        for (let j = 0; j < nC; j++) {
+          let ang = (j / nC) * Math.PI * 2 + rnd() * 0.5;
+          const L = r * (1.3 + rnd() * 0.8);
+          const pts = [x0, y0];
+          let px = x0, py = y0;
+          for (let k = 1; k <= 6; k++) {
+            ang += (rnd() - 0.5) * 0.8;
+            px += (cos(ang) * L) / 6;
+            py += (sin(ang) * L) / 6;
+            pts.push(px, py);
+          }
+          cr.push(pts);
+          if (rnd() < 0.75) {
+            const bi = 2 + Math.floor(rnd() * 3);
+            let bx = pts[bi * 2], by = pts[bi * 2 + 1], ba = ang + (rnd() < 0.5 ? -1 : 1) * 0.9;
+            const bp = [bx, by];
+            for (let k = 0; k < 3; k++) {
+              ba += (rnd() - 0.5) * 0.6;
+              bx += cos(ba) * L * 0.13;
+              by += sin(ba) * L * 0.13;
+              bp.push(bx, by);
+            }
+            cr.push(bp);
+          }
+        }
+        // 솟은 땅 조각(가운데 둘레)
+        const slabs: number[][] = [];
+        for (let j = 0; j < 7; j++) {
+          const ang = (j / 7) * Math.PI * 2 + rnd() * 0.4, d = r * (0.35 + rnd() * 0.2), w = 16 + rnd() * 14;
+          const sx = x0 + cos(ang) * d, sy = y0 + sin(ang) * d, tx = -sin(ang), ty = cos(ang);
+          slabs.push([sx - tx * w, sy - ty * w, sx + tx * w, sy + ty * w, sx + tx * w * 0.7 + cos(ang) * 14, sy + ty * w * 0.7 + sin(ang) * 14 - 14, sx - tx * w * 0.7 + cos(ang) * 14, sy - ty * w * 0.7 + sin(ang) * 14 - 14]);
+        }
+        const LIFE = 2.6;
+        this.addGround((g, q) => {
+          const t = (1 - q) * LIFE;
+          const open = Math.min(1, t / 0.14);
+          const fade = Math.min(1, (q * LIFE) / 0.8);
+          const glow = Math.max(0, 1 - t / 1.2);
+          g.circle(x0, y0, r * 0.55).fill({ color: 0x2a1a0a, alpha: 0.35 * fade });
+          for (const pts of cr) {
+            const n = pts.length / 2, m = Math.max(1, Math.ceil((n - 1) * open));
+            for (let i = 0; i < m; i++) {
+              const w = 1 - i / (n - 1);
+              g.moveTo(pts[i * 2], pts[i * 2 + 1]).lineTo(pts[i * 2 + 2], pts[i * 2 + 3]).stroke({ width: 6 + 22 * w, color: 0x8a6a40, alpha: 0.6 * fade, cap: 'round' });
+              g.moveTo(pts[i * 2], pts[i * 2 + 1]).lineTo(pts[i * 2 + 2], pts[i * 2 + 3]).stroke({ width: 3 + 12 * w, color: 0x140a02, alpha: 0.95 * fade, cap: 'round' });
+              if (glow > 0) g.moveTo(pts[i * 2], pts[i * 2 + 1]).lineTo(pts[i * 2 + 2], pts[i * 2 + 3]).stroke({ width: 1.5 + 4 * w, color: 0xff8a2a, alpha: 0.95 * glow, cap: 'round' });
+            }
+          }
+          for (const sl of slabs) {
+            g.poly(sl).fill({ color: 0x8a6a42, alpha: 0.95 * fade }).stroke({ width: 2, color: 0x3a2610, alpha: 0.8 * fade });
+            g.moveTo(sl[4], sl[5]).lineTo(sl[6], sl[7]).stroke({ width: 3, color: 0xc8a878, alpha: 0.9 * fade });
+          }
+        }, LIFE);
+        this.fx('ring', x0, y0, 0xfff0d0, r * 0.3, r * 2.4, 0.4, 0, 0, 0.6);
+        this.dustRing(x0, y0, r * 0.6, DUST, 30);
+        for (let i = 0; i < 26; i++) this.spawnBit('shard', x0 + (rnd() - 0.5) * r * 0.6, y0 + (rnd() - 0.5) * r * 0.6, i % 3 ? 0x7a5a3a : 0xa08060, 220 + rnd() * 260, 0.7, 0.8 + rnd() * 0.7, -Math.PI / 2, 2.6);
+        for (let i = 0; i < 14; i++) this.spawnBit('puff', x0, y0, DUST, 140 + rnd() * 160, 0.9, 1.1 + rnd() * 0.6);
+        hit(20, 0.1);
+        this.shake = Math.max(this.shake, 14);
+        break;
+      }
       case 'burst': {
         // 종 고유 필살기 공통 터짐: 색은 wk(종)로
         const c = WK_COL[e.wk ?? ''] ?? 0xffffff;
+        if (e.wk === 'kingstag') {
+          // 갑옷판이 사방으로 튕겨 나간다
+          const x0 = e.x, y0 = e.y, m0 = rnd() * Math.PI;
+          this.addShape((g, q) => {
+            const d = r * (0.5 + 1.3 * (1 - q * q));
+            for (let j = 0; j < 4; j++) {
+              const m = m0 + (j * Math.PI) / 2, R0 = d, R1 = d + 30, h = 0.4;
+              const pts: number[] = [];
+              for (let i = 0; i <= 6; i++) pts.push(x0 + cos(m - h + (2 * h * i) / 6) * R1, y0 + sin(m - h + (2 * h * i) / 6) * R1);
+              for (let i = 6; i >= 0; i--) pts.push(x0 + cos(m - h + (2 * h * i) / 6) * R0, y0 + sin(m - h + (2 * h * i) / 6) * R0);
+              g.poly(pts).fill({ color: 0x8a90a8, alpha: q }).stroke({ width: 3, color: 0x2a2e40, alpha: q });
+            }
+          }, 0.45);
+          for (let i = 0; i < 16; i++) this.spawnBit('shard', e.x, e.y, i % 2 ? 0xc8ccd8 : 0x8a90a8, 220 + rnd() * 200, 0.5, 0.8);
+        }
         this.aoeFx(e.x, e.y, r, c, !!e.awake);
         this.ringFx(e.x, e.y, r, 0xffffff);
         for (let i = 0; i < 18; i++) this.spawnParticle(e.x, e.y, i % 3 ? c : 0xffffff, r * (0.6 + rnd() * 0.6), 0.5, 0.7);
@@ -2254,20 +2408,48 @@ export class GameRenderer {
         // 긴 띠: 나비 떼 강물(오래)·빛줄기(짧게)
         if (e.x1 === undefined || e.y1 === undefined) break;
         const c = WK_COL[e.wk ?? ''] ?? 0xffffff, x0 = e.x1, y0 = e.y1, x1 = e.x, y1 = e.y, w = r || 40, dur = e.dur ?? 0.3;
+        const bandA = e.wk === 'monarch' ? 0.45 : 1;
         this.addShape((g, q) => {
-          const k = Math.min(1, q * 3);
+          const k = Math.min(1, q * 3) * bandA;
           g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: w, color: c, alpha: 0.22 * k, cap: 'round' });
           g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: w * 0.35, color: c, alpha: 0.55 * k, cap: 'round' });
           g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: Math.max(2, w * 0.08), color: 0xffffff, alpha: 0.9 * k, cap: 'round' });
         }, dur);
         if (e.wk === 'monarch') {
-          const n = 26;
-          for (let i = 0; i < n; i++)
-            later(rnd() * dur * 0.8, () => {
-              const t = rnd() * 0.3, jx = (rnd() - 0.5) * w * 0.8;
-              const nx = -Math.sin(a), ny = Math.cos(a);
-              this.spawnBit('petal', x0 + (x1 - x0) * t + nx * jx, y0 + (y1 - y0) * t + ny * jx, i % 2 ? c : 0x2a1a0a, 380, 1.2, 1, a, 0.15);
-            });
+          // 나비 떼가 길을 따라 강물처럼 흘러간다
+          const L = Math.hypot(x1 - x0, y1 - y0), ca = cos(a), sa = sin(a), nx = -sa, ny = ca;
+          const N = 54, LIFE = dur + 1;
+          const fl = Array.from({ length: N }, (_, i) => ({
+            b: (i / N) * (dur - 0.15) + rnd() * 0.05,
+            tr: 0.8 + rnd() * 0.35,
+            o: (rnd() - 0.5) * w * 0.85,
+            ph: rnd() * 6.28,
+            sz: 11 + rnd() * 7,
+            col: [c, 0xffb040, 0xff7a1a][i % 3],
+          }));
+          this.addShape((g, q) => {
+            const t = (1 - q) * LIFE;
+            for (const f of fl) {
+              const u = (t - f.b) / f.tr;
+              if (u < 0 || u > 1) continue;
+              const al = Math.min(1, u * 6, (1 - u) * 5);
+              const wob = Math.sin(t * 5 + f.ph) * 16;
+              const x = x0 + ca * L * u + nx * (f.o + wob), y = y0 + sa * L * u + ny * (f.o + wob);
+              this.bfly(g, x, y, a + Math.cos(t * 5 + f.ph) * 0.35, f.sz, 0.3 + 0.7 * Math.abs(Math.sin(t * 18 + f.ph)), f.col, al);
+            }
+          }, LIFE);
+        }
+        if (e.wk === 'morpho') {
+          // 빛줄기 전체가 반짝인다: 길을 따라 별빛과 빛 망울
+          const L = Math.hypot(x1 - x0, y1 - y0), ca = cos(a), sa = sin(a);
+          for (let i = 0; i < 16; i++) {
+            const t = (i + rnd()) / 16, j = (rnd() - 0.5) * w * 0.9;
+            this.spawnBit(i % 2 ? 'star' : 'mote', x0 + ca * L * t - sa * j, y0 + sa * L * t + ca * j, i % 3 ? c : 0xffffff, 20 + rnd() * 50, 0.45, 0.4 + rnd() * 0.5);
+          }
+          for (let i = 1; i <= 4; i++) {
+            const t = i / 4 - rnd() * 0.12;
+            this.fx('flare', x0 + ca * L * t, y0 + sa * L * t, i % 2 ? c : 0xffffff, 24, 100, 0.22, 0, 2);
+          }
         }
         hit(e.wk === 'morpho' ? 5 : 3, 0.02);
         break;
@@ -2326,6 +2508,28 @@ export class GameRenderer {
       case 'armor': {
         // 몸을 감싸는 고리(장수 갑옷·실바늘)
         const c = WK_COL[e.wk ?? ''] ?? 0xffffff;
+        if (e.wk === 'kingstag') {
+          // 장수 갑옷: 두꺼운 금속판 넷이 바깥에서 날아와 철컥 맞물린다
+          this.addAura(e.snake, 'plates', e.dur ?? 4, r, c);
+          const x0 = e.x, y0 = e.y;
+          this.addShape((g, q) => {
+            const d = r * (1 + 1.4 * q * q);
+            for (let j = 0; j < 4; j++) {
+              const m = (j * Math.PI) / 2 + 0.4;
+              g.circle(x0 + cos(m) * d, y0 + sin(m) * d, 22).fill({ color: 0x8a90a8, alpha: 1 - q }).stroke({ width: 3, color: 0xe8ecff, alpha: 1 - q });
+            }
+          }, 0.18);
+          later(0.18, () => {
+            this.fx('ring', x0, y0, 0xe8ecff, r * 0.8, r * 1.8, 0.3);
+            this.fx('flare', x0, y0, 0xffffff, r * 0.5, r * 1.6, 0.25);
+            for (let j = 0; j < 4; j++) {
+              const m = (j * Math.PI) / 2 + 0.4;
+              for (let i = 0; i < 5; i++) this.spawnBit('star', x0 + cos(m) * r, y0 + sin(m) * r, i % 2 ? 0xffffff : 0xffe8a0, 120 + rnd() * 120, 0.35, 0.5, m, 1.4);
+            }
+            hit(9, 0.05);
+          });
+          break;
+        }
         this.ringFx(e.x, e.y, r, c);
         this.addAura(e.snake, 'stance', e.dur ?? 3, r, c);
         hit(5, 0.02);
@@ -2405,6 +2609,85 @@ export class GameRenderer {
 
   private addShape(draw: (g: Graphics, k: number) => void, life: number) {
     this.shapes.push({ draw, life, max: life });
+  }
+  private addGround(draw: (g: Graphics, k: number) => void, life: number) {
+    this.grounds.push({ draw, life, max: life });
+  }
+
+  /** 반딧불 한 번 튐: 빛 구슬이 휙 날아가 '탕!' 터지고, 지나간 길은 잠깐 빛 실로 남는다(n번째일수록 크게) */
+  private fireflyZap(x0: number, y0: number, x1: number, y1: number, n: number, hit: (shake: number, punch: number) => void) {
+    const c = WK_COL.firefly, TRAVEL = 0.09, LIFE = 0.75;
+    const dx = x1 - x0, dy = y1 - y0;
+    this.addShape((g, q) => {
+      const t = (1 - q) * LIFE, p = Math.min(1, t / TRAVEL);
+      const hx = x0 + dx * p, hy = y0 + dy * p;
+      const fade = t < TRAVEL ? 1 : Math.max(0, 1 - (t - TRAVEL) / (LIFE - TRAVEL));
+      g.moveTo(x0, y0).lineTo(hx, hy).stroke({ width: 14, color: c, alpha: 0.3 * fade, cap: 'round' });
+      g.moveTo(x0, y0).lineTo(hx, hy).stroke({ width: 4, color: 0xffffff, alpha: 0.95 * fade, cap: 'round' });
+      if (p < 1) g.circle(hx, hy, 26).fill({ color: c, alpha: 0.3 }).circle(hx, hy, 14).fill({ color: c, alpha: 0.8 }).circle(hx, hy, 7).fill(0xffffff);
+    }, LIFE);
+    this.afterMs(() => {
+      if (!this.isNear(x1, y1)) return;
+      const big = Math.min(1.5, 0.8 + n * 0.1);
+      this.fx('flare', x1, y1, c, 30, 140 * big, 0.3, 0, 2);
+      this.fx('ring', x1, y1, 0xffffff, 10, 120 * big, 0.28);
+      this.fx('ring', x1, y1, c, 20, 170 * big, 0.4);
+      // '탕!' 십자 섬광
+      const rot = Math.random() * Math.PI;
+      this.addShape((g, q) => {
+        const L = 95 * big * (0.5 + 0.5 * (1 - q));
+        for (let j = 0; j < 2; j++) {
+          const ca = Math.cos(rot + (j * Math.PI) / 2), sa = Math.sin(rot + (j * Math.PI) / 2);
+          g.moveTo(x1 - ca * L, y1 - sa * L).lineTo(x1 + ca * L, y1 + sa * L).stroke({ width: 7 * q + 1, color: 0xffffff, alpha: q, cap: 'round' });
+        }
+        g.circle(x1, y1, 30 * q + 6).fill({ color: c, alpha: 0.65 * q });
+      }, 0.28);
+      for (let i = 0; i < 14; i++) this.spawnBit(i % 2 ? 'star' : 'mote', x1, y1, i % 3 ? c : 0xffffff, 140 + Math.random() * 180, 0.5, 0.6 + Math.random() * 0.5);
+      hit(5 + n, 0.04);
+    }, TRAVEL * 1000);
+  }
+
+  /** 나비 한 마리(날개 넷을 기울어진 타원으로) */
+  private bfly(g: Graphics, x: number, y: number, ang: number, sz: number, flap: number, col: number, alpha: number) {
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const P = (lx: number, ly: number) => [x + ca * lx - sa * ly, y + sa * lx + ca * ly];
+    const wing = (cx: number, cy: number, rx: number, ry: number, c: number, al: number) => {
+      const pts: number[] = [];
+      for (let i = 0; i < 10; i++) {
+        const t = (i / 10) * Math.PI * 2;
+        pts.push(...P(cx + Math.cos(t) * rx, cy + Math.sin(t) * ry));
+      }
+      g.poly(pts).fill({ color: c, alpha: al }).stroke({ width: 1.5, color: 0x1a0e04, alpha: al });
+    };
+    for (const sd of [-1, 1]) {
+      wing(sz * 0.35, sd * sz * 0.75 * flap, sz * 0.55, sz * 0.75 * flap, col, alpha);
+      wing(-sz * 0.35, sd * sz * 0.55 * flap, sz * 0.4, sz * 0.5 * flap, lighterC(col, 0.25), alpha * 0.9);
+    }
+    const [bx0, by0] = P(sz * 0.8, 0), [bx1, by1] = P(-sz * 0.8, 0);
+    g.moveTo(bx0, by0).lineTo(bx1, by1).stroke({ width: Math.max(2, sz * 0.22), color: 0x1a0e04, alpha, cap: 'round' });
+  }
+
+  /** 독가루 구름: 뭉게뭉게 덩이가 겹친 반투명 구름(몸 위에 떠 있다) */
+  private poisonCloud(x: number, y: number, R: number, k: number, seed: number) {
+    const g = this.cloudGfx, T = this.time;
+    const puffs: [number, number, number][] = [];
+    const N = 18;
+    for (let j = 0; j < N; j++) {
+      const ang = j * 2.39996 + seed, d = R * 0.78 * Math.sqrt((j + 0.5) / N);
+      const dr = R * 0.035 * Math.sin(T * 0.7 + j * 1.3);
+      const pr = R * (0.24 + 0.06 * ((j * 7) % 5) / 4) * (1 + 0.07 * Math.sin(T * 1.2 + j * 1.7));
+      puffs.push([x + Math.cos(ang + T * 0.05) * (d + dr), y + Math.sin(ang + T * 0.05) * (d + dr), pr]);
+    }
+    // 가장자리 뭉게(울퉁불퉁한 윤곽)
+    for (let j = 0; j < 12; j++) {
+      const ang = (j / 12) * Math.PI * 2 + T * 0.05 + seed;
+      const pr = R * (0.2 + 0.04 * Math.sin(T * 1.4 + j * 2.1));
+      puffs.push([x + Math.cos(ang) * R * 0.8, y + Math.sin(ang) * R * 0.8, pr]);
+    }
+    for (const [px, py, pr] of puffs) g.circle(px + pr * 0.1, py + pr * 0.22, pr).fill({ color: 0x5a4a10, alpha: 0.085 * k });
+    for (const [px, py, pr] of puffs) g.circle(px, py, pr * 0.9).fill({ color: 0xe0cc6a, alpha: 0.12 * k });
+    for (const [px, py, pr] of puffs) g.circle(px - pr * 0.22, py - pr * 0.3, pr * 0.52).fill({ color: 0xfffad0, alpha: 0.13 * k });
+    for (const [px, py, pr] of puffs) g.circle(px - pr * 0.3, py - pr * 0.4, pr * 0.22).fill({ color: 0xffffff, alpha: 0.1 * k });
   }
 
   /** 텍스처 효과 하나(커지며 사라짐, 가산 합성) */
@@ -2974,7 +3257,7 @@ export class GameRenderer {
 
     this.playerFam = player ? player.family : null;
     this.playerLv = player ? player.level : 1;
-    this.drawZones(frame.zones, frame.playerId);
+    this.drawZones(frame.zones, frame.playerId, player);
     this.drawTeles(frame.teles, frame.playerId, frame.snakes);
     this.drawFoods(frame.foods, player && player.alive ? player.family : null);
     this.drawRings(frame.rings);
@@ -3029,9 +3312,12 @@ export class GameRenderer {
     }
   }
 
-  private drawZones(zones: ZoneView[], playerId: number) {
+  private drawZones(zones: ZoneView[], playerId: number, player?: FrameSnake) {
     const g = this.zoneGfx;
     g.clear();
+    this.cloudGfx.clear();
+    this.hazeGfx.clear();
+    let haze = 0;
     const T = this.time;
     for (const z of zones) {
       if (!this.isNear(z.x, z.y)) continue;
@@ -3051,14 +3337,12 @@ export class GameRenderer {
           break;
         }
         case 'itchcloud': {
-          // 독가루 안개: 누런 구름이 일렁인다
-          for (let i = 0; i < 9; i++) {
-            const a = (i / 9) * Math.PI * 2 + T * 0.3;
-            const rr = z.r * (0.4 + 0.1 * Math.sin(T * 1.3 + i));
-            g.circle(z.x + Math.cos(a) * z.r * 0.48, z.y + Math.sin(a) * z.r * 0.48, rr).fill({ color: i % 2 ? 0xd8c060 : 0xb89a40, alpha: 0.13 * k });
-          }
-          g.circle(z.x, z.y, z.r).stroke({ width: 3, color: mine ? 0xffe880 : 0xb89a40, alpha: 0.45 * k });
-          if (Math.random() < 0.35) this.spawnParticle(z.x + (Math.random() - 0.5) * z.r * 1.5, z.y + (Math.random() - 0.5) * z.r * 1.5, 0xe8d070, 14, 1, 0.5);
+          // 독가루 구름: 땅엔 옅은 그늘, 몸 위로는 뭉게뭉게 떠 있는 반투명 구름(안에 들면 화면도 누렇게)
+          g.circle(z.x, z.y, z.r).fill({ color: 0x8a7a30, alpha: 0.1 * k }).stroke({ width: 2, color: mine ? 0xffe880 : 0xb89a40, alpha: 0.3 * k });
+          this.poisonCloud(z.x, z.y, z.r, k, (z.x * 0.013 + z.y * 0.007) % 6.28);
+          if (Math.random() < 0.5) this.spawnBit('puff', z.x + (Math.random() - 0.5) * z.r * 1.4, z.y + (Math.random() - 0.5) * z.r * 1.4, 0xe8d070, 10, 1.4, 0.9);
+          if (Math.random() < 0.4) this.spawnParticle(z.x + (Math.random() - 0.5) * z.r * 1.5, z.y + (Math.random() - 0.5) * z.r * 1.5, 0xfff080, 14, 1, 0.5);
+          if (!mine && player && player.alive && player.segs.length >= 2 && Math.hypot(player.segs[0] - z.x, player.segs[1] - z.y) < z.r) haze = Math.max(haze, k);
           break;
         }
         case 'web':
@@ -3221,6 +3505,17 @@ export class GameRenderer {
         }
       }
     }
+    if (haze > 0) {
+      // 구름 안: 화면 전체가 누런 독가루로 뿌옇고 가장자리가 더 짙다
+      const W = this.app.screen.width, H = this.app.screen.height, T = this.time, hg = this.hazeGfx;
+      hg.rect(0, 0, W, H).fill({ color: 0xc8b040, alpha: 0.16 * haze });
+      for (let j = 0; j < 4; j++) hg.rect(0, 0, W, H).stroke({ width: 60 + j * 70, color: 0xa89030, alpha: 0.07 * haze });
+      const M = Math.max(W, H);
+      for (let j = 0; j < 10; j++) {
+        const ang = j * 0.628 + T * 0.08, rr = M * (0.16 + 0.04 * Math.sin(T * 0.9 + j));
+        hg.circle(W / 2 + Math.cos(ang) * M * 0.55, H / 2 + Math.sin(ang) * M * 0.5, rr).fill({ color: 0xe0cc70, alpha: 0.08 * haze });
+      }
+    }
   }
 
   /** 기술 예고(필살기): 내 것은 계열 색, 남의 것은 빨강 */
@@ -3368,6 +3663,25 @@ export class GameRenderer {
           if (Math.random() < 0.9) {
             const ang = Math.random() * Math.PI * 2;
             this.spawnBit('petal', hx + Math.cos(ang) * a.r, hy + Math.sin(ang) * a.r, Math.random() < 0.5 ? a.col : 0xffe0f0, a.r * 0.9, 1, 0.8, ang + Math.PI + 0.6, 0.2);
+          }
+        } else if (a.kind === 'plates') {
+          // 장수 갑옷: 두꺼운 금속판 넷이 몸을 감싸고 천천히 돈다(판마다 리벳·빛이 스친다)
+          const R0 = a.r * 0.7, R1 = a.r, spin = this.time * 0.9, h = 0.6;
+          g.circle(hx, hy, R1 + 6).fill({ color: 0xb8c0d8, alpha: 0.1 * k });
+          for (let j = 0; j < 4; j++) {
+            const m = spin + (j * Math.PI) / 2;
+            const pts: number[] = [];
+            for (let i = 0; i <= 8; i++) pts.push(hx + Math.cos(m - h + (2 * h * i) / 8) * R1, hy + Math.sin(m - h + (2 * h * i) / 8) * R1);
+            for (let i = 8; i >= 0; i--) pts.push(hx + Math.cos(m - h + (2 * h * i) / 8) * R0, hy + Math.sin(m - h + (2 * h * i) / 8) * R0);
+            g.poly(pts).fill({ color: 0x7a8098, alpha: 0.95 * k }).stroke({ width: 4, color: 0x22263a, alpha: k });
+            g.moveTo(hx + Math.cos(m - h + 0.06) * (R1 - 6), hy + Math.sin(m - h + 0.06) * (R1 - 6)).arc(hx, hy, R1 - 6, m - h + 0.06, m + h - 0.06).stroke({ width: 4, color: 0xe8ecff, alpha: 0.85 * k });
+            const Rm = (R0 + R1) / 2 + 2;
+            for (const off of [-0.38, 0, 0.38]) g.circle(hx + Math.cos(m + off) * Rm, hy + Math.sin(m + off) * Rm, 3.6).fill({ color: 0xd8dce8, alpha: k }).stroke({ width: 1.5, color: 0x22263a, alpha: k });
+            const gl = (((this.time * 1.2 + j * 0.3) % 1.8) / 1.8) * 2 - 0.5;
+            if (gl >= 0 && gl <= 1) {
+              const t = m - h + 2 * h * gl;
+              g.moveTo(hx + Math.cos(t) * R0, hy + Math.sin(t) * R0).lineTo(hx + Math.cos(t) * R1, hy + Math.sin(t) * R1).stroke({ width: 7, color: 0xffffff, alpha: 0.75 * k });
+            }
           }
         } else if (a.kind === 'compound') {
           g.circle(hx, hy, a.r + 10 * Math.sin(this.time * 6)).stroke({ width: 2.5, color: a.col, alpha: 0.6 * k });
@@ -4464,6 +4778,17 @@ export class GameRenderer {
         continue;
       }
       sh.draw(sg, sh.life / sh.max);
+    }
+    const cg = this.crackGfx;
+    cg.clear();
+    for (let i = this.grounds.length - 1; i >= 0; i--) {
+      const sh = this.grounds[i];
+      sh.life -= dt;
+      if (sh.life <= 0) {
+        this.grounds.splice(i, 1);
+        continue;
+      }
+      sh.draw(cg, sh.life / sh.max);
     }
     for (let i = this.popups.length - 1; i >= 0; i--) {
       const p = this.popups[i];
