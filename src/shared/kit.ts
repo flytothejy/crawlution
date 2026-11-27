@@ -79,6 +79,21 @@ export const NEW_SKILLS: Record<string, { id: string; ai: AiKind; range: number;
   '번개 찌르기': { id: 'blinkstab', ai: 'aoe', range: 360, ult: true },
   '꽃밭 유혹': { id: 'bloom', ai: 'aoe', range: 240, ult: true },
   '유령 처형': { id: 'reap', ai: 'target', range: 460, ult: true },
+  // 딱정벌레
+  '하늘 던지기': { id: 'hurl', ai: 'target', range: 240, ult: true },
+  '장수 갑옷': { id: 'ironshell', ai: 'aoe', range: 200, ult: true },
+  '톱니 연쇄 던지기': { id: 'chainthrow', ai: 'target', range: 230, ult: true },
+  '반딧불 연쇄 섬광': { id: 'fireflies', ai: 'target', range: 320, ult: true },
+  // 잠자리
+  '영역 선포': { id: 'territory', ai: 'aoe', range: 290, ult: true },
+  '노을 맴돌이': { id: 'sunset', ai: 'target', range: 360, ult: true },
+  '실바늘 관통': { id: 'needle', ai: 'aoe', range: 260, ult: true },
+  '썰물 밀물': { id: 'tide', ai: 'aoe', range: 360, ult: true },
+  // 나비
+  '대이동': { id: 'migrate', ai: 'line', range: 560, ult: true },
+  '거대한 눈': { id: 'bigeye', ai: 'aoe', range: 300, ult: true },
+  '푸른 빛줄기': { id: 'prism', ai: 'cone', range: 480, ult: true },
+  '독가루 안개': { id: 'itchcloud', ai: 'aoe', range: 260, ult: true },
 };
 
 function toKitSkill(slot: V3Slot, v: V3Skill): KitSkill {

@@ -20,7 +20,8 @@ const opts = (species: string, extra: Partial<GameOpts> = {}): GameOpts => ({ po
   check('40종 모두 4칸 기술이 실제 구현에 연결됨', V3_ROSTER.every((id) => !!kitOf(id)));
   const names = new Set<string>();
   for (const sp of V3_SPECIES) for (const sl of ['atk', 'def', 'spc', 'ult'] as const) names.add(v3Kit(sp)[sl].name);
-  check('서로 다른 기술 64개', names.size === 64, `${names.size}개`);
+  const uniqUlt = V3_SPECIES.filter((sp) => sp.ult).length;
+  check('서로 다른 기술 64개 + 종 고유 필살기', names.size === 64 + uniqUlt, `${names.size}개(고유 필살기 ${uniqUlt})`);
 }
 
 // 1) 한 판 끝까지(3판): 봇 20마리
@@ -67,7 +68,7 @@ const statusSeen = new Set<string>();
     const kit = kitOf(sp.id)!;
     for (const sl of [...KIT_SLOTS, 'ult'] as const) {
       const sk = kit[sl];
-      if (sl !== 'atk' && sp.swap !== sl && !sp.base) continue; // 계열 기본 칸은 대표 종에서만
+      if (sl !== 'atk' && sp.swap !== sl && !sp.base && !(sl === 'ult' && sp.ult)) continue; // 계열 기본 칸은 대표 종에서만(종 고유 필살기는 그 종에서)
       const sim = new Simulation(7 + sp.id.length, '나', opts(sp.id, { bots: 3, startLevel: 10 }));
       sim.enemies.update = () => {};
       const me = sim.snakes[0];

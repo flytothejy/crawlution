@@ -24,6 +24,12 @@ export function famColor(f: FamilyId | null | undefined, k: 1 | 2 = 1): number {
 /** 흙먼지 색(땅 색에 가까운 베이지) */
 const DUST = 0xc9b48e;
 /** 몸 동작 층이 맡는 기술(예전 도형 연출을 줄인다) */
+/** 종 고유 필살기 색(fx의 wk) */
+const WK_COL: Record<string, number> = {
+  ghost: 0xb8a8ff, herc: 0xd8a040, kingstag: 0xc8c8d8, saw: 0xe8a850, firefly: 0xd8ff6a,
+  emperor: 0x5ab8ff, sunset: 0xff6a3a, damsel: 0x8affff, tide: 0x4ab8ff,
+  monarch: 0xff9a2a, owl: 0xc8a070, morpho: 0x3a8aff, tussock: 0xd8c060,
+};
 const DRY = [0xb07a3a, 0xc89a5a, 0x8a5a2a, 0xd8b070, 0x9a6a3a];
 const MOTION_KINDS = new Set<string>(['antrun', 'spiderlings', 'stain', 'legwhip', 'aimline', 'throw', 'grab', 'sweep', 'combo', 'stab', 'threat', 'camo', 'playdead', 'baitset', 'charge', 'push', 'lift', 'hop', 'thud', 'land', 'dive', 'snatch', 'shock', 'windup', 'lifted', 'scissor', 'circle', 'compound', 'roll', 'trizone']);
 const BW_W = 130, BW_H = 200, BW_AX = 0.04, BW_AY = 0.52;
@@ -2192,8 +2198,7 @@ export class GameRenderer {
       case 'blink': {
         // 번개 궤적: 출발점 → 도착점을 지그재그로 잇고 잔상
         if (e.x1 === undefined || e.y1 === undefined) break;
-        const ghost = e.wk === 'ghost';
-        const c = ghost ? 0xb8a8ff : P(0, 0xe8d890), x0 = e.x1, y0 = e.y1;
+        const c = e.wk ? (WK_COL[e.wk] ?? P(0, 0xe8d890)) : P(0, 0xe8d890), x0 = e.x1, y0 = e.y1;
         const dx = e.x - x0, dy = e.y - y0, L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
         const pts: number[] = [x0, y0];
         for (let k = 1; k < 6; k++) {
@@ -2233,6 +2238,97 @@ export class GameRenderer {
         for (let i = 0; i < 40; i++) this.spawnBit('petal', e.x, e.y, [c, 0xffe0f0, 0xffffff][i % 3], 160 + rnd() * 200, 0.8, 0.9 + rnd() * 0.5, rnd() * Math.PI * 2, Math.PI);
         if (near) this.screenFlash = Math.max(this.screenFlash, 0.3);
         hit(13, 0.07);
+        break;
+      }
+      case 'burst': {
+        // 종 고유 필살기 공통 터짐: 색은 wk(종)로
+        const c = WK_COL[e.wk ?? ''] ?? 0xffffff;
+        this.aoeFx(e.x, e.y, r, c, !!e.awake);
+        this.ringFx(e.x, e.y, r, 0xffffff);
+        for (let i = 0; i < 18; i++) this.spawnParticle(e.x, e.y, i % 3 ? c : 0xffffff, r * (0.6 + rnd() * 0.6), 0.5, 0.7);
+        if (e.awake && near) this.screenFlash = Math.max(this.screenFlash, 0.25);
+        hit(e.awake ? 12 : 8, e.awake ? 0.06 : 0.04);
+        break;
+      }
+      case 'beam': {
+        // 긴 띠: 나비 떼 강물(오래)·빛줄기(짧게)
+        if (e.x1 === undefined || e.y1 === undefined) break;
+        const c = WK_COL[e.wk ?? ''] ?? 0xffffff, x0 = e.x1, y0 = e.y1, x1 = e.x, y1 = e.y, w = r || 40, dur = e.dur ?? 0.3;
+        this.addShape((g, q) => {
+          const k = Math.min(1, q * 3);
+          g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: w, color: c, alpha: 0.22 * k, cap: 'round' });
+          g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: w * 0.35, color: c, alpha: 0.55 * k, cap: 'round' });
+          g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: Math.max(2, w * 0.08), color: 0xffffff, alpha: 0.9 * k, cap: 'round' });
+        }, dur);
+        if (e.wk === 'monarch') {
+          const n = 26;
+          for (let i = 0; i < n; i++)
+            later(rnd() * dur * 0.8, () => {
+              const t = rnd() * 0.3, jx = (rnd() - 0.5) * w * 0.8;
+              const nx = -Math.sin(a), ny = Math.cos(a);
+              this.spawnBit('petal', x0 + (x1 - x0) * t + nx * jx, y0 + (y1 - y0) * t + ny * jx, i % 2 ? c : 0x2a1a0a, 380, 1.2, 1, a, 0.15);
+            });
+        }
+        hit(e.wk === 'morpho' ? 5 : 3, 0.02);
+        break;
+      }
+      case 'territory': {
+        // 바닥에 남는 고리(영역·맴돌이): dur 동안
+        const c = WK_COL[e.wk ?? ''] ?? 0xffffff, x0 = e.x, y0 = e.y, dur = e.dur ?? 3;
+        this.ringFx(x0, y0, r, c);
+        this.addShape((g, q) => {
+          const k = Math.min(1, q * 6);
+          const t = this.time;
+          g.circle(x0, y0, r).fill({ color: c, alpha: 0.06 * k }).stroke({ width: 4, color: c, alpha: 0.6 * k });
+          for (let j = 0; j < 6; j++) {
+            const ang = t * 1.2 + (j / 6) * Math.PI * 2;
+            g.moveTo(x0 + Math.cos(ang) * r, y0 + Math.sin(ang) * r).arc(x0, y0, r, ang, ang + 0.35).stroke({ width: 8, color: 0xffffff, alpha: 0.5 * k });
+          }
+        }, dur);
+        hit(4, 0.02);
+        break;
+      }
+      case 'tide': {
+        // 물결: n=1 퍼짐, n=-1 오므라듦
+        const c = WK_COL.tide, x0 = e.x, y0 = e.y, out = (e.n ?? 1) > 0;
+        for (let j = 0; j < 3; j++)
+          later(j * 0.08, () =>
+            this.addShape((g, q) => {
+              const p = out ? 1 - q : q;
+              const rr = r * (0.2 + 0.8 * p);
+              g.circle(x0, y0, rr).stroke({ width: 14 - j * 3, color: j === 1 ? 0xffffff : c, alpha: 0.75 * q });
+            }, 0.55),
+          );
+        for (let i = 0; i < 30; i++) {
+          const aa = (i / 30) * Math.PI * 2;
+          if (out) this.spawnParticle(x0 + Math.cos(aa) * 30, y0 + Math.sin(aa) * 30, c, r * 0.9, 0.5, 0.7);
+          else this.spawnParticle(x0 + Math.cos(aa) * r, y0 + Math.sin(aa) * r, c, 30, 0.5, 0.7);
+        }
+        hit(out ? 9 : 12, 0.05);
+        break;
+      }
+      case 'bigeye': {
+        // 땅에 떠오르는 거대한 눈알 무늬
+        const x0 = e.x, y0 = e.y, dur = e.dur ?? 1.8;
+        this.addShape((g, q) => {
+          const open = Math.min(1, (1 - q) * 6) * Math.min(1, q * 5);
+          const blink = q < 0.12 ? q / 0.12 : 1;
+          const ry = r * 0.55 * open * blink;
+          g.ellipse(x0, y0, r, Math.max(2, ry)).fill({ color: 0xf0e0b0, alpha: 0.35 * open }).stroke({ width: 6, color: 0x3a2a1a, alpha: 0.8 * open });
+          g.circle(x0, y0, Math.min(r * 0.42, ry)).fill({ color: 0x8a5a2a, alpha: 0.7 * open });
+          g.circle(x0, y0, Math.min(r * 0.2, ry * 0.5)).fill({ color: 0x1a1008, alpha: 0.9 * open });
+          g.circle(x0 - r * 0.12, y0 - r * 0.1, Math.min(r * 0.07, ry * 0.2)).fill({ color: 0xffffff, alpha: 0.9 * open });
+        }, dur);
+        if (near) this.screenFlash = Math.max(this.screenFlash, 0.2);
+        hit(10, 0.05);
+        break;
+      }
+      case 'armor': {
+        // 몸을 감싸는 고리(장수 갑옷·실바늘)
+        const c = WK_COL[e.wk ?? ''] ?? 0xffffff;
+        this.ringFx(e.x, e.y, r, c);
+        this.addAura(e.snake, 'stance', e.dur ?? 3, r, c);
+        hit(5, 0.02);
         break;
       }
     }
@@ -2952,6 +3048,17 @@ export class GameRenderer {
           g.circle(z.x, z.y, z.r * 0.6).fill({ color: 0xb8c860, alpha: 0.18 * k });
           g.circle(z.x, z.y, z.r).stroke({ width: 3, color: mine ? 0xd8e870 : 0x7a8a2a, alpha: 0.4 * k });
           if (Math.random() < 0.2) this.spawnParticle(z.x + (Math.random() - 0.5) * z.r * 1.4, z.y + (Math.random() - 0.5) * z.r * 1.4, 0xa8b850, 12, 1, 0.6);
+          break;
+        }
+        case 'itchcloud': {
+          // 독가루 안개: 누런 구름이 일렁인다
+          for (let i = 0; i < 9; i++) {
+            const a = (i / 9) * Math.PI * 2 + T * 0.3;
+            const rr = z.r * (0.4 + 0.1 * Math.sin(T * 1.3 + i));
+            g.circle(z.x + Math.cos(a) * z.r * 0.48, z.y + Math.sin(a) * z.r * 0.48, rr).fill({ color: i % 2 ? 0xd8c060 : 0xb89a40, alpha: 0.13 * k });
+          }
+          g.circle(z.x, z.y, z.r).stroke({ width: 3, color: mine ? 0xffe880 : 0xb89a40, alpha: 0.45 * k });
+          if (Math.random() < 0.35) this.spawnParticle(z.x + (Math.random() - 0.5) * z.r * 1.5, z.y + (Math.random() - 0.5) * z.r * 1.5, 0xe8d070, 14, 1, 0.5);
           break;
         }
         case 'web':

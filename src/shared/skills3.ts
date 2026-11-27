@@ -500,6 +500,342 @@ export function castNewUlt(sim: Simulation, s: Snake, id: string) {
   const cap = new Map<number, number>();
   s.ultMap = cap;
   switch (id) {
+    // ---------- 딱정벌레 계열 ----------
+    case 'hurl': {
+      // 헤라클레스장수풍뎅이 '하늘 던지기': 앞의 적을 뿔로 집어 들고 뛰어올라(1초, 둘 다 공중) 앞에 내리꽂는다.
+      // 내리꽂힌 적은 큰 피해 + 기절, 떨어진 자리 둘레는 충격파(각성: 충격파가 더 넓고 세다)
+      let o: Snake | null = null, bd = 260;
+      for (const e of sim.snakes) {
+        if (e.id === s.id || !sim.hittable(e) || e.deadT > 0 || !e.alive) continue;
+        const d = dist(e.x, e.y, s.x, s.y);
+        if (d < bd) ((bd = d), (o = e));
+      }
+      sim.fx('burst', s, s.x, s.y, { r: 90, wk: 'herc' });
+      s.flyT = Math.max(s.flyT, 1);
+      s.skyT = Math.max(s.skyT, 1);
+      if (!o) return;
+      const t = o;
+      sim.stun(t, 1.4);
+      t.flyT = Math.max(t.flyT, 1); // 들려 있는 동안 다른 공격도 안 맞음
+      sim.shove(t, datan2(s.y - t.y, s.x - t.x), Math.max(0, dist(t.x, t.y, s.x, s.y) - s.r - t.r - 6));
+      hitFx(sim, t.x, t.y, 'stun');
+      sim.later(1, () => {
+        if (!s.alive) return;
+        const lx = s.x + dcos(s.angle) * (s.r + t.r + 40), ly = s.y + dsin(s.angle) * (s.r + t.r + 40);
+        if (t.alive) {
+          sim.shove(t, datan2(ly - t.y, lx - t.x), dist(lx, ly, t.x, t.y));
+          t.flyT = 0;
+          sim.deal(s, t, B * 2.0, 'ult', t.x, t.y, 'ult', cap);
+          sim.stun(t, 0.6);
+          sim.hitstop(s, t, 0.14);
+        }
+        const R = aw ? 170 : 130;
+        sim.fx('burst', s, lx, ly, { r: R, wk: 'herc', awake: true });
+        sim.circle(s, lx, ly, R, (e, x, y) => {
+          if (e === t) return;
+          sim.deal(s, e, B * (aw ? 1.0 : 0.7), 'ult', x, y, 'ult', cap);
+          sim.knock(e, datan2(y - ly, x - lx), 90);
+          hitFx(sim, x, y, 'push');
+        });
+      });
+      return;
+    }
+    case 'ironshell': {
+      // 왕사슴벌레 '장수 갑옷': 4초 동안 받는 피해 −60%, 받은 피해를 모아 두었다가
+      // 끝날 때 둘레 충격파로 되돌린다(모은 피해의 150%, 상한 있음). 각성: 충격파에 기절 0.8초
+      const T = 4;
+      s.armorT = T;
+      s.armorStore = 0;
+      s.reduceT = Math.max(s.reduceT, T);
+      s.reduceMul = Math.min(s.reduceMul, 0.4);
+      pose(sim, s, 'brace', T);
+      sim.fx('armor', s, s.x, s.y, { r: 110, dur: T, wk: 'kingstag' });
+      sim.later(T, () => {
+        if (!s.alive) return;
+        const stored = s.armorStore;
+        s.armorT = 0;
+        const R = 200;
+        sim.fx('burst', s, s.x, s.y, { r: R, wk: 'kingstag', awake: stored > s.maxHp * 0.15 });
+        sim.circle(s, s.x, s.y, R, (o, x, y) => {
+          sim.deal(s, o, B * 0.8 + Math.min(stored * 1.5, B * 3), 'ult', x, y, 'ult', cap);
+          sim.knock(o, datan2(y - s.y, x - s.x), 110);
+          if (aw) sim.stun(o, 0.8);
+          sim.hitstop(s, o, 0.08);
+          hitFx(sim, x, y, aw ? 'stun' : 'push');
+        });
+      });
+      return;
+    }
+    case 'chainthrow': {
+      // 톱사슴벌레 '톱니 연쇄 던지기': 가까운 적을 집어 다른 적에게 내던지고, 맞은 적을 또 다음 적에게… 3번(각성 4번).
+      // 던져진 적과 맞은 적 모두 피해 + 0.5초 기절. 맞을 적이 없으면 앞으로 멀리 내던진다
+      const n = aw ? 4 : 3;
+      let cur: Snake | null = null, bd = 240;
+      for (const e of sim.snakes) {
+        if (e.id === s.id || !sim.hittable(e) || e.deadT > 0 || !e.alive) continue;
+        const d = dist(e.x, e.y, s.x, s.y);
+        if (d < bd) ((bd = d), (cur = e));
+      }
+      sim.fx('burst', s, s.x, s.y, { r: 80, wk: 'saw' });
+      if (!cur) return;
+      const used = new Set<number>([cur.id]);
+      let a = cur;
+      for (let k = 0; k < n; k++)
+        sim.later(0.15 + k * 0.35, () => {
+          if (!s.alive || !a.alive) return;
+          let b: Snake | null = null, bb = 440;
+          for (const e of sim.snakes) {
+            if (e.id === s.id || used.has(e.id) || !sim.hittable(e) || e.deadT > 0 || !e.alive) continue;
+            const d = dist(e.x, e.y, a.x, a.y);
+            if (d < bb) ((bb = d), (b = e));
+          }
+          const x0 = a.x, y0 = a.y;
+          if (!b) {
+            sim.shove(a, s.angle, 260);
+            sim.fx('blink', s, a.x, a.y, { x1: x0, y1: y0, angle: s.angle, wk: 'saw' });
+            sim.deal(s, a, B * 0.9, 'ult', a.x, a.y, 'ult', cap);
+            sim.stun(a, 0.5);
+            return;
+          }
+          const ang = datan2(b.y - a.y, a.x === b.x && a.y === b.y ? 1 : b.x - a.x);
+          sim.shove(a, ang, Math.max(0, bb - a.r - b.r));
+          sim.fx('blink', s, a.x, a.y, { x1: x0, y1: y0, angle: ang, wk: 'saw' });
+          for (const e of [a, b]) {
+            sim.deal(s, e, B * 0.9, 'ult', e.x, e.y, 'ult', cap);
+            sim.stun(e, 0.5);
+            hitFx(sim, e.x, e.y, 'stun');
+          }
+          sim.hitstop(s, b, 0.08);
+          used.add(b.id);
+          a = b;
+        });
+      return;
+    }
+    case 'fireflies': {
+      // 애반딧불이 '반딧불 연쇄 섬광': 빛이 적에서 적으로 6번(각성 9번) 튀며, 맞은 적은 피해 + 1.5초 눈부심 + 3초 표식
+      const n = aw ? 9 : 6;
+      const used = new Set<number>();
+      let px = s.x, py = s.y, reach = 320;
+      for (let k = 0; k < n; k++)
+        sim.later(0.05 + k * 0.12, () => {
+          if (!s.alive) return;
+          let b: Snake | null = null, bb = reach;
+          for (const e of sim.snakes) {
+            if (e.id === s.id || used.has(e.id) || !sim.hittable(e) || e.deadT > 0 || !e.alive) continue;
+            const d = dist(e.x, e.y, px, py);
+            if (d < bb) ((bb = d), (b = e));
+          }
+          if (!b) return;
+          used.add(b.id);
+          sim.fx('blink', s, b.x, b.y, { x1: px, y1: py, angle: datan2(b.y - py, b.x - px), wk: 'firefly' });
+          sim.deal(s, b, B * Math.max(0.5, 1.0 - 0.08 * k), 'ult', b.x, b.y, 'ult', cap);
+          sim.blind(b, 1.5);
+          sim.markOn(b, 3);
+          hitFx(sim, b.x, b.y, 'blind');
+          px = b.x;
+          py = b.y;
+          reach = 280;
+        });
+      return;
+    }
+    // ---------- 잠자리 계열 ----------
+    case 'territory': {
+      // 왕잠자리 '영역 선포': 5초 동안 내 둘레(나를 따라다님)가 영역이 된다. 나는 빨라지고(+30%) 받는 피해 −50%,
+      // 안의 적은 표식(받는 피해 +20%)·느려짐, 1초마다 가장 가까운 적에게 순찰 급습(각성: 0.6초마다)
+      // 영역은 나를 따라 움직인다(순찰 비행)
+      const R = 290, T = 5;
+      let cx = s.x, cy = s.y;
+      sim.fx('armor', s, cx, cy, { r: R, dur: T, wk: 'emperor' });
+      const every = aw ? 0.5 : 0.75;
+      let acc = 0;
+      for (let k = 1; k <= T * 4; k++)
+        sim.later(k * 0.25, () => {
+          if (!s.alive) return;
+          ((cx = s.x), (cy = s.y));
+          if (dist(s.x, s.y, cx, cy) < R) {
+            // 내 영역 안: 빠르고 단단하다
+            s.rallyT = Math.max(s.rallyT, 0.3);
+            s.reduceT = Math.max(s.reduceT, 0.3);
+            s.reduceMul = Math.min(s.reduceMul, 0.5);
+          }
+          sim.circle(s, cx, cy, R, (o) => (sim.markOn(o, 0.4), sim.slow(o, 0.3, 0.8)));
+          acc += 0.25;
+          if (acc + 1e-6 < every) return;
+          acc = 0;
+          let b: Snake | null = null, bb = Infinity;
+          for (const e of sim.snakes) {
+            if (e.id === s.id || !sim.hittable(e) || e.deadT > 0 || !e.alive || dist(e.x, e.y, cx, cy) > R) continue;
+            const d = dist(e.x, e.y, s.x, s.y);
+            if (d < bb) ((bb = d), (b = e));
+          }
+          if (!b || bb > 420) return;
+          sim.fx('blink', s, b.x, b.y, { x1: s.x, y1: s.y, angle: datan2(b.y - s.y, b.x - s.x), wk: 'emperor' });
+          sim.deal(s, b, B * 0.7, 'ult', b.x, b.y, 'ult', cap);
+          hitFx(sim, b.x, b.y, 'cut');
+        });
+      return;
+    }
+    case 'sunset': {
+      // 고추잠자리 '노을 맴돌이': 가까운 적 둘레를 3초 동안 크게 맴돌며(날아서 맞지 않음)
+      // 0.25초마다 둘레 안의 적 하나를 스치듯 벤다(각성: 0.18초마다)
+      let c: Snake | null = null, bd = 380;
+      for (const e of sim.snakes) {
+        if (e.id === s.id || !sim.hittable(e) || e.deadT > 0 || !e.alive) continue;
+        const d = dist(e.x, e.y, s.x, s.y);
+        if (d < bd) ((bd = d), (c = e));
+      }
+      const T = 3, R = 150, gap = aw ? 0.18 : 0.25;
+      let cx = c ? c.x : s.x + dcos(s.angle) * 150, cy = c ? c.y : s.y + dsin(s.angle) * 150;
+      let th = datan2(s.y - cy, s.x - cx);
+      s.flyT = Math.max(s.flyT, T);
+      s.skyT = Math.max(s.skyT, T);
+      sim.fx('territory', s, cx, cy, { r: R, dur: T, wk: 'sunset' });
+      const steps = Math.round(T / 0.1);
+      let acc = 0, rr = 0;
+      for (let k = 1; k <= steps; k++)
+        sim.later(k * 0.1, () => {
+          if (!s.alive) return;
+          if (c && c.alive && c.deadT <= 0) ((cx = c.x), (cy = c.y));
+          th += 0.42;
+          const tx = cx + dcos(th) * R, ty = cy + dsin(th) * R;
+          sim.shove(s, datan2(ty - s.y, tx - s.x), dist(tx, ty, s.x, s.y));
+          s.angle = th + PI / 2;
+          acc += 0.1;
+          if (acc + 1e-6 < gap) return;
+          acc = 0;
+          const near: Snake[] = [];
+          for (const e of sim.snakes) if (e.id !== s.id && sim.hittable(e) && e.alive && e.deadT <= 0 && dist(e.x, e.y, cx, cy) < R + 60) near.push(e);
+          if (!near.length) return;
+          const e = near[rr++ % near.length];
+          sim.fx('blink', s, e.x, e.y, { x1: s.x, y1: s.y, angle: datan2(e.y - s.y, e.x - s.x), wk: 'sunset' });
+          sim.deal(s, e, B * 0.32, 'ult', e.x, e.y, 'ult', cap);
+          hitFx(sim, e.x, e.y, 'cut');
+        });
+      return;
+    }
+    case 'needle': {
+      // 실잠자리 '실바늘 관통': 3초 동안 무적 + 빠르게 날며, 몸으로 뚫고 지나가는 적마다 한 번씩 베고 1초 느리게.
+      // 각성: 3.2초, 지나간 적에 표식
+      const T = aw ? 3.6 : 3;
+      s.invulnT = Math.max(s.invulnT, T);
+      s.rallyT = Math.max(s.rallyT, T);
+      sim.fx('armor', s, s.x, s.y, { r: 60, dur: T, wk: 'damsel' });
+      const hit = new Set<number>();
+      for (let k = 1; k <= Math.round(T / 0.1); k++)
+        sim.later(k * 0.1, () => {
+          if (!s.alive) return;
+          for (const e of sim.snakes) {
+            if (e.id === s.id || hit.has(e.id) || !sim.hittable(e) || e.deadT > 0 || !e.alive) continue;
+            let near = false;
+            for (let i = 0; i < e.segN && !near; i += 2) if (dist(e.segs[i * 2], e.segs[i * 2 + 1], s.x, s.y) < s.r + e.r + 26) near = true;
+            if (!near) continue;
+            hit.add(e.id);
+            sim.fx('blink', s, s.x + dcos(s.angle) * 40, s.y + dsin(s.angle) * 40, { x1: s.x - dcos(s.angle) * 60, y1: s.y - dsin(s.angle) * 60, angle: s.angle, wk: 'damsel' });
+            sim.deal(s, e, B * 1.3, 'ult', e.x, e.y, 'ult', cap);
+            sim.slow(e, 1, 0.55);
+            if (aw) sim.markOn(e, 3);
+            sim.hitstop(s, e, 0.04);
+            hitFx(sim, e.x, e.y, 'slow');
+          }
+        });
+      return;
+    }
+    case 'tide': {
+      // 물잠자리 '썰물 밀물': 넓게 물을 끌어당겨 적을 내 앞으로 모으고 0.8초 기절(각성: 1.2초),
+      // 1초 뒤 큰 물결로 밀어내며 피해 + 느려짐. 끝나면 적은 멀리, 나는 안전하게(치고 빠지기)
+      const R1 = 400, R2 = 230;
+      s.flyT = Math.max(s.flyT, 1.4); // 물 위로 떠서 맞지 않음
+      sim.fx('tide', s, s.x, s.y, { r: R1, wk: 'tide', n: -1 });
+      sim.circle(s, s.x, s.y, R1, (o, x, y) => {
+        sim.pullTo(o, s.x, s.y, 200);
+        sim.deal(s, o, B * 0.6, 'ult', x, y, 'ult', cap);
+        sim.stun(o, aw ? 1.2 : 0.8);
+        hitFx(sim, x, y, 'stun');
+      });
+      sim.later(1, () => {
+        if (!s.alive) return;
+        sim.fx('tide', s, s.x, s.y, { r: R2, wk: 'tide', n: 1 });
+        sim.circle(s, s.x, s.y, R2, (o, x, y) => {
+          sim.deal(s, o, B * 1.3, 'ult', x, y, 'ult', cap);
+          sim.knock(o, datan2(y - s.y, x - s.x), 220);
+          sim.slow(o, 1.5, 0.6);
+          sim.hitstop(s, o, 0.06);
+          hitFx(sim, x, y, 'push');
+        });
+      });
+      return;
+    }
+    // ---------- 나비 계열 ----------
+    case 'migrate': {
+      // 제왕나비 '대이동': 바라보는 쪽으로 나비 떼 강물이 2초 동안 흐른다(길이 620, 폭 150).
+      // 안의 적은 흐름 따라 떠밀리며 조금씩 피해 + 쓴 독(중독). 각성: 독 두 배
+      const dir = aimAt(sim, s, 600), x0 = s.x, y0 = s.y, L = 620, W = 150;
+      sim.fx('beam', s, x0 + dcos(dir) * L, y0 + dsin(dir) * L, { x1: x0, y1: y0, angle: dir, wk: 'monarch', dur: 2, r: W });
+      for (let k = 0; k < 10; k++)
+        sim.later(0.05 + k * 0.2, () => {
+          if (!s.alive) return;
+          sim.line(s, x0, y0, dir, L, W, 99, (o, x, y) => {
+            sim.knock(o, dir, 45);
+            sim.deal(s, o, B * 0.16, 'ult', x, y, 'ult', cap);
+            sim.poison(s, o, 3, B * (aw ? 0.08 : 0.04));
+            if (k % 3 === 0) hitFx(sim, x, y, 'poison');
+          });
+        });
+      return;
+    }
+    case 'bigeye': {
+      // 올빼미나비 '거대한 눈': 커다란 눈알 무늬가 번쩍 떠서 둘레 적이 1.6초 겁먹어 달아나고 2.2초 눈부심.
+      // 1.6초 뒤 눈을 깜빡이며 둘레 적에게 피해 + 표식(각성: 겁먹음 2.2초)
+      const R = 320;
+      sim.telegraph(s, { shape: 'circle', x: s.x, y: s.y, r: R, angle: 0, len: 0, w: 0 }, () => {
+        sim.fx('bigeye', s, s.x, s.y, { r: R, dur: 1.8 });
+        sim.circle(s, s.x, s.y, R, (o, x, y) => {
+          sim.fear(o, aw ? 2.2 : 1.6);
+          sim.blind(o, 2.2);
+          hitFx(sim, x, y, 'fear');
+        });
+        sim.later(1.6, () => {
+          if (!s.alive) return;
+          sim.fx('burst', s, s.x, s.y, { r: R, wk: 'owl' });
+          sim.circle(s, s.x, s.y, R, (o, x, y) => {
+            sim.deal(s, o, B * 1.1, 'ult', x, y, 'ult', cap);
+            sim.markOn(o, 3);
+            hitFx(sim, x, y, 'cut');
+          });
+        });
+      });
+      return;
+    }
+    case 'prism': {
+      // 모르포나비 '푸른 빛줄기': 앞쪽 120°를 1.2초 동안 쓸고 지나가는 긴 빛줄기(길이 520).
+      // 닿은 적마다 한 번 큰 피해 + 1.2초 눈부심(각성: 두 번 쓸기)
+      const sweeps = aw ? 2 : 1, steps = 8, L = 520;
+      const base = aimAt(sim, s, 500);
+      for (let w = 0; w < sweeps; w++) {
+        const hit = new Set<number>();
+        for (let k = 0; k <= steps; k++)
+          sim.later(w * 1.3 + k * 0.15, () => {
+            if (!s.alive) return;
+            const a = base + (w % 2 ? 1 : -1) * (-1.05 + (2.1 * k) / steps);
+            sim.fx('beam', s, s.x + dcos(a) * L, s.y + dsin(a) * L, { x1: s.x, y1: s.y, angle: a, wk: 'morpho', dur: 0.18, r: 34 });
+            sim.line(s, s.x, s.y, a, L, 60, 99, (o, x, y) => {
+              if (hit.has(o.id)) return;
+              hit.add(o.id);
+              sim.deal(s, o, B * 1.3, 'ult', x, y, 'ult', cap);
+              sim.blind(o, 1.2);
+              hitFx(sim, x, y, 'blind');
+            });
+          });
+      }
+      return;
+    }
+    case 'itchcloud': {
+      // 독나방 '독가루 안개': 큰 독가루 구름(반지름 260, 5초)을 남긴다. 안의 적은 0.5초마다 피해 + 가려움, 가끔 헷갈림.
+      // 각성: 구름이 나를 따라다닌다
+      sim.addZone({ x: s.x, y: s.y, r: 260, kind: 'itchcloud', life: 5, owner: s.id, dps: B * 0.24, mul: 0.6, ult: cap, follow: aw, target: -1 });
+      sim.fx('burst', s, s.x, s.y, { r: 260, wk: 'tussock' });
+      return;
+    }
     // ---------- 사마귀 계열: 종마다 다른 필살기 ----------
     case 'riposte': {
       // 넓적배사마귀 '반격 자세': 2.5초 동안 받는 피해 −50%, 맞을 때마다 그 적을 바로 되벤다.
@@ -729,6 +1065,12 @@ export function zoneTick(sim: Simulation, z: Zone, owner: Snake, tick: boolean) 
       sim.deal(owner, o, z.dps * 0.5, 'skill', o.x, o.y, 'skill', null, false);
       sim.slow(o, 1, z.mul);
       hitFx(sim, o.x, o.y, 'slow');
+    } else if (z.kind === 'itchcloud') {
+      sim.deal(owner, o, z.dps * 0.5, 'ult', o.x, o.y, 'ult', z.ult, false);
+      sim.itch(o, 1.5, z.dps * 0.2, owner);
+      z.acc2 = (z.acc2 ?? 0) + 1;
+      if (z.acc2 % 4 === 0) (sim.confuse(o, z.mul, owner), hitFx(sim, o.x, o.y, 'confuse'));
+      else hitFx(sim, o.x, o.y, 'itch');
     } else if (z.kind === 'bstorm') {
       sim.deal(owner, o, z.dps * 0.5, 'ult', o.x, o.y, 'ult', z.ult, false);
       sim.confuse(o, z.mul, owner);
@@ -838,4 +1180,21 @@ export function riposteHit(sim: Simulation, s: Snake, a: Snake) {
     sim.hitstop(s, a, 0.04);
     hitFx(sim, a.x, a.y, 'cut');
   }), 'ult');
+}
+
+/** 방향형 필살기 조준 보정: 앞쪽(±70°) range 안에 적이 있으면 가장 가까운 적 쪽, 없으면 바라보는 쪽 */
+function aimAt(sim: Simulation, s: Snake, range: number) {
+  let best = s.angle, bd = range;
+  for (const o of sim.snakes) {
+    if (o.id === s.id || !sim.hittable(o) || !o.alive || o.deadT > 0) continue;
+    const d = dist(o.x, o.y, s.x, s.y);
+    if (d >= bd) continue;
+    const a = datan2(o.y - s.y, o.x - s.x);
+    let da = a - s.angle;
+    while (da > PI) da -= 2 * PI;
+    while (da < -PI) da += 2 * PI;
+    if (Math.abs(da) > 1.22) continue;
+    ((bd = d), (best = a));
+  }
+  return best;
 }

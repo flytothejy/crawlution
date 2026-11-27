@@ -235,6 +235,9 @@ export interface Snake {
   counterT: number;
   counterN: number;
   counterCd: number;
+  /** 장수 갑옷(왕사슴벌레 필살기): 받은 피해를 모아 두었다가 끝날 때 충격파로 되돌린다 */
+  armorT: number;
+  armorStore: number;
   skyT: number;
   ambushT: number;
   trailT: number;
@@ -326,6 +329,7 @@ export interface Zone {
   hits: Set<number>;
   ult: Map<number, number> | null; // 필살기 피해 상한 계산
   target: number; // 따라다니는 대상(열 공)
+  acc2?: number; // 장판 자체 세기(독가루 안개 헷갈림 주기)
 }
 
 export interface Proj {
@@ -563,7 +567,7 @@ export class Simulation {
       reduceT: 0, reduceMul: 1, backT: 0, bitterT: 0, curlT: 0, deadT: 0, escapeT: 0,
       grabT: 0, grabTarget: -1, grabKind: '', grabbedBy: -1, kvx: 0, kvy: 0, slideT: 0, slideVx: 0, slideVy: 0,
       nextMul: 1, nextBite: 1, nextBiteT: 0, fangT: 0, critNext: 0,
-      chanT: 0, chanKind: '', chanAcc: 0, chanN: 0, chanHits: new Map(), chanDmg: 0, chanAcc2: 0, grabDmg: 0, grabAcc: 0, ultMap: null, trailHits: new Set(), pushedBy: -1, pushedT: 0, autoCd: 0, whirlT: 0, counterT: 0, counterN: 0, counterCd: 0, skyT: 0, ambushT: 0, trailT: 0, trailAwake: false, lanternT: 0, compoundT: 0,
+      chanT: 0, chanKind: '', chanAcc: 0, chanN: 0, chanHits: new Map(), chanDmg: 0, chanAcc2: 0, grabDmg: 0, grabAcc: 0, ultMap: null, trailHits: new Set(), pushedBy: -1, pushedT: 0, autoCd: 0, whirlT: 0, counterT: 0, counterN: 0, counterCd: 0, armorT: 0, armorStore: 0, skyT: 0, ambushT: 0, trailT: 0, trailAwake: false, lanternT: 0, compoundT: 0,
       decoyT: 0, decoyX: 0, decoyY: 0,
       crouchT: 0, notBoostT: 0, prayArmed: false, braceCd: 0, fierceCd: 0, thinCd: 0, sapCd: 0, buzzCd: 0, longLifeUsed: false, store: 0, pack: 0,
       patrolX: 0, patrolY: 0, patrolT: 0, nestCd: 0, crisisCd: 0, crisisT: 0, alertT: 0, acroT: 0, senseT: 0, sapT: 0,
@@ -721,7 +725,7 @@ export class Simulation {
   private clearStatus(s: Snake) {
     s.rallyT = s.stunT = s.slowT = s.rootT = s.silenceT = s.blindT = s.markT = s.fearT = s.confuseT = s.charmT = s.itchT = s.hiddenT = s.ghostT = s.flyT = s.dashT = 0;
     s.reduceT = s.backT = s.bitterT = s.curlT = s.deadT = s.escapeT = s.feastT = s.yuckT = 0;
-    s.chanT = s.whirlT = s.counterT = s.counterCd = s.skyT = s.ambushT = s.trailT = s.lanternT = s.compoundT = s.decoyT = 0;
+    s.chanT = s.whirlT = s.counterT = s.counterCd = s.armorT = s.skyT = s.ambushT = s.trailT = s.lanternT = s.compoundT = s.decoyT = 0;
     s.coilT = s.leafT = s.flutterT = s.glowT = s.jumpT = s.spcCd = 0;
     s.charmBy = s.itchBy = -1;
     s.slowMul = s.reduceMul = 1;
@@ -1834,6 +1838,8 @@ export class Simulation {
     }
     // 위장·숨기는 맞으면 풀린다
     if (t.hiddenT > 0 && kind !== 'poison') t.hiddenT = 0;
+    // 장수 갑옷: 받은 피해를 모은다
+    if (t.armorT > 0 && kind !== 'poison') t.armorStore += d;
     // 반격 자세: 맞으면 바로 되벤다
     if (t.counterT > 0 && by >= 0 && by !== t.id && kind !== 'poison' && t.hp > 0 && this.snakes[by]) SK3.riposteHit(this, t, this.snakes[by]);
     this.events.push({ type: 'hit', snake: t.id, by, dmg: d, x, y, kind, good, ...(this.src && this.actor && this.actor.id === by ? { src: this.src } : {}) });
@@ -1918,6 +1924,7 @@ export class Simulation {
     s.itchT = dec(s.itchT);
     s.hiddenT = dec(s.hiddenT);
     s.counterT = dec(s.counterT);
+    s.armorT = dec(s.armorT);
     s.counterCd = dec(s.counterCd);
     s.chaseT = dec(s.chaseT);
     // 매복 자세·빛 끄기: 웅크린 채 1.5초
