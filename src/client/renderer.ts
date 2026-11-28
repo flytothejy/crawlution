@@ -3049,7 +3049,13 @@ export class GameRenderer {
 
   /** 바닥에 남는 그을린 자국 */
   private decal(x: number, y: number, r: number, color: number) {
-    if (this.decalLayer.children.length > 30) this.decalLayer.children[0].destroy();
+    if (this.decalLayer.children.length > 30) {
+      // 가장 오래된 자국을 지울 때 효과 목록에서도 빼야 한다(남아 있으면 다음 화면에서 지워진 그림을 건드려 그리기가 멈춤)
+      const old = this.decalLayer.children[0];
+      const i = this.fxs.findIndex((f) => f.s === old);
+      if (i >= 0) this.fxs.splice(i, 1);
+      old.destroy();
+    }
     const s = new Sprite(this.tex.scorch);
     s.anchor.set(0.5);
     s.position.set(x, y);
@@ -5150,6 +5156,10 @@ export class GameRenderer {
     for (let i = this.fxs.length - 1; i >= 0; i--) {
       const f = this.fxs[i];
       f.life -= dt;
+      if (f.s.destroyed) {
+        this.fxs.splice(i, 1);
+        continue;
+      }
       if (f.life <= 0) {
         f.s.destroy();
         this.fxs.splice(i, 1);
