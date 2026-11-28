@@ -94,6 +94,22 @@ export const NEW_SKILLS: Record<string, { id: string; ai: AiKind; range: number;
   '거대한 눈': { id: 'bigeye', ai: 'aoe', range: 300, ult: true },
   '푸른 빛줄기': { id: 'prism', ai: 'cone', range: 480, ult: true },
   '독가루 안개': { id: 'itchcloud', ai: 'aoe', range: 260, ult: true },
+  // 지네·벌·개미·거미
+  '천 다리 질풍': { id: 'legstorm', ai: 'aoe', range: 300, ult: true },
+  '천장 습격': { id: 'ceilingdrop', ai: 'target', range: 420, ult: true },
+  '노린내 굴리기': { id: 'stinkroll', ai: 'line', range: 300, ult: true },
+  '땅속 빛 습격': { id: 'glowburrow', ai: 'line', range: 260, ult: true },
+  '벌 공 열탕': { id: 'beeball', ai: 'aoe', range: 300, ult: true },
+  '대진동': { id: 'megabuzz', ai: 'aoe', range: 220, ult: true },
+  '진흙 호리병': { id: 'mudjar', ai: 'aoe', range: 420, ult: true },
+  '정지 비행 저격': { id: 'hoversnipe', ai: 'target', range: 600, ult: true },
+  '잎 베기 폭풍': { id: 'leafstorm', ai: 'aoe', range: 190, ult: true },
+  '분노의 큰턱': { id: 'ragebite', ai: 'target', range: 240, ult: true },
+  '불개미 떼 범람': { id: 'fireflood', ai: 'aoe', range: 280, ult: true },
+  '거대 그물 짓기': { id: 'grandweb', ai: 'target', range: 380, ult: true },
+  '여덟 눈 도약': { id: 'eyeleap', ai: 'aoe', range: 420, ult: true },
+  '새끼 거미 해일': { id: 'broodflood', ai: 'aoe', range: 300, ult: true },
+  '죽음의 고치': { id: 'deathcocoon', ai: 'target', range: 340, ult: true },
 };
 
 function toKitSkill(slot: V3Slot, v: V3Skill): KitSkill {

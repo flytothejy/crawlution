@@ -162,6 +162,13 @@ export const PROGS: Record<string, Prog> = {
     const on = outQ(Math.min(1, t / 0.25)) * Math.min(1, (d - t) / 0.2);
     return { coil: on, legSpread: on, width: 1 + 0.1 * on, headScale: 1 + 0.05 * on };
   },
+  // 노린내 굴리기: 몸을 공처럼 말고 굴러간다(말린 채 옆으로 계속 구름)
+  ball: (k, t, d) => {
+    const on = outQ(Math.min(1, t / 0.2)) * Math.min(1, (d - t) / 0.2);
+    return { coil: on, roll: (t * 2.5) % 1, width: 1 + 0.15 * on, jitter: 1.5 * on, headScale: 1 - 0.1 * on };
+  },
+  // 천장 습격: 앞몸을 높이 치켜들며 위로 사라진다
+  rearup: (k) => ({ headZ: 120 * outQ(k), z: 70 * inQ(k), headScale: 1 + 0.25 * k, jaw: k, legSpread: 1, ghost: 0.9 * k }),
   // 휘감기: 몸 앞쪽으로 적을 감아 조인다(감는 자리 = 렌더러가 기억)
   wrap: (k, t, d) => ({ wrap: outQ(Math.min(1, t / 0.3)) * Math.min(1, (d - t) / 0.2), jitter: 0.8, legSpread: 1 }),
   // 긴 다리 채찍: 다리가 길게 늘어나 물결치듯 앞쪽으로 후려침

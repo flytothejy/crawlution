@@ -40,7 +40,7 @@ export type FxKind =
   | 'windup' | 'lifted' | 'trizone' | 'baitset' | 'aimline' | 'legwhip' | 'stain' | 'antrun' | 'spiderlings' | 'warhorn'
   | 'fangstab' | 'coil' | 'vortex' | 'acid' | 'burrow' | 'antcall' | 'antriver' | 'leafwall' | 'nest' | 'buzz' | 'mudpot' | 'powder' | 'flutter' | 'charm' | 'bstorm' | 'eyespot' | 'morpho' | 'hairs'
   // 종 고유 필살기
-  | 'riposte' | 'reapslash' | 'blink' | 'bloom' | 'bloomburst' | 'burst' | 'beam' | 'territory' | 'tide' | 'bigeye' | 'armor' | 'quake';
+  | 'riposte' | 'reapslash' | 'blink' | 'bloom' | 'bloomburst' | 'burst' | 'beam' | 'territory' | 'tide' | 'bigeye' | 'armor' | 'quake' | 'aura' | 'dropshadow' | 'glowtrail' | 'geyser' | 'swarmline' | 'buzzring' | 'lob' | 'jar' | 'laser' | 'snipe' | 'bigweb' | 'eyes' | 'crosshair' | 'brood' | 'cocoon' | 'silkpull' | 'antswarm';
 
 export type GameEvent =
   | { type: 'eat'; snake: number; x: number; y: number; big: boolean; gold?: boolean; special?: number; taste?: number }
@@ -208,7 +208,7 @@ export interface RingView {
   total: number;
 }
 
-export type ZoneKind = 'gas' | 'web' | 'silk' | 'pit' | 'honey' | 'blade' | 'stingers' | 'nest' | 'bait' | 'lantern' | 'prison' | 'rain' | 'decoy' | 'heat' | 'powder' | 'firenest' | 'bstorm' | 'itchcloud';
+export type ZoneKind = 'gas' | 'web' | 'silk' | 'pit' | 'honey' | 'blade' | 'stingers' | 'nest' | 'bait' | 'lantern' | 'prison' | 'rain' | 'decoy' | 'heat' | 'powder' | 'firenest' | 'bstorm' | 'itchcloud' | 'stinktrail' | 'fireflood' | 'bigweb';
 
 export interface ZoneView {
   x: number;
